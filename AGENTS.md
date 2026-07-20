@@ -37,7 +37,7 @@ ir → (nothing)
 - `localsql-ir` — Common IR. `Relation` (relation/) and `Expression` (expression/) are sealed-ish hierarchies; `IrVisitor` does open recursion. **Must not depend on Spark or ANTLR.**
 - `localsql-spark` — `SparkAstBuilder` converts ParseTree → IR. `SparkExpressionBuilder` and `SparkDataTypeBuilder` are package-private helpers.
 - `localsql-duckdb` — `DuckDbSqlGenerator` (IR → SQL string) + `DuckDbExecutor` (JDBC over in-process DuckDB).
-- `localsql-thrift` — `ThriftServer` orchestrates the full pipeline; currently a placeholder (no real HiveServer2 Thrift impl yet).
+- `localsql-thrift` — `ThriftServer` orchestrates the full pipeline and serves a real HiveServer2 `TCLIService` Thrift RPC on port 10000 (via `TThreadPoolServer`). `LocalSqlThriftService` implements all 23 `TCLIService.Iface` methods; smoke tests in `src/test` cover OpenSession→ExecuteStatement→FetchResults and GetTables/GetColumns metadata.
 - `localsql-app` — `Main` with sample data; shaded into `runtime.jar`.
 
 ## ANTLR codegen — critical quirks

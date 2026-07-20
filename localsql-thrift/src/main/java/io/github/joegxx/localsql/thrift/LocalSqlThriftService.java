@@ -158,7 +158,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         for (Catalog.Table t : catalogService.catalog().listTables(null)) {
             if (req.getTableName() != null && !req.getTableName().isEmpty()
                     && !matches(t.name().get(t.name().size() - 1), req.getTableName())) continue;
-            rows.add(List.of("spark_catalog", t.name().get(0), t.name().get(1), "TABLE", null, null, null, null, null, null));
+            rows.add(nullableRow("spark_catalog", t.name().get(0), t.name().get(1), "TABLE",
+                    null, null, null, null, null, null));
         }
         TOperationHandle h = newHandle(TOperationType.GET_TABLES, true);
         operations.put(guid(h), new OperationState(h,
@@ -188,7 +189,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             if (req.getTableName() != null && !req.getTableName().isEmpty()
                     && !matches(t.name().get(t.name().size() - 1), req.getTableName())) continue;
             for (Catalog.Column c : t.columns()) {
-                rows.add(List.of("spark_catalog", t.name().get(0), t.name().get(1), c.name(),
+                rows.add(nullableRow("spark_catalog", t.name().get(0), t.name().get(1), c.name(),
                         toSqlType(c.type()), "STRING", Integer.MAX_VALUE, null, null, null,
                         java.sql.DatabaseMetaData.columnNullable, null, null, null, null,
                         (long) pos, "YES", null, null, null, null, 0));
@@ -353,6 +354,12 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     private boolean matches(String value, String pattern) {
         if (pattern == null || pattern.isEmpty()) return true;
         return value.matches(pattern.replace("%", ".*").replace("_", "."));
+    }
+
+    private static List<Object> nullableRow(Object... values) {
+        List<Object> list = new ArrayList<>(values.length);
+        for (Object v : values) list.add(v);
+        return list;
     }
 
     private TSessionHandle newSessionHandle() {

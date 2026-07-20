@@ -1,0 +1,19 @@
+AGENTS.md
+  s_3ed52dcf7056d5::t_889356e5a5d979 5-15,18-36,42,55-62,65-71,73,79,84-88,93-94,96,98,100,103-111,113,115,117-119,124-126,128-137,158,160-162,164-166,187,195-196,198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.34-trip",
+  "base_commit_sha": "dbc90307a2d627e869dcf0fddeec4f707285b2f7",
+  "prompts": {},
+  "sessions": {
+    "s_3ed52dcf7056d5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_080951985ffecKhP4tBwx2dN7i",
+        "model": "glm-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogStore.java
+  s_3ed52dcf7056d5::t_17c03d542fc688 1-27
+AGENTS.md
+  s_3ed52dcf7056d5::t_ad24cd0eeccaad 103-106
+  s_3ed52dcf7056d5::t_b74763005dbed7 15,19
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_3ed52dcf7056d5::t_b1bfda09728fea 3-4,7-8,10-11,16-26,30-62,64-66,69-78
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/Catalog.java
+  s_3ed52dcf7056d5::t_9ea9482f10cb4a 15-20,22-27,29-30,37,51-61,64-68,75-78,83-84,86-115
+  s_3ed52dcf7056d5::t_6065f3d20aedf4 85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.34-trip",
+  "base_commit_sha": "b5962b10a064dddbfa8d19a33cd2f485adb96267",
+  "prompts": {},
+  "sessions": {
+    "s_3ed52dcf7056d5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_080951985ffecKhP4tBwx2dN7i",
+        "model": "glm-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

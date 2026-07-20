@@ -1,0 +1,188 @@
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/MapExpr.java
+  s_b33fc4f71998f0::t_a924a875de6a56 1-16
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/FractionalType.java
+  s_b33fc4f71998f0::t_75d6e1a8a9ab13 1-7
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_5bf158d9ae7c54 1-96,98-105,107-121,123-132,134-205,211-261
+  s_b33fc4f71998f0::t_a46d995790becd 206-210
+  s_b33fc4f71998f0::t_17cd15f1e1e2e0 97,106
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/TableScan.java
+  s_b33fc4f71998f0::t_52b6b4d18d69aa 1-9,11-12,17-18,20-22,24-32
+  s_b33fc4f71998f0::t_6d4654bd8592f3 10,13-16,19,23
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Expression.java
+  s_b33fc4f71998f0::t_7ca44cf8a73a5a 1-5
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Literal.java
+  s_b33fc4f71998f0::t_f400f848ede3a3 1-45
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Alias.java
+  s_b33fc4f71998f0::t_dec98c26ba3b1c 1-23
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/TimestampType.java
+  s_b33fc4f71998f0::t_70031f7f0c8dac 1-5
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkDataTypeBuilder.java
+  s_b33fc4f71998f0::t_ed9373ce74b0be 22
+  s_b33fc4f71998f0::t_fccea7d311c46c 1-21,23-71
+localsql-analyzer/pom.xml
+  s_b33fc4f71998f0::t_7e35d08100e00a 1-23
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_9af144ef1ca1c3 1-48
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Generate.java
+  s_b33fc4f71998f0::t_be23c62a8cde53 1-28
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/InList.java
+  s_b33fc4f71998f0::t_d67a09138be0c9 1-24
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/CTERelation.java
+  s_b33fc4f71998f0::t_efa41a13d12d5a 1-26
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/BinaryType.java
+  s_b33fc4f71998f0::t_79512ab2303dc0 1-5
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_a6fc7927ec0dc2 1-66
+localsql-parser/src/main/antlr4/org/apache/spark/sql/catalyst/parser/SqlBase.g4
+  s_b33fc4f71998f0::t_6c9fc92645b8f1 1872
+  s_b33fc4f71998f0::t_fb68b6cbc398f8 1-1871,1873-1892
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/StructType.java
+  s_b33fc4f71998f0::t_414306f87d3248 1-9
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/StructField.java
+  s_b33fc4f71998f0::t_f888f6f82e7def 1-3
+localsql-ir/pom.xml
+  s_b33fc4f71998f0::t_367be73481134a 1-12
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/AttributeReference.java
+  s_b33fc4f71998f0::t_79a6a23f536eb9 1-23
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_d1e17bc0998979 25
+  s_b33fc4f71998f0::t_8a5c58082e31e0 50-70
+  s_b33fc4f71998f0::t_6e1c8907bd98c6 228
+  s_b33fc4f71998f0::t_374df3d5b7896b 22
+  s_b33fc4f71998f0::t_99903395955029 1-21,23-24,26-48,72-227,229-287
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Star.java
+  s_b33fc4f71998f0::t_a7d215f7d82f48 3
+  s_b33fc4f71998f0::t_822db1bb4be918 1-2,4-18
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/RewriteEngine.java
+  s_b33fc4f71998f0::t_b6489b099cbe01 1-43,45-47
+  s_b33fc4f71998f0::t_d6a8b9f570319b 44
+AGENTS.md
+  s_b33fc4f71998f0::t_74d5d38ae448af 1-84
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/CaseWhen.java
+  s_b33fc4f71998f0::t_a19b35f3526f1a 1-27
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Relation.java
+  s_b33fc4f71998f0::t_3fc2fe1e969a80 1-8
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/MapType.java
+  s_b33fc4f71998f0::t_559a44f049d0a7 1-7
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/With.java
+  s_b33fc4f71998f0::t_671326694c1174 1-24
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/NullType.java
+  s_b33fc4f71998f0::t_d0b727bb7c95b0 1-5
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/BooleanType.java
+  s_b33fc4f71998f0::t_e4ca0ca78d6fc7 1-5
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/Catalog.java
+  s_b33fc4f71998f0::t_65745e6fa5478d 1-53
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/ScalarSubquery.java
+  s_b33fc4f71998f0::t_fdaa23d391c36b 1-13
+localsql-catalog/pom.xml
+  s_b33fc4f71998f0::t_51ec5304f65d61 1-11,19
+  s_b33fc4f71998f0::t_394d41801533ff 12-18
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Filter.java
+  s_b33fc4f71998f0::t_6d933e6a4c8a63 1-25
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/UnknownType.java
+  s_b33fc4f71998f0::t_cec46adb6d269a 1-6
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/FunctionCall.java
+  s_b33fc4f71998f0::t_578c0b69f153b6 1-6,8-21,23-30
+  s_b33fc4f71998f0::t_94019d8a7ac370 7,22
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Aggregate.java
+  s_b33fc4f71998f0::t_81bd4f77d00964 1-30
+localsql-duckdb/pom.xml
+  s_b33fc4f71998f0::t_6dec1b4f98e6fa 1-27
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Union.java
+  s_b33fc4f71998f0::t_6a915cc0e65cd4 1-24
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_b33fc4f71998f0::t_ead25a4baf04a5 1-2,7-18
+  s_b33fc4f71998f0::t_a13ded043f7e2b 3-6
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/UnaryExpression.java
+  s_b33fc4f71998f0::t_627b1053302028 1-28
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/DateType.java
+  s_b33fc4f71998f0::t_e82486a9f60823 1-5
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_d4cc10588c9323 1-6,8-58,60-64,66-70,72,74-76,91-93,106-107,117-118,120-129,132-142,145-146,151-163,165-348
+  s_b33fc4f71998f0::t_a30144db39e8d3 119
+  s_b33fc4f71998f0::t_6958ee8d7d22d4 109,130,143,147-150
+  s_b33fc4f71998f0::t_85c0a957d0cb73 131
+  s_b33fc4f71998f0::t_30f3a25c761bd8 164
+  s_b33fc4f71998f0::t_05aa602246bfbd 59,65
+  s_b33fc4f71998f0::t_491d8eafe91f94 7
+  s_b33fc4f71998f0::t_f0a47392fa2830 71,73,77-90
+  s_b33fc4f71998f0::t_7f13e36a8a53e5 108,110-116
+  s_b33fc4f71998f0::t_5be641af5a63f1 94-105
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Subquery.java
+  s_b33fc4f71998f0::t_e85e6ca9195e75 1-13
+localsql-app/pom.xml
+  s_b33fc4f71998f0::t_a80a53ec5b6313 1-88
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/ArrayExpr.java
+  s_b33fc4f71998f0::t_0e4629f109e552 1-13
+localsql-spark/pom.xml
+  s_b33fc4f71998f0::t_25ee2c64a9e6d0 1-23
+localsql-parser/pom.xml
+  s_b33fc4f71998f0::t_4f91d7a2f2396a 1-40
+localsql-thrift/pom.xml
+  s_b33fc4f71998f0::t_a786b94e71c7ef 1-21,30-31
+  s_b33fc4f71998f0::t_0e66934c7f2eb3 22-29
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/IrNode.java
+  s_b33fc4f71998f0::t_e4a95608c06971 1-17
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/DataType.java
+  s_b33fc4f71998f0::t_3a2b9b5d2c127f 1-8
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Cast.java
+  s_b33fc4f71998f0::t_7c88d89e64ce85 1-19
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Window.java
+  s_b33fc4f71998f0::t_d7730a049d6b45 1-30
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/visitor/IrVisitor.java
+  s_b33fc4f71998f0::t_f862e878a583e9 1-6,9-206
+  s_b33fc4f71998f0::t_d5bd8dc1a064cd 7-8
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/ArrayType.java
+  s_b33fc4f71998f0::t_283c4b16a256cc 1-5
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/StringType.java
+  s_b33fc4f71998f0::t_1ed7cc826cc936 1-5
+localsql-rewrite/pom.xml
+  s_b33fc4f71998f0::t_3bd00c20086f02 1-19
+localsql-parser/src/main/java/io/github/joegxx/localsql/parser/SparkSqlParser.java
+  s_b33fc4f71998f0::t_0cd6c073ed1070 1-52
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Identifier.java
+  s_b33fc4f71998f0::t_6fd20b2f3d48dd 1-19
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Limit.java
+  s_b33fc4f71998f0::t_70405536a100ad 1-28
+pom.xml
+  s_b33fc4f71998f0::t_cd6d44932dcb74 1-148
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Project.java
+  s_b33fc4f71998f0::t_6f960d72f69886 1-25
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Join.java
+  s_b33fc4f71998f0::t_2ebd9205f9ccc1 1-42
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Sort.java
+  s_b33fc4f71998f0::t_6e866c19125a52 4
+  s_b33fc4f71998f0::t_38483c30df3353 1-3,5-27
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbExecutor.java
+  s_b33fc4f71998f0::t_046a1cc2374a3f 1-76
+localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java
+  s_b33fc4f71998f0::t_d5953ecc342a99 9-10
+  s_b33fc4f71998f0::t_4cdc26020c3e71 1-8,11-53
+.gitignore
+  s_b33fc4f71998f0::t_68161659eaef9a 25-31
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/BinaryExpression.java
+  s_b33fc4f71998f0::t_d7439a81ac3d18 1-34
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/StructExpr.java
+  s_b33fc4f71998f0::t_14fc5774801b21 1-13
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Values.java
+  s_b33fc4f71998f0::t_3393532dc63ead 1-19
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/IntegralType.java
+  s_b33fc4f71998f0::t_6f5dea209194c3 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.34-trip",
+  "base_commit_sha": "88f5053ed266f03ab570989d614b861b865d6f6c",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

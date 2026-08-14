@@ -1,0 +1,33 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_2a0850f83ae327 166-193
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/visitor/IrVisitor.java
+  s_b33fc4f71998f0::t_d743ee3dd6e4f9 124,157,208-209
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/SubqueryAlias.java
+  s_b33fc4f71998f0::t_d743ee3dd6e4f9 1-24
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_d743ee3dd6e4f9 99-101,212
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_d743ee3dd6e4f9 31,124-127,193-196
+  s_b33fc4f71998f0::t_ce086e367feaf4 82
+  s_b33fc4f71998f0::t_68c36ce6871274 131-136,154-158
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Aggregate.java
+  s_b33fc4f71998f0::t_d743ee3dd6e4f9 12,15-19,23,29
+AGENTS.md
+  s_b33fc4f71998f0::t_83093f64f372f1 95,186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "8654a29ceeb6b7f28256df298a58a19ee9a44840",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

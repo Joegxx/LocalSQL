@@ -1,0 +1,33 @@
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbExecutor.java
+  s_b33fc4f71998f0::t_c6074dc52a5cd2 49,52,56-84,86-91
+AGENTS.md
+  s_b33fc4f71998f0::t_328323d15ecfd2 181-183
+  s_b33fc4f71998f0::t_02b60e953047b6 175
+  s_b33fc4f71998f0::t_be9c9ddda62003 187
+localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java
+  s_b33fc4f71998f0::t_a70212f98498bf 4-5,7-9,15,29-33,51-57,59-78,80-91
+  s_b33fc4f71998f0::t_f936b5c9ba6842 58
+  s_b33fc4f71998f0::t_20faf8a052a839 79
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_9acf1b02b68450 47
+  s_b33fc4f71998f0::t_de41c1e8ff8858 64
+  s_b33fc4f71998f0::t_5cfac32fc4c097 4-5,7-9,19,33-36,42-46,48-63,65-73
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbCatalogStore.java
+  s_b33fc4f71998f0::t_2ebb5f0abc05df 1-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "e168a02646e9eb0065d312ab668b7d59c82bcee2",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ada-glm-5.2"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -1,7 +1,12 @@
 package io.github.joegxx.localsql.thrift;
 
 import io.github.joegxx.localsql.catalog.CatalogService;
+import io.github.joegxx.localsql.catalog.CatalogStore;
+import io.github.joegxx.localsql.duckdb.DuckDbCatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
+import io.github.joegxx.localsql.ir.type.FractionalType;
+import io.github.joegxx.localsql.ir.type.IntegralType;
+import io.github.joegxx.localsql.ir.type.StringType;
 import org.apache.hive.service.rpc.thrift.*;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.transport.TSocket;
@@ -11,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -23,23 +29,48 @@ class ThriftServerSmokeTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        catalog = new CatalogService();
-        catalog.registerSampleTable("users", "id", "name", "age");
-        catalog.registerSampleTable("orders", "id", "user_id", "amount");
         executor = new DuckDbExecutor();
-        executor.registerSampleTable("users", List.of("id", "name", "age"), List.of(
-                List.of("1", "alice", "30"),
-                List.of("2", "bob", "25"),
-                List.of("3", "carol", "40")
-        ));
-        executor.registerSampleTable("orders", List.of("id", "user_id", "amount"), List.of(
-                List.of("100", "1", "99.5"),
-                List.of("101", "1", "20.0"),
-                List.of("102", "2", "150.0")
-        ));
+        CatalogStore store = new DuckDbCatalogStore(executor);
+        catalog = new CatalogService(store);
+        registerUsers(catalog, executor);
+        registerOrders(catalog, executor);
         server = new ThriftServer(catalog, executor);
         server.start(port);
         Thread.sleep(800);
+    }
+
+    private void registerUsers(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("users",
+                List.of(new DuckDbExecutor.ColDef("id", "BIGINT"),
+                        new DuckDbExecutor.ColDef("name", "VARCHAR"),
+                        new DuckDbExecutor.ColDef("age", "INT")),
+                List.<List<Object>>of(List.of(1L, "alice", 30),
+                        List.of(2L, "bob", 25),
+                        List.of(3L, "carol", 40)));
+        var table = catalog.registerTable("default", "users", "TABLE",
+                List.of(new CatalogService.ColumnDef("id", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("name", new StringType(), true, null),
+                        new CatalogService.ColumnDef("age", IntegralType.INT, true, null)),
+                null, "duckdb", null, Map.of(), null);
+        catalog.store().saveRuntimeInfo(table.tableId(), "users",
+                "CREATE TABLE users (id BIGINT, name VARCHAR, age INT)");
+    }
+
+    private void registerOrders(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("orders",
+                List.of(new DuckDbExecutor.ColDef("id", "BIGINT"),
+                        new DuckDbExecutor.ColDef("user_id", "BIGINT"),
+                        new DuckDbExecutor.ColDef("amount", "DOUBLE")),
+                List.<List<Object>>of(List.of(100L, 1L, 99.5),
+                        List.of(101L, 1L, 20.0),
+                        List.of(102L, 2L, 150.0)));
+        var table = catalog.registerTable("default", "orders", "TABLE",
+                List.of(new CatalogService.ColumnDef("id", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("user_id", IntegralType.BIGINT, true, null),
+                        new CatalogService.ColumnDef("amount", FractionalType.DOUBLE, true, null)),
+                null, "duckdb", null, Map.of(), null);
+        catalog.store().saveRuntimeInfo(table.tableId(), "orders",
+                "CREATE TABLE orders (id BIGINT, user_id BIGINT, amount DOUBLE)");
     }
 
     @AfterEach

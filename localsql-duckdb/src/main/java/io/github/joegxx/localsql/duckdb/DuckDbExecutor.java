@@ -46,25 +46,49 @@ public final class DuckDbExecutor implements AutoCloseable {
     }
 
     public void registerSampleTable(String name, List<String> columns, List<List<Object>> rows) throws SQLException {
-        StringBuilder sb = new StringBuilder("CREATE TABLE ").append(name).append(" (");
+        StringBuilder sb = new StringBuilder("CREATE TABLE ").append(quoteIdent(name)).append(" (");
         for (int i = 0; i < columns.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(columns.get(i)).append(" VARCHAR");
+            sb.append(quoteIdent(columns.get(i))).append(" VARCHAR");
         }
         sb.append(")");
         executeUpdate(sb.toString());
-        for (List<Object> row : rows) {
-            StringBuilder ins = new StringBuilder("INSERT INTO ").append(name).append(" VALUES (");
-            for (int i = 0; i < row.size(); i++) {
-                if (i > 0) ins.append(", ");
-                Object v = row.get(i);
-                if (v == null) ins.append("NULL");
-                else if (v instanceof Number) ins.append(v);
-                else ins.append("'").append(v.toString().replace("'", "''")).append("'");
-            }
-            ins.append(")");
-            executeUpdate(ins.toString());
+        for (List<Object> row : rows) insertRow(name, row);
+    }
+
+    /**
+     * Register a typed table and insert rows. Column types must be DuckDB-native
+     * type names (INT, BIGINT, VARCHAR, DOUBLE, etc.). Values are coerced to
+     * string literals except null and Number.
+     */
+    public void registerTable(String name, List<ColDef> colDefs, List<List<Object>> rows) throws SQLException {
+        StringBuilder sb = new StringBuilder("CREATE TABLE ").append(quoteIdent(name)).append(" (");
+        for (int i = 0; i < colDefs.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(quoteIdent(colDefs.get(i).name())).append(' ').append(colDefs.get(i).type());
         }
+        sb.append(")");
+        executeUpdate(sb.toString());
+        for (List<Object> row : rows) insertRow(name, row);
+    }
+
+    public record ColDef(String name, String type) {}
+
+    private void insertRow(String table, List<Object> row) throws SQLException {
+        StringBuilder ins = new StringBuilder("INSERT INTO ").append(quoteIdent(table)).append(" VALUES (");
+        for (int i = 0; i < row.size(); i++) {
+            if (i > 0) ins.append(", ");
+            Object v = row.get(i);
+            if (v == null) ins.append("NULL");
+            else if (v instanceof Number) ins.append(v);
+            else ins.append("'").append(v.toString().replace("'", "''")).append("'");
+        }
+        ins.append(")");
+        executeUpdate(ins.toString());
+    }
+
+    private static String quoteIdent(String ident) {
+        return "\"" + ident.replace("\"", "\"\"") + "\"";
     }
 
     @Override

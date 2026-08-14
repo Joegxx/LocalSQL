@@ -172,19 +172,19 @@ runtime_table      (table_id, duck_table_name, create_sql, last_refresh)
 | ✅ | `localsql-catalog/.../Catalog.java` | `Table` / `Column` record 富化:加 `tableId`、`tableType`、`properties`、`metadataJson`、`ordinal`、`defaultValue`、`expression`;保留旧构造器做向后兼容;加 `parseDataType` / `toStorageType` 工具方法 |
 | ✅ | `localsql-catalog/.../CatalogStore.java` | 新建。`init()` / `saveTable()` / `loadTable()` / `loadTables()` / `saveRuntimeInfo()` / `loadAllRuntimeInfo()` |
 | ✅ | `localsql-catalog/.../CatalogService.java` | 加 `(CatalogStore)` 构造器,启动时 `loadFromStore`;`registerTable` 落 store + cache;保留 `registerSampleTable` 向后兼容 |
-| ❌ | `localsql-duckdb/.../DuckDbCatalogStore.java` | **待建**。实现 `CatalogStore`,建 4 张表(`CREATE TABLE IF NOT EXISTS`),用 `executor.executeQuery` / `executeUpdate` 操作 |
+| ✅ | `localsql-duckdb/.../DuckDbCatalogStore.java` | 已建。实现 `CatalogStore`,`init()` 建 4 张表(`catalog_table`/`catalog_column`/`catalog_property`/`runtime_table`),`saveTable`/`loadTable`/`loadTables`/`saveRuntimeInfo`/`loadAllRuntimeInfo` 全部实现;用 `executor.execute`/`executeUpdate` 操作 |
 | ✅ | `localsql-ir/.../TableScan.java` | `output` 去掉 `final`,改为可变 `ArrayList`,加 `setOutput(List<AttributeReference>)` 方法 |
 | ✅ | `localsql-analyzer/.../SemanticAnalyzer.java` | `visitTableScan` 真正 `r.setOutput(out)`;按 column.type() 给 AttributeReference `setDataType`(qualifier 优先用 alias) |
 | ✅ | `localsql-thrift/pom.xml` | 加了 `localsql-analyzer` 和 `localsql-rewrite` 两个 dependency |
 | ✅ | `localsql-thrift/.../ThriftServer.java` | `executeSparkSql` 在 `buildStatement` 之后、`generator.generate` 之前调 `analyzer.analyze(rel)` + `rewriter.rewrite(rel)`;构造器内部 new `SemanticAnalyzer` + `RewriteEngine` |
 | ✅ | `localsql-thrift/.../LocalSqlThriftService.java` | `ExecuteStatement` 同样接入 analyzer + rewrite |
-| ❌ | `localsql-app/.../Main.java` | **待改**。用 `DuckDbCatalogStore` + `DuckDbExecutor`,`registerTable` 一次完成元数据 + 数据 + runtime_table 写入;data 里的 `age` / `amount` / `id` 改成正确类型(不再全 VARCHAR) |
-| ❌ | `localsql-thrift/.../ThriftServerSmokeTest.java` | **待改**。用 `DuckDbCatalogStore` |
-| ❌ | 跑 `mvn test` 全部通过 | **待验证**。Analyzer/RewriteEngine 接入后 smoke test 2/2 通过 ✅;DuckDbCatalogStore 未建,其余依赖它的步骤待做 |
+| ✅ | `localsql-app/.../Main.java` | 用 `DuckDbCatalogStore` + `DuckDbExecutor`,`registerTable` 一次完成元数据 + 数据 + runtime_table 写入;data 里的 `age` / `amount` / `id` 改成正确类型(不再全 VARCHAR) |
+| ✅ | `localsql-thrift/.../ThriftServerSmokeTest.java` | 用 `DuckDbCatalogStore` |
+| ✅ | 跑 `mvn test` 全部通过 | **已验证**。`mvn clean test` 2/2 通过;`mvn clean package -DskipTests` 通过;`runtime.jar` demo 跑出正确结果 |
 
 ### 下次从这里继续
 
-下一步:建 `DuckDbCatalogStore` -> 重写 `Main` 用 `DuckDbCatalogStore` 统一注册(元数据 + 数据 + runtime_table)-> 更新 `ThriftServerSmokeTest` 用 `DuckDbCatalogStore` -> 跑全套 `mvn test`。
+DuckDB 元数据 + Analyzer/RewriteEngine 接入**已全部完成**(见上表 ✅)。下一步方向:补 SQL 覆盖(子查询别名、WHERE/HAVING、窗口函数)、实现 DDL、或接更多 Thrift 元数据接口。
 
 `CatalogStore` 接口已定,`DuckDbCatalogStore` 实现时直接 `implements CatalogStore` 即可。`init()` 里发 `CREATE TABLE IF NOT EXISTS catalog_table ...` 等 4 条 DDL。`loadTable(database, tableName)` 用 `SELECT * FROM catalog_table JOIN catalog_column USING (table_id) WHERE database_name = ? AND table_name = ? ORDER BY ordinal` 然后手动组 `Catalog.Table`。
 

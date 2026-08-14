@@ -1,0 +1,34 @@
+localsql-thrift/pom.xml
+  s_b33fc4f71998f0::t_a60c67fa84ea91 31-37
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/TableScan.java
+  s_b33fc4f71998f0::t_73c82a72e99080 9,18,28
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_17aa21c8d19e29 34-36,38-40,42
+AGENTS.md
+  s_b33fc4f71998f0::t_25a02774dc0094 176-180,183
+  s_b33fc4f71998f0::t_9e5588ddd915fd 187
+  s_b33fc4f71998f0::t_797d776c1b22c0 86-89
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_ccd4b808ad4486 3,9,39-40,47
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_b33fc4f71998f0::t_547544ddcb66df 3,10
+  s_b33fc4f71998f0::t_61d435f933a647 45
+  s_b33fc4f71998f0::t_a92d6f2b144842 36-37
+  s_b33fc4f71998f0::t_a5fa19440cbc0d 92-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "fffabd801bf37b98db95dbe6ada36a7b57d01789",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ada-glm-5.2"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

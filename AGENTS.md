@@ -83,9 +83,10 @@ ir -> (nothing)
 执行查询时(见 `ThriftServer.executeSparkSql`):
 1. `SparkSqlParser.parseStatement` -> `SingleStatementContext`
 2. `SparkAstBuilder.buildStatement` -> IR `Relation`
-3. (Analyzer / RewriteEngine 存在但**当前未接入**,`ThriftServer` 不调用它们 - 见"在途工作"章节)
-4. `DuckDbSqlGenerator.generate` -> DuckDB SQL 串
-5. `DuckDbExecutor.execute` -> `QueryResult`
+3. `SemanticAnalyzer.analyze(rel)` -> 填 `TableScan.output` + 给 `AttributeReference`/`Literal` 设 DataType
+4. `RewriteEngine.rewrite(rel)` -> 原地重命名函数(`size`->`array_length` 等)
+5. `DuckDbSqlGenerator.generate` -> DuckDB SQL 串
+6. `DuckDbExecutor.execute` -> `QueryResult`
 
 ## SQL 生成约定(不要破坏)
 
@@ -121,7 +122,6 @@ Generator 永远不用查 Catalog。
 ## 已知 MVP 缺口
 
 - DDL 未实现(CREATE / ALTER / DROP 是 Phase 2)
-- `RewriteEngine` 和 `SemanticAnalyzer` **当前未接入运行路径**。`thrift` 模块的 pom **没有**声明 `analyzer` / `rewrite` 依赖(只有 `app` 声明了)- 接入需要在 `localsql-thrift/pom.xml` 加依赖并在 `ThriftServer.executeSparkSql` / `LocalSqlThriftService.ExecuteStatement` 之间调 `analyzer.analyze` + `rewriter.rewrite`
 - 表别名只对 `TableScan` 生效;子查询别名(`AliasedQuery`)被丢弃(见 `SparkAstBuilder.alias` - 只处理 `TableScan`)
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - ROLLUP / CUBE / GROUPING SETS 抛 `UnsupportedOperationException`(在 `SparkAstBuilder.visitAggregate`)
@@ -173,18 +173,18 @@ runtime_table      (table_id, duck_table_name, create_sql, last_refresh)
 | ✅ | `localsql-catalog/.../CatalogStore.java` | 新建。`init()` / `saveTable()` / `loadTable()` / `loadTables()` / `saveRuntimeInfo()` / `loadAllRuntimeInfo()` |
 | ✅ | `localsql-catalog/.../CatalogService.java` | 加 `(CatalogStore)` 构造器,启动时 `loadFromStore`;`registerTable` 落 store + cache;保留 `registerSampleTable` 向后兼容 |
 | ❌ | `localsql-duckdb/.../DuckDbCatalogStore.java` | **待建**。实现 `CatalogStore`,建 4 张表(`CREATE TABLE IF NOT EXISTS`),用 `executor.executeQuery` / `executeUpdate` 操作 |
-| ❌ | `localsql-ir/.../TableScan.java` | **待改**。`output` 字段去掉 `final`,加 `setOutput(List<AttributeReference>)` 方法 |
-| ❌ | `localsql-analyzer/.../SemanticAnalyzer.java` | **待改**。`visitTableScan` 真正 `r.setOutput(out)`;按 column.type() 给 AttributeReference `setDataType`;递归处理子节点上的 AttributeReference |
-| ❌ | `localsql-thrift/pom.xml` | **待改**。加 `localsql-analyzer` 和 `localsql-rewrite` 两个 dependency |
-| ❌ | `localsql-thrift/.../ThriftServer.java` | **待改**。`executeSparkSql` 在 `buildStatement` 之后、`generator.generate` 之前加 `analyzer.analyze(rel)` + `rewriter.rewrite(rel)`;构造器接受 `SemanticAnalyzer` + `RewriteEngine`(或内部 new) |
-| ❌ | `localsql-thrift/.../LocalSqlThriftService.java` | **待改**。`ExecuteStatement` 同样接入 analyzer + rewrite |
+| ✅ | `localsql-ir/.../TableScan.java` | `output` 去掉 `final`,改为可变 `ArrayList`,加 `setOutput(List<AttributeReference>)` 方法 |
+| ✅ | `localsql-analyzer/.../SemanticAnalyzer.java` | `visitTableScan` 真正 `r.setOutput(out)`;按 column.type() 给 AttributeReference `setDataType`(qualifier 优先用 alias) |
+| ✅ | `localsql-thrift/pom.xml` | 加了 `localsql-analyzer` 和 `localsql-rewrite` 两个 dependency |
+| ✅ | `localsql-thrift/.../ThriftServer.java` | `executeSparkSql` 在 `buildStatement` 之后、`generator.generate` 之前调 `analyzer.analyze(rel)` + `rewriter.rewrite(rel)`;构造器内部 new `SemanticAnalyzer` + `RewriteEngine` |
+| ✅ | `localsql-thrift/.../LocalSqlThriftService.java` | `ExecuteStatement` 同样接入 analyzer + rewrite |
 | ❌ | `localsql-app/.../Main.java` | **待改**。用 `DuckDbCatalogStore` + `DuckDbExecutor`,`registerTable` 一次完成元数据 + 数据 + runtime_table 写入;data 里的 `age` / `amount` / `id` 改成正确类型(不再全 VARCHAR) |
 | ❌ | `localsql-thrift/.../ThriftServerSmokeTest.java` | **待改**。用 `DuckDbCatalogStore` |
-| ❌ | 跑 `mvn test` 全部通过 | **待验证**。当前已完成 3/12 步,partial 状态下编译和测试都过 ✅ |
+| ❌ | 跑 `mvn test` 全部通过 | **待验证**。Analyzer/RewriteEngine 接入后 smoke test 2/2 通过 ✅;DuckDbCatalogStore 未建,其余依赖它的步骤待做 |
 
 ### 下次从这里继续
 
-按上表倒序:先建 `DuckDbCatalogStore` -> 改 `TableScan` -> 修 `SemanticAnalyzer` -> thrift pom 加依赖 -> 接 ThriftServer / LocalSqlThriftService -> 重写 Main -> 更新测试 -> 跑全套 `mvn test`。
+下一步:建 `DuckDbCatalogStore` -> 重写 `Main` 用 `DuckDbCatalogStore` 统一注册(元数据 + 数据 + runtime_table)-> 更新 `ThriftServerSmokeTest` 用 `DuckDbCatalogStore` -> 跑全套 `mvn test`。
 
 `CatalogStore` 接口已定,`DuckDbCatalogStore` 实现时直接 `implements CatalogStore` 即可。`init()` 里发 `CREATE TABLE IF NOT EXISTS catalog_table ...` 等 4 条 DDL。`loadTable(database, tableName)` 用 `SELECT * FROM catalog_table JOIN catalog_column USING (table_id) WHERE database_name = ? AND table_name = ? ORDER BY ordinal` 然后手动组 `Catalog.Table`。
 

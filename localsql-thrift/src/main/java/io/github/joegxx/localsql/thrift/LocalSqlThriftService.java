@@ -1,11 +1,13 @@
 package io.github.joegxx.localsql.thrift;
 
+import io.github.joegxx.localsql.analyzer.SemanticAnalyzer;
 import io.github.joegxx.localsql.catalog.Catalog;
 import io.github.joegxx.localsql.catalog.CatalogService;
 import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
 import io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator;
 import io.github.joegxx.localsql.ir.relation.Relation;
 import io.github.joegxx.localsql.parser.SparkSqlParser;
+import io.github.joegxx.localsql.rewrite.RewriteEngine;
 import io.github.joegxx.localsql.spark.SparkAstBuilder;
 import org.apache.hive.service.rpc.thrift.*;
 import org.apache.thrift.TException;
@@ -31,6 +33,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     private final DuckDbSqlGenerator generator = new DuckDbSqlGenerator();
     private final SparkSqlParser parser = new SparkSqlParser();
     private final SparkAstBuilder astBuilder = new SparkAstBuilder();
+    private final SemanticAnalyzer analyzer;
+    private final RewriteEngine rewriter = new RewriteEngine();
 
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
     private final Map<String, OperationState> operations = new ConcurrentHashMap<>();
@@ -38,6 +42,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     LocalSqlThriftService(CatalogService catalogService, DuckDbExecutor executor) {
         this.catalogService = catalogService;
         this.executor = executor;
+        this.analyzer = new SemanticAnalyzer(catalogService.catalog());
     }
 
     private record SessionState(TSessionHandle handle) {}
@@ -84,6 +89,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         try {
             var ctx = parser.parseStatement(sql);
             Relation rel = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
+            analyzer.analyze(rel);
+            rewriter.rewrite(rel);
             String duckSql = generator.generate(rel);
             LOG.info("Translated to DuckDB SQL: {}", duckSql);
             DuckDbExecutor.QueryResult result = executor.execute(duckSql);

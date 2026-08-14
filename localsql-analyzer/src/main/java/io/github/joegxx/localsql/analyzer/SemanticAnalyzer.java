@@ -31,9 +31,15 @@ public final class SemanticAnalyzer {
         public Void visitTableScan(TableScan r, Void ctx) {
             catalog.getTable(r.tableName()).ifPresent(table -> {
                 List<AttributeReference> out = new ArrayList<>();
+                List<String> qualifier = r.alias() != null
+                        ? List.of(r.alias())
+                        : r.tableName();
                 for (Catalog.Column c : table.columns()) {
-                    out.add(new AttributeReference(c.name(), r.tableName()));
+                    AttributeReference attr = new AttributeReference(c.name(), qualifier);
+                    attr.setDataType(c.type());
+                    out.add(attr);
                 }
+                r.setOutput(out);
             });
             return null;
         }

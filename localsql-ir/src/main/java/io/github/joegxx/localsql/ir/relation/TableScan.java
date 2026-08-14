@@ -6,7 +6,7 @@ import java.util.List;
 
 public final class TableScan extends Relation {
     private final List<String> tableName;
-    private final List<AttributeReference> output;
+    private List<AttributeReference> output;
     private final String alias;
 
     public TableScan(List<String> tableName, List<AttributeReference> output) {
@@ -15,7 +15,7 @@ public final class TableScan extends Relation {
 
     public TableScan(List<String> tableName, List<AttributeReference> output, String alias) {
         this.tableName = List.copyOf(tableName);
-        this.output = List.copyOf(output);
+        this.output = output == null ? List.of() : new java.util.ArrayList<>(output);
         this.alias = alias;
     }
 
@@ -24,6 +24,8 @@ public final class TableScan extends Relation {
 
     @Override
     public List<AttributeReference> output() { return output; }
+
+    public void setOutput(List<AttributeReference> output) { this.output = output; }
 
     @Override
     public String toString() {

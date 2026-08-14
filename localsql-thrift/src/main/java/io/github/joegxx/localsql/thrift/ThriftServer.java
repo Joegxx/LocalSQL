@@ -1,10 +1,12 @@
 package io.github.joegxx.localsql.thrift;
 
+import io.github.joegxx.localsql.analyzer.SemanticAnalyzer;
 import io.github.joegxx.localsql.catalog.CatalogService;
 import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
 import io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator;
 import io.github.joegxx.localsql.ir.relation.Relation;
 import io.github.joegxx.localsql.parser.SparkSqlParser;
+import io.github.joegxx.localsql.rewrite.RewriteEngine;
 import io.github.joegxx.localsql.spark.SparkAstBuilder;
 import org.apache.hive.service.rpc.thrift.TCLIService;
 import org.apache.hive.service.rpc.thrift.TColumn;
@@ -34,12 +36,15 @@ public final class ThriftServer {
     private final CatalogService catalogService;
     private final DuckDbExecutor executor;
     private final DuckDbSqlGenerator generator = new DuckDbSqlGenerator();
+    private final SemanticAnalyzer analyzer;
+    private final RewriteEngine rewriter = new RewriteEngine();
     private TServer server;
     private LocalSqlThriftService service;
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor) {
         this.catalogService = catalogService;
         this.executor = executor;
+        this.analyzer = new SemanticAnalyzer(catalogService.catalog());
     }
 
     public void start(int port) {
@@ -76,6 +81,8 @@ public final class ThriftServer {
         var ctx = parser.parseStatement(sql);
         SparkAstBuilder builder = new SparkAstBuilder();
         Relation rel = builder.buildStatement(sql, s -> parser.parseStatement(s));
+        analyzer.analyze(rel);
+        rewriter.rewrite(rel);
         String duckSql = generator.generate(rel);
         LOG.info("Translated to DuckDB SQL: {}", duckSql);
         return executor.execute(duckSql);

@@ -1,0 +1,19 @@
+README.md
+  s_b33fc4f71998f0::t_6f0444ac4fec09 2-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "4b55de0f8df153193ddef9d0a23eda490b3a98b8",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

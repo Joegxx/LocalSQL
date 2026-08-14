@@ -163,4 +163,32 @@ class ThriftServerSmokeTest {
             client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
         }
     }
+
+    @Test
+    void whereOrderByAndLimit() throws Exception {
+        var result = server.executeSparkSql(
+                "SELECT name, age FROM users WHERE age >= 30 ORDER BY age DESC LIMIT 1");
+
+        assertEquals(List.of("name", "age"), result.columns());
+        assertEquals(List.of(List.of("carol", 40)), result.rows());
+    }
+
+    @Test
+    void aggregateHaving() throws Exception {
+        var result = server.executeSparkSql(
+                "SELECT user_id, count(*) AS cnt FROM orders "
+                        + "GROUP BY user_id HAVING count(*) > 1 ORDER BY user_id");
+
+        assertEquals(List.of("user_id", "cnt"), result.columns());
+        assertEquals(List.of(List.of(1L, 2L)), result.rows());
+    }
+
+    @Test
+    void aliasedSubquery() throws Exception {
+        var result = server.executeSparkSql(
+                "SELECT s.name FROM (SELECT name FROM users WHERE age >= 30) s ORDER BY s.name");
+
+        assertEquals(List.of("name"), result.columns());
+        assertEquals(List.of(List.of("alice"), List.of("carol")), result.rows());
+    }
 }

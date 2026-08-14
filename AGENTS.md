@@ -92,7 +92,7 @@ ir -> (nothing)
 
 `DuckDbSqlGenerator` 把 relation 拆成两类:
 - **Query 节点**(`Project` / `Filter` / `Aggregate` / `Sort` / `Limit` / `Union` / `With` / `Generate`)- 发完整的 `SELECT ...`。当它们作为 `FROM` 子句的 source 时,**必须**通过 `emitChildSource` 加 `(...)` 包裹。
-- **Source 节点**(`TableScan` / `Join` / `Values`)- 直接发表表达式,不加 `SELECT *` 前缀。`Join` 直接发 `left JOIN right ON ...`。
+- **Source 节点**(`TableScan` / `Join` / `Values` / `SubqueryAlias`)- 直接发表表达式,不加 `SELECT *` 前缀。`Join` 直接发 `left JOIN right ON ...`;`SubqueryAlias` 发 `(query) AS alias`。
 
 `emitJoin` **不**加 `SELECT * FROM` 前缀 - 之前是 bug。`FROM` 子句必须走 `emitChildSource`,永远不要裸用 `emit`。
 
@@ -122,7 +122,6 @@ Generator 永远不用查 Catalog。
 ## 已知 MVP 缺口
 
 - DDL 未实现(CREATE / ALTER / DROP 是 Phase 2)
-- 表别名只对 `TableScan` 生效;子查询别名(`AliasedQuery`)被丢弃(见 `SparkAstBuilder.alias` - 只处理 `TableScan`)
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - ROLLUP / CUBE / GROUPING SETS 抛 `UnsupportedOperationException`(在 `SparkAstBuilder.visitAggregate`)
 - Catalog 当前是内存 `LinkedHashMap`(MVP);后续换 DuckDB-backed store,**不改调用方**
@@ -184,7 +183,7 @@ runtime_table      (table_id, duck_table_name, create_sql, last_refresh)
 
 ### 下次从这里继续
 
-DuckDB 元数据 + Analyzer/RewriteEngine 接入**已全部完成**(见上表 ✅)。下一步方向:补 SQL 覆盖(子查询别名、WHERE/HAVING、窗口函数)、实现 DDL、或接更多 Thrift 元数据接口。
+DuckDB 元数据 + Analyzer/RewriteEngine 接入**已全部完成**(见上表 ✅)。WHERE/ORDER BY/LIMIT、HAVING、子查询别名已有端到端回归覆盖。下一步方向:窗口函数、实现 DDL、或接更多 Thrift 元数据接口。
 
 `CatalogStore` 接口已定,`DuckDbCatalogStore` 实现时直接 `implements CatalogStore` 即可。`init()` 里发 `CREATE TABLE IF NOT EXISTS catalog_table ...` 等 4 条 DDL。`loadTable(database, tableName)` 用 `SELECT * FROM catalog_table JOIN catalog_column USING (table_id) WHERE database_name = ? AND table_name = ? ORDER BY ordinal` 然后手动组 `Catalog.Table`。
 

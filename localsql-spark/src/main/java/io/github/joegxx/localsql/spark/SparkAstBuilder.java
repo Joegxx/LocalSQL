@@ -96,8 +96,9 @@ public final class SparkAstBuilder {
         if (agg != null && input != null) {
             input = visitAggregate(agg, input, selectItems);
         }
-        if (having != null && input != null) {
-            input = new Filter(input, exprBuilder.visit(having.booleanExpression()));
+        if (having != null && input instanceof Aggregate aggregate) {
+            input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
+                    aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()));
         }
 
         if (input == null) {
@@ -208,7 +209,7 @@ public final class SparkAstBuilder {
         if (r instanceof TableScan t) {
             return new TableScan(t.tableName(), t.output(), aliasName);
         }
-        return r;
+        return new SubqueryAlias(r, aliasName);
     }
 
     private Relation visitQueryOrganization(QueryOrganizationContext org, Relation input) {

@@ -28,6 +28,7 @@ public final class DuckDbSqlGenerator {
         else if (rel instanceof TableScan t) emitTableScan(t, sb);
         else if (rel instanceof Values v) emitValues(v, sb);
         else if (rel instanceof Generate g) emitGenerate(g, sb);
+        else if (rel instanceof SubqueryAlias a) emitSubqueryAlias(a, sb);
         else throw new UnsupportedOperationException("Unsupported relation: " + rel.getClass().getSimpleName());
     }
 
@@ -78,11 +79,7 @@ public final class DuckDbSqlGenerator {
     }
 
     private void emitChildSource(Relation child, StringBuilder sb) {
-        boolean isQuery = child instanceof Project || child instanceof Filter
-                || child instanceof Aggregate || child instanceof Sort
-                || child instanceof Limit || child instanceof Union
-                || child instanceof With || child instanceof Generate;
-        if (isQuery) {
+        if (isQuery(child)) {
             sb.append("(");
             emit(child, sb);
             sb.append(")");
@@ -124,11 +121,19 @@ public final class DuckDbSqlGenerator {
                 emitExpr(a.groupingExpressions().get(i), sb);
             }
         }
+        if (a.havingCondition() != null) {
+            sb.append(" HAVING ");
+            emitExpr(a.havingCondition(), sb);
+        }
     }
 
     private void emitSort(Sort s, StringBuilder sb) {
-        sb.append("SELECT * FROM ");
-        emitChildSource(s.child(), sb);
+        if (isQuery(s.child())) {
+            emit(s.child(), sb);
+        } else {
+            sb.append("SELECT * FROM ");
+            emitChildSource(s.child(), sb);
+        }
         sb.append(" ORDER BY ");
         for (int i = 0; i < s.order().size(); i++) {
             if (i > 0) sb.append(", ");
@@ -144,6 +149,13 @@ public final class DuckDbSqlGenerator {
         emitChildSource(l.child(), sb);
         if (l.offset() > 0) sb.append(" OFFSET ").append(l.offset());
         sb.append(" LIMIT ").append(l.limit());
+    }
+
+    private boolean isQuery(Relation relation) {
+        return relation instanceof Project || relation instanceof Filter
+                || relation instanceof Aggregate || relation instanceof Sort
+                || relation instanceof Limit || relation instanceof Union
+                || relation instanceof With || relation instanceof Generate;
     }
 
     private void emitChild(Relation child, StringBuilder sb) {
@@ -176,6 +188,12 @@ public final class DuckDbSqlGenerator {
             }
             sb.append(")");
         }
+    }
+
+    private void emitSubqueryAlias(SubqueryAlias a, StringBuilder sb) {
+        sb.append("(");
+        emit(a.child(), sb);
+        sb.append(") AS ").append(quote(a.alias()));
     }
 
     private void emitGenerate(Generate g, StringBuilder sb) {

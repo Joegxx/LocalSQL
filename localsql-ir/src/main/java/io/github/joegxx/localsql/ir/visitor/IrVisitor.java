@@ -121,6 +121,7 @@ public class IrVisitor<R, C> {
         if (rel instanceof Generate r) return visitGenerate(r, ctx);
         if (rel instanceof Values r) return visitValues(r, ctx);
         if (rel instanceof CTERelation r) return visitCTERelation(r, ctx);
+        if (rel instanceof SubqueryAlias r) return visitSubqueryAlias(r, ctx);
         return visitNode(rel, ctx);
     }
 
@@ -153,6 +154,7 @@ public class IrVisitor<R, C> {
         res = aggregateResult(res, visitRelation(r.child(), ctx));
         for (Expression e : r.groupingExpressions()) res = aggregateResult(res, visit(e, ctx));
         for (Expression e : r.aggregateExpressions()) res = aggregateResult(res, visit(e, ctx));
+        if (r.havingCondition() != null) res = aggregateResult(res, visit(r.havingCondition(), ctx));
         return res;
     }
 
@@ -203,4 +205,6 @@ public class IrVisitor<R, C> {
     }
 
     public R visitCTERelation(CTERelation r, C ctx) { return visitRelation(r.definition(), ctx); }
+
+    public R visitSubqueryAlias(SubqueryAlias r, C ctx) { return visitRelation(r.child(), ctx); }
 }

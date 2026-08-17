@@ -184,6 +184,18 @@ class ThriftServerSmokeTest {
     }
 
     @Test
+    void havingWithoutGroupBy() throws Exception {
+        var pass = server.executeSparkSql(
+                "SELECT count(*) AS cnt FROM orders HAVING count(*) > 1");
+        assertEquals(List.of("cnt"), pass.columns());
+        assertEquals(List.of(List.of(3L)), pass.rows(), "implicit group should return count row");
+
+        var filtered = server.executeSparkSql(
+                "SELECT count(*) AS cnt FROM orders HAVING count(*) > 100");
+        assertTrue(filtered.rows().isEmpty(), "HAVING should filter the single implicit group");
+    }
+
+    @Test
     void aliasedSubquery() throws Exception {
         var result = server.executeSparkSql(
                 "SELECT s.name FROM (SELECT name FROM users WHERE age >= 30) s ORDER BY s.name");

@@ -25,6 +25,7 @@ public class IrVisitor<R, C> {
         if (expr == null) return null;
         if (expr instanceof Literal e) return visitLiteral(e, ctx);
         if (expr instanceof Identifier e) return visitIdentifier(e, ctx);
+        if (expr instanceof IntervalLiteral e) return visitIntervalLiteral(e, ctx);
         if (expr instanceof AttributeReference e) return visitAttributeReference(e, ctx);
         if (expr instanceof Alias e) return visitAlias(e, ctx);
         if (expr instanceof BinaryExpression e) return visitBinary(e, ctx);
@@ -43,6 +44,7 @@ public class IrVisitor<R, C> {
     }
 
     public R visitLiteral(Literal e, C ctx) { return visitNode(e, ctx); }
+    public R visitIntervalLiteral(IntervalLiteral e, C ctx) { return visitNode(e, ctx); }
     public R visitIdentifier(Identifier e, C ctx) { return visitNode(e, ctx); }
     public R visitAttributeReference(AttributeReference e, C ctx) { return visitNode(e, ctx); }
     public R visitAlias(Alias e, C ctx) { return visit(e.child(), ctx); }

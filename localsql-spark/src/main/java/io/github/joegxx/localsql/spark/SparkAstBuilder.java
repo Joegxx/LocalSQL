@@ -99,12 +99,14 @@ public final class SparkAstBuilder {
         if (having != null && input instanceof Aggregate aggregate) {
             input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
                     aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()));
+        } else if (having != null && input != null) {
+            input = new Aggregate(input, List.of(), selectItems, exprBuilder.visit(having.booleanExpression()));
         }
 
         if (input == null) {
             return new Project(new Values(List.of(List.of())), selectItems);
         }
-        if (agg != null) return input;
+        if (agg != null || input instanceof Aggregate) return input;
         return new Project(input, selectItems);
     }
 

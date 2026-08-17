@@ -82,7 +82,7 @@ final class SparkExpressionBuilder {
                 for (ExpressionContext e : pred.expression()) items.add(visit(e));
                 return new InList(value, items, negated);
             }
-            if (kind == SqlBaseParser.IS && pred.NULL() != null) {
+            if (kind == SqlBaseParser.NULL) {
                 return new UnaryExpression(negated ? UnaryExpression.Op.IS_NOT_NULL : UnaryExpression.Op.IS_NULL, value);
             }
             if (kind == SqlBaseParser.LIKE || kind == SqlBaseParser.RLIKE) {
@@ -257,6 +257,26 @@ final class SparkExpressionBuilder {
             }
             return Literal.ofString(sb.toString());
         }
+        if (c instanceof IntervalLiteralContext il) {
+            IntervalContext iv = il.interval();
+            if (iv.errorCapturingMultiUnitsInterval() != null) {
+                MultiUnitsIntervalContext multi = iv.errorCapturingMultiUnitsInterval().body;
+                if (multi != null && !multi.intervalValue().isEmpty() && !multi.unit.isEmpty()) {
+                    IntervalValueContext val = multi.intervalValue(0);
+                    String text = val.getText();
+                    String unit = multi.unit.get(0).getText().toUpperCase();
+                    return new IntervalLiteral(stripSign(text), unit);
+                }
+            }
+            if (iv.errorCapturingUnitToUnitInterval() != null) {
+                UnitToUnitIntervalContext u2u = iv.errorCapturingUnitToUnitInterval().body;
+                if (u2u != null && u2u.value != null && u2u.from != null) {
+                    String text = u2u.value.getText();
+                    String unit = u2u.from.getText().toUpperCase();
+                    return new IntervalLiteral(stripSign(text), unit);
+                }
+            }
+        }
         if (c instanceof TypeConstructorContext tc) {
             String type = tc.identifier().getText().toLowerCase();
             String raw = tc.STRING().getText();
@@ -266,6 +286,12 @@ final class SparkExpressionBuilder {
             return new Cast(Literal.ofString(v), SparkDataTypeBuilder.build(null));
         }
         throw new IllegalStateException("Unsupported constant: " + c.getClass().getSimpleName());
+    }
+
+    private static String stripSign(String text) {
+        String t = text.trim();
+        if (t.startsWith("+") || t.startsWith("-")) return t.substring(1);
+        return t;
     }
 
     private Expression visitNumber(NumberContext n) {

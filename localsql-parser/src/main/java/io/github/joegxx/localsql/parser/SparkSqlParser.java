@@ -32,7 +32,7 @@ public final class SparkSqlParser {
     }
 
     private static CharStream toCharStream(String sql) {
-        return CharStreams.fromString(sql);
+        return new UpperCaseCharStream(CharStreams.fromString(sql));
     }
 
     public static final class SqlParseException extends RuntimeException {

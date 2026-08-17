@@ -206,6 +206,9 @@ public final class DuckDbSqlGenerator {
 
     private void emitExpr(Expression e, StringBuilder sb) {
         if (e instanceof Literal l) emitLiteral(l, sb);
+        else if (e instanceof IntervalLiteral iv) {
+            sb.append("INTERVAL '").append(iv.value()).append("' ").append(iv.unit().toUpperCase());
+        }
         else if (e instanceof Identifier id) sb.append(quote(id.name()));
         else if (e instanceof AttributeReference a) {
             if (a.qualifier().isEmpty()) sb.append(quote(a.name()));

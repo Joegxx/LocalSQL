@@ -74,6 +74,7 @@ ir -> (nothing)
 
 - 语法文件:`localsql-parser/src/main/antlr4/org/apache/spark/sql/catalyst/parser/SqlBase.g4`。**这是从 apache/spark `v3.2.0` tag 逐字复制的 Spark 3.2.0 SqlBase.g4。**
 - **语法只改了一处**:`fragment LETTER` 从 `[A-Z]` 改成 `[a-zA-Z]`。原版只能匹配大写,因为 Spark 的 runtime lexer 在我们没有的 Java 代码里做大小写折叠。不改这个的话,小写标识符会被 tokenize 成 `UNRECOGNIZED`,任何真实查询都会在 `SELECT <小写>` 处失败。**不要"恢复"成上游版本。**
+- **关键字大小写折叠靠 `UpperCaseCharStream`**:关键字规则(`SELECT: 'SELECT'` 等)仍是全大写,`SparkSqlParser.toCharStream` 用 `UpperCaseCharStream`(parser 模块内自写)包输入流:tokenize 时 `LA()` 返回大写、`getText()` 返回原文,从而关键字大小写不敏感、字符串字面量保持原样。这两个机制缺一不可,缺关键字折叠则 `select 1` 都会解析失败。
 - 生成的 parser/lexer 类落在 `localsql-parser/target/generated-sources/antlr4/...` 下,package 是 `org.apache.spark.sql.catalyst.parser`。这个 package 故意和真 Spark 撞名(这样 g4 不改就能编);不要重命名。
 - ANTLR 插件在 `compile` 时自动跑。只想重新生成:`mvn -pl localsql-parser antlr4:antlr4`。
 - `SqlBase.g4` 里 parser 用了成员字段(`legacy_setops_precedence_enabled`、`SQL_standard_keyword_behavior` 等)默认 `false` - 保持原样,MVP 不动它们。
@@ -125,6 +126,10 @@ Generator 永远不用查 Catalog。
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - ROLLUP / CUBE / GROUPING SETS 抛 `UnsupportedOperationException`(在 `SparkAstBuilder.visitAggregate`)
 - Catalog 当前是内存 `LinkedHashMap`(MVP);后续换 DuckDB-backed store,**不改调用方**
+
+## TPC-DS 统一测试
+
+`localsql-thrift/src/test/resources/tpcds-v2.7.0/` 是从 apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0` 拉取的 32 个查询。`TpcdsQueryPipelineTest` 参数化跑每个查询的完整流水线(parse -> analyze -> rewrite -> generate),不执行。MVP 未支持特性的查询进 `UNSUPPORTED` 列表(目前只有 `q22.sql` 的 ROLLUP);其余必须翻译成功,防止回归。
 
 ## MVP 不做什么(不要主动加)
 

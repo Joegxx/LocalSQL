@@ -1,0 +1,108 @@
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q70a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-70
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q35a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-62
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q77a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-121
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q80a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-147
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q86a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-61
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/IntervalLiteral.java
+  s_b33fc4f71998f0::t_35f117455822a9 1-19
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q10a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-69
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q11.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-84
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q18a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-133
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q27a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-70
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q57.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-57
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q5a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-158
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q64.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-111
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q35.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-65
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q47.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-64
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q51a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-103
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_ba0c9d23a42ccd 85
+  s_b33fc4f71998f0::t_7b8d1c1f8da9ed 260-262,265-266,268-271,273-279,291-294
+  s_b33fc4f71998f0::t_59949caab807a2 264,267
+  s_b33fc4f71998f0::t_4ca03729cd40e1 263,272
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q98.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-22
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_5fe6a0425a430a 102-103,109
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_81de0d9ff0e1c3 209-211
+localsql-parser/src/main/java/io/github/joegxx/localsql/parser/SparkSqlParser.java
+  s_b33fc4f71998f0::t_d7dac7700f1f9f 35
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q75.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-78
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q49.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-133
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_19cc09f2c47f5f 187-197
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q34.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-37
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q22.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-15
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q74.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-60
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/visitor/IrVisitor.java
+  s_b33fc4f71998f0::t_6bbbf7acc6076c 28
+  s_b33fc4f71998f0::t_ea4d94b59bb6df 47
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q14a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-215
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q67a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-208
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q78.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-75
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q24.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-40
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q72.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-40
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q14.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-135
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsQueryPipelineTest.java
+  s_b33fc4f71998f0::t_b28b1485513d3d 87-90
+  s_b33fc4f71998f0::t_d74686822d1a50 1-37,40-86,91-109
+  s_b33fc4f71998f0::t_db01836561d7f3 38-39
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q36a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-70
+AGENTS.md
+  s_b33fc4f71998f0::t_aee49d2b770d45 130-133
+  s_b33fc4f71998f0::t_b58647f06c4d95 77
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q20.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-19
+localsql-parser/src/main/java/io/github/joegxx/localsql/parser/UpperCaseCharStream.java
+  s_b33fc4f71998f0::t_e011088606af77 1-48
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q12.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-23
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q6.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-23
+localsql-thrift/src/test/resources/tpcds-v2.7.0/q22a.sql
+  s_b33fc4f71998f0::t_5975114da6e21c 1-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "463698db5d4b7b3934e6cd7f4d1f9c97bbbd6f8a",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

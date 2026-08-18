@@ -61,7 +61,11 @@ public final class ThriftServer {
                 LOG.info("HiveServer2 Thrift server listening on port {} (jdbc:hive2://localhost:{})", port, port);
                 server.serve();
             } catch (TTransportException e) {
-                LOG.error("Thrift server failed", e);
+                // A silent bind failure is the worst outcome: the JVM keeps
+                // running while clients get connection refused. Fail loudly.
+                LOG.error("Thrift server failed to bind port {}. Is another instance running? " +
+                        "Hint: lsof -iTCP:{} -sTCP:LISTEN", port, port, e);
+                System.exit(1);
             }
         }, "localsql-thrift-server");
         serverThread.setDaemon(true);
@@ -77,6 +81,8 @@ public final class ThriftServer {
 
     public DuckDbExecutor.QueryResult executeSparkSql(String sql) throws SQLException {
         LOG.info("Executing Spark SQL: {}", sql);
+        var admin = AdminStatementHandler.tryHandle(catalogService, sql, "default");
+        if (admin.isPresent()) return admin.get().result();
         SparkSqlParser parser = new SparkSqlParser();
         var ctx = parser.parseStatement(sql);
         SparkAstBuilder builder = new SparkAstBuilder();

@@ -233,4 +233,65 @@ class ThriftServerSmokeTest {
                         ") t ON u.id = t.user_id ORDER BY name");
         assertEquals(List.of(List.of("alice", 2L), List.of("bob", 1L)), result2.rows());
     }
+
+    @Test
+    void showAndDescribeOverThrift() throws Exception {
+        try (TTransport transport = new TSocket("localhost", port)) {
+            transport.open();
+            TCLIService.Client client = new TCLIService.Client(
+                    new TBinaryProtocol(transport), new TBinaryProtocol(transport));
+
+            TOpenSessionResp open = client.OpenSession(
+                    new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
+            assertEquals(TStatusCode.SUCCESS_STATUS, open.getStatus().getStatusCode());
+
+            // SHOW DATABASES
+            TExecuteStatementResp showDb = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "SHOW DATABASES"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, showDb.getStatus().getStatusCode(),
+                    "SHOW DATABASES: " + showDb.getStatus());
+            List<String> dbRows = fetchFirstColumn(client, showDb.getOperationHandle());
+            assertTrue(dbRows.contains("default"), "default db should be listed: " + dbRows);
+
+            // SHOW TABLES
+            TExecuteStatementResp showTables = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "SHOW TABLES"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, showTables.getStatus().getStatusCode());
+            List<String> tableRows = fetchFirstColumn(client, showTables.getOperationHandle());
+            assertTrue(tableRows.contains("users"), "users should be listed: " + tableRows);
+            assertTrue(tableRows.contains("orders"), "orders should be listed: " + tableRows);
+
+            // SHOW TABLES LIKE filter
+            TExecuteStatementResp showLike = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "SHOW TABLES LIKE 'us%'"));
+            List<String> likeRows = fetchFirstColumn(client, showLike.getOperationHandle());
+            assertEquals(List.of("users"), likeRows);
+
+            // DESCRIBE users
+            TExecuteStatementResp desc = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "DESCRIBE users"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, desc.getStatus().getStatusCode());
+            TFetchResultsResp descRes = client.FetchResults(
+                    new TFetchResultsReq(desc.getOperationHandle(), TFetchOrientation.FETCH_FIRST, 100));
+            List<TColumn> descCols = descRes.getResults().getColumns();
+            assertEquals("id", descCols.get(0).getStringVal().getValues().get(0));
+            assertEquals("name", descCols.get(0).getStringVal().getValues().get(1));
+            assertEquals("age", descCols.get(0).getStringVal().getValues().get(2));
+
+            // USE default
+            TExecuteStatementResp use = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "USE default"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, use.getStatus().getStatusCode(),
+                    "USE default: " + use.getStatus());
+
+            client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
+        }
+    }
+
+    private List<String> fetchFirstColumn(TCLIService.Client client, TOperationHandle op) throws Exception {
+        TFetchResultsResp res = client.FetchResults(
+                new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 10_000));
+        assertEquals(TStatusCode.SUCCESS_STATUS, res.getStatus().getStatusCode());
+        return res.getResults().getColumns().get(0).getStringVal().getValues();
+    }
 }

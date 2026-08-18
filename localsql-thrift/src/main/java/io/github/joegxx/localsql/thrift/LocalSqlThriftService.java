@@ -45,13 +45,17 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         this.analyzer = new SemanticAnalyzer(catalogService.catalog());
     }
 
-    private record SessionState(TSessionHandle handle) {}
+    private static final class SessionState {
+        final TSessionHandle handle;
+        volatile String currentDatabase = "default";
+        SessionState(TSessionHandle handle) { this.handle = handle; }
+    }
     private record OperationState(TOperationHandle handle, List<String> columns,
                                   List<List<Object>> rows, boolean fetched) {}
 
     @Override
     public TOpenSessionResp OpenSession(TOpenSessionReq req) {
-        LOG.info("OpenSession user={}", req.getUsername());
+        LOG.info("OpenSession user={} clientProtocol={}", req.getUsername(), req.getClient_protocol());
         TOpenSessionResp resp = new TOpenSessionResp(ok(), TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11);
         resp.setSessionHandle(newSessionHandle());
         resp.setConfiguration(new java.util.HashMap<>());
@@ -84,19 +88,33 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     @Override
     public TExecuteStatementResp ExecuteStatement(TExecuteStatementReq req) {
         String sql = req.getStatement();
-        LOG.info("ExecuteStatement: {}", sql);
+        String sessionId = guid(req.getSessionHandle());
+        SessionState session = sessions.get(sessionId);
+        String currentDb = session != null ? session.currentDatabase : "default";
+        LOG.info("ExecuteStatement [session={}, db={}]: {}", sessionId, currentDb, sql);
         TOperationHandle opHandle = newHandle(TOperationType.EXECUTE_STATEMENT, true);
         try {
-            var ctx = parser.parseStatement(sql);
-            Relation rel = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
-            analyzer.analyze(rel);
-            rewriter.rewrite(rel);
-            String duckSql = generator.generate(rel);
-            LOG.info("Translated to DuckDB SQL: {}", duckSql);
-            DuckDbExecutor.QueryResult result = executor.execute(duckSql);
-            operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
+            // admin/introspection statements (SHOW/DESCRIBE/USE) that IDEs send
+            var admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDb);
+            if (admin.isPresent()) {
+                DuckDbExecutor.QueryResult result = admin.get().result();
+                if (admin.get().newCurrentDatabase() != null && session != null) {
+                    session.currentDatabase = admin.get().newCurrentDatabase();
+                }
+                LOG.info("Admin statement handled: {} row(s)", result.rows().size());
+                operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
+            } else {
+                var ctx = parser.parseStatement(sql);
+                Relation rel = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
+                analyzer.analyze(rel);
+                rewriter.rewrite(rel);
+                String duckSql = generator.generate(rel);
+                LOG.info("Translated to DuckDB SQL: {}", duckSql);
+                DuckDbExecutor.QueryResult result = executor.execute(duckSql);
+                operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
+            }
         } catch (Exception e) {
-            LOG.error("Execute failed", e);
+            LOG.error("Execute failed [session={}]: {}", sessionId, sql, e);
             operations.put(guid(opHandle), new OperationState(opHandle, List.of("error"), List.of(List.of(e.getMessage())), false));
             TExecuteStatementResp resp = new TExecuteStatementResp(error(e.getMessage()));
             resp.setOperationHandle(opHandle);
@@ -148,9 +166,13 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     @Override
     public TGetSchemasResp GetSchemas(TGetSchemasReq req) {
+        String pattern = req.getSchemaName();
+        LOG.info("GetSchemas schemaPattern={}", pattern);
         List<List<Object>> rows = new ArrayList<>();
         for (Catalog.Database db : catalogService.catalog().listDatabases()) {
-            rows.add(List.of(db.name(), "spark_catalog"));
+            if (pattern == null || pattern.isEmpty() || matches(db.name(), pattern)) {
+                rows.add(List.of(db.name(), "spark_catalog"));
+            }
         }
         TOperationHandle h = newHandle(TOperationType.GET_SCHEMAS, true);
         operations.put(guid(h), new OperationState(h, List.of("TABLE_SCHEM", "TABLE_CATALOG"), rows, false));
@@ -161,11 +183,18 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     @Override
     public TGetTablesResp GetTables(TGetTablesReq req) {
+        LOG.info("GetTables catalog={} schema={} table={}",
+                req.getCatalogName(), req.getSchemaName(), req.getTableName());
+        String schema = req.getSchemaName();
+        String tablePattern = req.getTableName();
         List<List<Object>> rows = new ArrayList<>();
-        for (Catalog.Table t : catalogService.catalog().listTables(null)) {
-            if (req.getTableName() != null && !req.getTableName().isEmpty()
-                    && !matches(t.name().get(t.name().size() - 1), req.getTableName())) continue;
-            rows.add(nullableRow("spark_catalog", t.name().get(0), t.name().get(1), "TABLE",
+        for (Catalog.Table t : catalogService.catalog().listTables(
+                schema == null || schema.isEmpty() ? null : schema.toLowerCase())) {
+            String dbName = t.database();
+            if (schema != null && !schema.isEmpty() && !matches(dbName, schema)) continue;
+            if (tablePattern != null && !tablePattern.isEmpty()
+                    && !matches(t.name().get(t.name().size() - 1), tablePattern)) continue;
+            rows.add(nullableRow("spark_catalog", dbName, t.name().get(1), "TABLE",
                     null, null, null, null, null, null));
         }
         TOperationHandle h = newHandle(TOperationType.GET_TABLES, true);
@@ -190,13 +219,22 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     @Override
     public TGetColumnsResp GetColumns(TGetColumnsReq req) {
+        LOG.info("GetColumns catalog={} schema={} table={} column={}",
+                req.getCatalogName(), req.getSchemaName(), req.getTableName(), req.getColumnName());
+        String schema = req.getSchemaName();
+        String tablePattern = req.getTableName();
+        String columnPattern = req.getColumnName();
         List<List<Object>> rows = new ArrayList<>();
         int pos = 1;
-        for (Catalog.Table t : catalogService.catalog().listTables(null)) {
-            if (req.getTableName() != null && !req.getTableName().isEmpty()
-                    && !matches(t.name().get(t.name().size() - 1), req.getTableName())) continue;
+        for (Catalog.Table t : catalogService.catalog().listTables(
+                schema == null || schema.isEmpty() ? null : schema.toLowerCase())) {
+            String dbName = t.database();
+            if (schema != null && !schema.isEmpty() && !matches(dbName, schema)) continue;
+            if (tablePattern != null && !tablePattern.isEmpty()
+                    && !matches(t.name().get(t.name().size() - 1), tablePattern)) continue;
             for (Catalog.Column c : t.columns()) {
-                rows.add(nullableRow("spark_catalog", t.name().get(0), t.name().get(1), c.name(),
+                if (columnPattern != null && !columnPattern.isEmpty() && !matches(c.name(), columnPattern)) continue;
+                rows.add(nullableRow("spark_catalog", dbName, t.name().get(1), c.name(),
                         toSqlType(c.type()), "STRING", Integer.MAX_VALUE, null, null, null,
                         java.sql.DatabaseMetaData.columnNullable, null, null, null, null,
                         (long) pos, "YES", null, null, null, null, 0));

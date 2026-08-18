@@ -217,9 +217,13 @@ ORDER BY cnt DESC;
 确认使用的是当前版本。历史版本不支持小写关键字,现已在词法层做大小写折叠;若仍失败,检查是否端口连到了别的服务。
 
 **客户端连不上?**
-1. `lsof -iTCP:10000 -sTCP:LISTEN` 确认进程监听;
+1. `lsof -iTCP:10000 -sTCP:LISTEN` 确认进程监听;若提示端口被占,说明有旧实例还在跑——先 `pkill -f runtime.jar` 再启动(当前版本端口被占会直接报错退出,不会静默假活);
 2. 客户端 JDBC URL 必须是 `jdbc:hive2://` 前缀(不是 `jdbc:duckdb`);
-3. 用了自定义端口时,URL 里的端口要一致。
+3. 用了自定义端口时,URL 里的端口要一致;
+4. IDEA/DataGrip 选驱动 **Apache Hive**,URL 填 `jdbc:hive2://localhost:10000/default`。如果客户端尝试 SASL 握手失败,在 URL 后追加 `;auth=noSasl`。
+
+**IDEA 里看不到 database/schema 或表?**
+DataGrip/IntelliJ 的内省依赖 `SHOW DATABASES` / `SHOW TABLES` / `DESCRIBE` 语句,当前版本已支持;若仍为空,确认连接的是**新启动**的进程(旧版本进程不支持这些语句)。服务端日志会打印收到的每条 SQL(`ExecuteStatement [session=.., db=..]: ...`),可直接对照排查客户端到底发了什么。
 
 **查询报 `Referenced table "xxx" not found`?**
 表名拼写要和注册进 Catalog 的一致(当前内置 `users`/`orders`,在 `default` 库)。

@@ -1,0 +1,64 @@
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_9a34812d237567 39
+  s_b33fc4f71998f0::t_f5fa58cc48069d 53-56
+  s_b33fc4f71998f0::t_a39f9f350b66b0 131-132
+  s_b33fc4f71998f0::t_acd2721253f23e 314
+  s_b33fc4f71998f0::t_5ee70f29a84b26 115,121
+  s_b33fc4f71998f0::t_dbd2bec9699110 297
+  s_b33fc4f71998f0::t_a48850702330ca 266
+  s_b33fc4f71998f0::t_5697df30e8ff6f 97,100,102-111,117-120
+  s_b33fc4f71998f0::t_917fcf7639f69d 267
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_de6c09402d8a6b 137,140
+  s_b33fc4f71998f0::t_a8e458e23b4d87 304-320,324-325
+  s_b33fc4f71998f0::t_63ba3d48592fdf 371,374-380
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbExecutor.java
+  s_b33fc4f71998f0::t_9890c78c7f6fac 48-54
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Union.java
+  s_b33fc4f71998f0::t_d25b3ae03ba7af 8-10,13,16-19,22,27,33-36
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsQueryPipelineTest.java
+  s_b33fc4f71998f0::t_7bfc605d81905d 68-71
+pom.xml
+  s_b33fc4f71998f0::t_91edcaea68229e 33
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/DecimalType.java
+  s_b33fc4f71998f0::t_d7d6c48e480784 1-5
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsConsistencyTest.java
+  s_b33fc4f71998f0::t_8390ae2bee5eaa 140-143
+  s_b33fc4f71998f0::t_30db1f030a9f59 1-37,47-52,61-85,88,101-107,114-116,120,122-139,144-180
+  s_b33fc4f71998f0::t_72616c0e6e2c06 38-46,53-60
+  s_b33fc4f71998f0::t_75a098f0d93d34 86
+  s_b33fc4f71998f0::t_d114a4b298f37d 87,89,91,111,117-119,121
+  s_b33fc4f71998f0::t_411f6ed5525c7f 90,92-100,108-110,112-113
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Project.java
+  s_b33fc4f71998f0::t_9376e2010074eb 11,14-17,20,25,31-34
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkDataTypeBuilder.java
+  s_b33fc4f71998f0::t_a37a58f1def789 57-61
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/type/DataType.java
+  s_b33fc4f71998f0::t_30ee829f5dfe8a 4
+AGENTS.md
+  s_b33fc4f71998f0::t_2f381b9a883651 141-142,146-159
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_8ce47715964e00 6
+  s_b33fc4f71998f0::t_7d53f5c9c34214 227-231,233
+  s_b33fc4f71998f0::t_05b304bc9c31b4 399-406
+  s_b33fc4f71998f0::t_d1027b372a5260 478
+  s_b33fc4f71998f0::t_78b9cf3fa2f481 51
+  s_b33fc4f71998f0::t_929e621381133d 495,498-501,503-526
+  s_b33fc4f71998f0::t_f2a1dced771d84 502
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "20478697c1bfbeeafc28242c9f2fcd64bb810152",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -134,10 +134,10 @@ final class SparkExpressionBuilder {
 
     Expression visitPrimary(PrimaryExpressionContext ctx) {
         if (ctx instanceof ConstantDefaultContext c) return visitConstant(c.constant());
-        if (ctx instanceof ColumnReferenceContext c) return new Identifier(c.identifier().getText(), false);
+        if (ctx instanceof ColumnReferenceContext c) return new Identifier(unquote(c.identifier().getText()), false);
         if (ctx instanceof DereferenceContext c) {
             Expression base = visitPrimary(c.base);
-            String field = c.fieldName.getText();
+            String field = unquote(c.fieldName.getText());
             return qualify(base, field);
         }
         if (ctx instanceof ParenthesizedExpressionContext c) return visit(c.expression());
@@ -301,15 +301,28 @@ final class SparkExpressionBuilder {
     }
 
     private Expression visitNumber(NumberContext n) {
-        if (n instanceof IntegerLiteralContext i) return Literal.ofInt(Long.parseLong(i.INTEGER_VALUE().getText()));
-        if (n instanceof BigIntLiteralContext b) return Literal.ofInt(Long.parseLong(b.BIGINT_LITERAL().getText().replaceFirst("[Ll]$", "")));
-        if (n instanceof DoubleLiteralContext d) return Literal.ofDouble(Double.parseDouble(d.DOUBLE_LITERAL().getText().replaceFirst("[Dd]$", "")));
-        if (n instanceof DecimalLiteralContext d) return Literal.ofDecimal(d.DECIMAL_VALUE().getText());
-        if (n instanceof SmallIntLiteralContext s) return Literal.ofInt(Long.parseLong(s.SMALLINT_LITERAL().getText().replaceFirst("[Ss]$", "")));
-        if (n instanceof TinyIntLiteralContext t) return Literal.ofInt(Long.parseLong(t.TINYINT_LITERAL().getText().replaceFirst("[Yy]$", "")));
-        if (n instanceof ExponentLiteralContext e) return Literal.ofDouble(Double.parseDouble(e.EXPONENT_VALUE().getText()));
+        // Spark's grammar folds an optional leading MINUS into number literals
+        // (number: MINUS? INTEGER_VALUE ...), so each literal context may carry
+        // the sign as a separate token that getText() on the value token misses.
+        if (n instanceof IntegerLiteralContext i)
+            return Literal.ofInt(signed(i.MINUS() != null, Long.parseLong(i.INTEGER_VALUE().getText())));
+        if (n instanceof BigIntLiteralContext b)
+            return Literal.ofInt(signed(b.MINUS() != null, Long.parseLong(b.BIGINT_LITERAL().getText().replaceFirst("[Ll]$", ""))));
+        if (n instanceof DoubleLiteralContext d)
+            return Literal.ofDouble(signed(d.MINUS() != null, Double.parseDouble(d.DOUBLE_LITERAL().getText().replaceFirst("[Dd]$", ""))));
+        if (n instanceof DecimalLiteralContext d)
+            return Literal.ofDecimal(d.MINUS() != null ? "-" + d.DECIMAL_VALUE().getText() : d.DECIMAL_VALUE().getText());
+        if (n instanceof SmallIntLiteralContext s)
+            return Literal.ofInt(signed(s.MINUS() != null, Long.parseLong(s.SMALLINT_LITERAL().getText().replaceFirst("[Ss]$", ""))));
+        if (n instanceof TinyIntLiteralContext t)
+            return Literal.ofInt(signed(t.MINUS() != null, Long.parseLong(t.TINYINT_LITERAL().getText().replaceFirst("[Yy]$", ""))));
+        if (n instanceof ExponentLiteralContext e)
+            return Literal.ofDouble(signed(e.MINUS() != null, Double.parseDouble(e.EXPONENT_VALUE().getText())));
         return Literal.ofNull();
     }
+
+    private static long signed(boolean negative, long v) { return negative ? -v : v; }
+    private static double signed(boolean negative, double v) { return negative ? -v : v; }
 
     private WindowSpec visitWindowSpec(WindowSpecContext ctx) {
         if (ctx instanceof WindowRefContext) {
@@ -355,7 +368,15 @@ final class SparkExpressionBuilder {
 
     static List<String> parts(QualifiedNameContext q) {
         List<String> out = new ArrayList<>();
-        for (IdentifierContext id : q.identifier()) out.add(id.getText());
+        for (IdentifierContext id : q.identifier()) out.add(unquote(id.getText()));
         return out;
+    }
+
+    static String unquote(String text) {
+        if (text == null) return null;
+        if (text.length() >= 2 && text.startsWith("`") && text.endsWith("`")) {
+            return text.substring(1, text.length() - 1);
+        }
+        return text;
     }
 }

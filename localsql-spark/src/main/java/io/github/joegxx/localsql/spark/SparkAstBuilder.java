@@ -36,7 +36,7 @@ public final class SparkAstBuilder {
     private Relation visitCtes(CtesContext ctx, Relation body) {
         List<CTERelation> ctes = new ArrayList<>();
         for (NamedQueryContext nq : ctx.namedQuery()) {
-            String name = nq.name.getText();
+            String name = SparkExpressionBuilder.unquote(nq.name.getText());
             Relation def = visitQuery(nq.query());
             ctes.add(new CTERelation(name, def, def.output()));
         }
@@ -50,9 +50,10 @@ public final class SparkAstBuilder {
             Relation right = visitQueryTerm(c.right);
             int op = c.operator.getType();
             boolean distinct = c.setQuantifier() == null || c.setQuantifier().DISTINCT() != null;
-            if (op == SqlBaseParser.UNION) return new Union(List.of(left, right), distinct);
-            if (op == SqlBaseParser.INTERSECT) return new Union(List.of(left, right), true);
-            if (op == SqlBaseParser.EXCEPT || op == SqlBaseParser.SETMINUS) return new Union(List.of(left, right), true);
+            if (op == SqlBaseParser.UNION) return new Union(List.of(left, right), distinct, Union.Kind.UNION);
+            if (op == SqlBaseParser.INTERSECT) return new Union(List.of(left, right), distinct, Union.Kind.INTERSECT);
+            if (op == SqlBaseParser.EXCEPT || op == SqlBaseParser.SETMINUS)
+                return new Union(List.of(left, right), distinct, Union.Kind.EXCEPT);
         }
         throw new IllegalStateException("Unknown queryTerm: " + ctx.getClass().getSimpleName());
     }
@@ -93,22 +94,31 @@ public final class SparkAstBuilder {
             selectItems.add(visitNamedExpression(ne));
         }
 
+        boolean aggregated = false;
         if (agg != null && input != null) {
             input = visitAggregate(agg, input, selectItems);
+            aggregated = true;
         }
-        if (having != null && input instanceof Aggregate aggregate) {
-            input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
-                    aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()),
-                    aggregate.groupingAnalytics());
-        } else if (having != null && input != null) {
-            input = new Aggregate(input, List.of(), selectItems, exprBuilder.visit(having.booleanExpression()));
+        if (having != null && input != null) {
+            if (aggregated && input instanceof Aggregate aggregate) {
+                input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
+                        aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()),
+                        aggregate.groupingAnalytics());
+            } else if (!aggregated) {
+                // HAVING without GROUP BY: implicit single-group aggregate
+                input = new Aggregate(input, List.of(), selectItems, exprBuilder.visit(having.booleanExpression()));
+                aggregated = true;
+            }
         }
 
         if (input == null) {
-            return new Project(new Values(List.of(List.of())), selectItems);
+            return new Project(new Values(List.of(List.of())), selectItems, distinct);
         }
-        if (agg != null || input instanceof Aggregate) return input;
-        return new Project(input, selectItems);
+        // When aggregated, selectItems are already inside the Aggregate node.
+        // Do NOT shortcut on 'input instanceof Aggregate': a plain query whose
+        // FROM is an aggregated subquery still needs its own Project on top.
+        if (aggregated) return input;
+        return new Project(input, selectItems, distinct);
     }
 
     private Relation visitLateralView(LateralViewContext lv, Relation input) {
@@ -118,8 +128,8 @@ public final class SparkAstBuilder {
         if (lv.expression() != null) for (ExpressionContext e : lv.expression()) args.add(exprBuilder.visit(e));
         FunctionCall gen = new FunctionCall(fn, args);
         List<String> outs = new ArrayList<>();
-        if (lv.colName != null) for (var id : lv.colName) outs.add(id.getText());
-        if (outs.isEmpty() && lv.tblName != null) outs.add(lv.tblName.getText());
+        if (lv.colName != null) for (var id : lv.colName) outs.add(SparkExpressionBuilder.unquote(id.getText()));
+        if (outs.isEmpty() && lv.tblName != null) outs.add(SparkExpressionBuilder.unquote(lv.tblName.getText()));
         return new Generate(gen, outs, input);
     }
 
@@ -253,7 +263,8 @@ public final class SparkAstBuilder {
     private Relation alias(Relation r, TableAliasContext alias) {
         if (alias == null) return r;
         String aliasName = null;
-        if (alias.strictIdentifier() != null) aliasName = alias.strictIdentifier().getText();
+        if (alias.strictIdentifier() != null) aliasName = SparkExpressionBuilder.unquote(alias.strictIdentifier().getText());
+        if (aliasName == null) return r;
         if (r instanceof TableScan t) {
             return new TableScan(t.tableName(), t.output(), aliasName);
         }
@@ -283,11 +294,11 @@ public final class SparkAstBuilder {
     Expression visitNamedExpression(NamedExpressionContext ne) {
         Expression e = exprBuilder.visit(ne.expression());
         if (ne.name != null) {
-            return new Alias(e, ne.name.getText(), List.of());
+            return new Alias(e, SparkExpressionBuilder.unquote(ne.name.getText()), List.of());
         }
         if (ne.identifierList() != null) {
             List<String> names = new ArrayList<>();
-            for (ErrorCapturingIdentifierContext id : ne.identifierList().identifierSeq().ident) names.add(id.getText());
+            for (ErrorCapturingIdentifierContext id : ne.identifierList().identifierSeq().ident) names.add(SparkExpressionBuilder.unquote(id.getText()));
             return new Alias(e, names.isEmpty() ? e.toString() : names.get(0), names);
         }
         return e;
@@ -300,7 +311,7 @@ public final class SparkAstBuilder {
 
     private static List<String> parts(MultipartIdentifierContext mi) {
         List<String> out = new ArrayList<>();
-        for (ErrorCapturingIdentifierContext id : mi.parts) out.add(id.getText());
+        for (ErrorCapturingIdentifierContext id : mi.parts) out.add(SparkExpressionBuilder.unquote(id.getText()));
         return out;
     }
 

@@ -3,6 +3,7 @@ package io.github.joegxx.localsql.duckdb;
 import io.github.joegxx.localsql.ir.expression.*;
 import io.github.joegxx.localsql.ir.relation.*;
 import io.github.joegxx.localsql.ir.type.DataType;
+import io.github.joegxx.localsql.ir.type.DecimalType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +48,7 @@ public final class DuckDbSqlGenerator {
 
     private void emitProject(Project p, StringBuilder sb) {
         sb.append("SELECT ");
+        if (p.distinct()) sb.append("DISTINCT ");
         if (p.projectList().size() == 1 && p.projectList().get(0) instanceof Star) {
             sb.append("*");
         } else {
@@ -222,8 +224,13 @@ public final class DuckDbSqlGenerator {
     }
 
     private void emitUnion(Union u, StringBuilder sb) {
+        String op = switch (u.kind()) {
+            case UNION -> "UNION";
+            case INTERSECT -> "INTERSECT";
+            case EXCEPT -> "EXCEPT";
+        };
         for (int i = 0; i < u.children().size(); i++) {
-            if (i > 0) sb.append(u.distinct() ? " UNION " : " UNION ALL ");
+            if (i > 0) sb.append(" ").append(op).append(u.distinct() ? " " : " ALL ").append(" ");
             sb.append("(");
             emit(u.children().get(i), sb);
             sb.append(")");
@@ -389,6 +396,14 @@ public final class DuckDbSqlGenerator {
             sb.append(")");
             return;
         }
+        if ((name.equals("like") || name.equals("rlike")) && f.arguments().size() == 2 && f.windowSpec() == null) {
+            sb.append("(");
+            emitExpr(f.arguments().get(0), sb);
+            sb.append(name.equals("like") ? " LIKE " : " REGEXP ");
+            emitExpr(f.arguments().get(1), sb);
+            sb.append(")");
+            return;
+        }
         String mapped = FN_MAP.getOrDefault(name, name);
         sb.append(mapped).append("(");
         if (f.distinct()) sb.append("DISTINCT ");
@@ -460,6 +475,7 @@ public final class DuckDbSqlGenerator {
 
     private String duckType(DataType t) {
         if (t == null) return "VARCHAR";
+        if (t instanceof DecimalType d) return "DECIMAL(" + d.precision() + "," + d.scale() + ")";
         return switch (t.typeName()) {
             case "BOOLEAN" -> "BOOLEAN";
             case "INT" -> "INTEGER";
@@ -476,7 +492,36 @@ public final class DuckDbSqlGenerator {
 
     private String quote(String id) {
         if (id == null || id.isEmpty()) return id;
-        if (id.matches("[a-z_][a-z0-9_]*")) return id;
+        if (id.matches("[a-z_][a-z0-9_]*") && !DUCKDB_RESERVED.contains(id)) return id;
         return "\"" + id.replace("\"", "\"\"") + "\"";
     }
+
+    /** DuckDB reserved words that would break unquoted SQL if used as identifiers. */
+    private static final java.util.Set<String> DUCKDB_RESERVED = java.util.Set.of(
+            "all", "analyse", "analyze", "and", "anti", "any", "array", "as", "asc",
+            "asymmetric", "at", "authorization", "between", "bigint", "binary", "bit",
+            "boolean", "both", "by", "case", "cast", "char", "character", "check",
+            "collate", "column", "concat", "constraint", "create", "cross", "cube",
+            "current", "current_catalog", "current_date", "current_path",
+            "current_role", "current_schema", "current_time", "current_timestamp",
+            "current_user", "database", "date", "decimal", "default", "deferrable",
+            "deferred", "delete", "desc", "describe", "distinct", "do", "double",
+            "drop", "else", "end", "except", "exists", "explain", "extract", "false",
+            "fetch", "filter", "first", "float", "following", "for", "foreign",
+            "from", "full", "function", "group", "grouping", "groups", "having",
+            "if", "ilike", "in", "initially", "inner", "inout", "insert", "int",
+            "integer", "intersect", "interval", "into", "is", "join", "json",
+            "lateral", "leading", "left", "like", "limit", "list", "local",
+            "localtime", "localtimestamp", "map", "match", "mediumint", "mod", "natural",
+            "new", "no", "none", "not", "null", "nulls", "numeric", "of", "offset",
+            "old", "on", "only", "or", "order", "out", "outer", "over", "overlaps",
+            "partition", "position", "preceding", "precision", "primary", "qualify",
+            "range", "read", "real", "recursive", "references", "regexp", "release",
+            "rename", "replace", "returning", "returns", "revoke", "right", "rollback",
+            "rollup", "row", "rows", "sample", "schema", "select", "semi", "set",
+            "similar", "smallint", "some", "struct", "table", "tablesample", "text",
+            "then", "time", "timestamp", "tinyint", "to", "trailing", "transaction",
+            "trigger", "true", "union", "unique", "unknown", "update", "user",
+            "using", "uuid", "values", "varchar", "view", "when", "where", "window",
+            "with", "xor", "year");
 }

@@ -45,6 +45,13 @@ public final class DuckDbExecutor implements AutoCloseable {
         }
     }
 
+    /** Execute any statement (DDL, INSTALL/LOAD extension, table-producing CALLs). */
+    public void run(String sql) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute(sql);
+        }
+    }
+
     public void registerSampleTable(String name, List<String> columns, List<List<Object>> rows) throws SQLException {
         StringBuilder sb = new StringBuilder("CREATE TABLE ").append(quoteIdent(name)).append(" (");
         for (int i = 0; i < columns.size(); i++) {

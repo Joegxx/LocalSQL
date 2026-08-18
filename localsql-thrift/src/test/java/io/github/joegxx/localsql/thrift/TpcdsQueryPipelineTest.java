@@ -65,6 +65,10 @@ class TpcdsQueryPipelineTest {
     }
 
     private static Path resourceDir(String name) {
+        return resourceDirPublic(name);
+    }
+
+    static Path resourceDirPublic(String name) {
         Path p = Path.of("src/test/resources", name);
         if (Files.isDirectory(p)) return p;
         return Path.of("localsql-thrift/src/test/resources", name);

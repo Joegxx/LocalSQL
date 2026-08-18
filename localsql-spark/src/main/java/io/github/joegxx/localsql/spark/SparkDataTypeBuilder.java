@@ -54,6 +54,11 @@ final class SparkDataTypeBuilder {
             case "bigint" -> IntegralType.BIGINT;
             case "float" -> FractionalType.FLOAT;
             case "double" -> FractionalType.DOUBLE;
+            case "decimal", "numeric", "dec" -> {
+                int precision = args.size() > 0 ? args.get(0) : 10;
+                int scale = args.size() > 1 ? args.get(1) : 0;
+                yield new DecimalType(precision, scale);
+            }
             case "string", "varchar", "char" -> new StringType();
             case "binary" -> new BinaryType();
             case "date" -> new DateType();

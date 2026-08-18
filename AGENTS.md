@@ -138,13 +138,25 @@ MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过(当前为空,136/1
 ### 分层测试架构
 
 - **L1 翻译回归** - `TpcdsQueryPipelineTest`:parse -> analyze -> rewrite -> generate,不执行
-- **L3 结果一致性** - `TpcdsGoldenResultTest`:走真实 Thrift 端点(OpenSession -> ExecuteStatement -> FetchResults)执行 TPC-DS 查询,结果与 Spark 语义的 golden 期望对比
+- **L3 结果一致性(手工 golden)** - `TpcdsGoldenResultTest`:走真实 Thrift 端点执行,结果与 Spark 语义的手工校准期望对比
+- **L3 结果一致性(差分 oracle)** - `TpcdsConsistencyTest`:**135/135 全过**。同一份数据(DuckDB `tpcds` 扩展 `dsdgen(sf=0.01)` 生成全 24 表)+ 同一条 SQL:期望侧 DuckDB 原生执行原文(反引号归一化为双引号),实际侧走 Thrift 管线,双向 `EXCEPT ALL` 严格多重集对比。任何翻译语义漂移都会暴露
 
 L3 组件(全部 DuckDB 自举):
 - `ThriftQueryRunner` - Thrift 客户端封装,启动 in-process server 并执行查询取回行
-- `TpcdsMiniData` - 24 张表的确定性 mini 数据集(当前覆盖 6 张),带干扰行;同时注册 Catalog 元数据 + DuckDB 物理表
-- golden 期望 - 按 Spark 语义对 mini 数据**人工校准**固化在测试里(未来可接真 Spark 环境刷新)
-- 对比 - 实际/期望都灌成 DuckDB VARCHAR 表(`actual_qN`/`expected_qN`),双向 `EXCEPT ALL` 计数为 0 即通过(严格多重集相等)
+- `TpcdsMiniData` - 确定性 mini 数据集(手工 golden 用),带干扰行;同时注册 Catalog 元数据 + DuckDB 物理表
+- `TpcdsConsistencyTest` - 差分测试本体;`ORACLE_UNAVAILABLE` 列出原文在 DuckDB 无法执行的查询(保留字别名 `returns`/`at`),只断言 thrift 侧成功;dsdgen 的 customer 表是 1.x schema,会 `ALTER TABLE ADD COLUMN c_last_review_date DATE` 补 2.7 的列
+- 对比 - 实际/期望都灌成 DuckDB VARCHAR 表,双向 `EXCEPT ALL` 计数为 0 即通过
+
+差分测试暴露并修复的翻译 bug(全部有回归保护):
+- `INTERSECT`/`EXCEPT` 被当 `UNION DISTINCT`(Union IR 加 `Kind`,之前是 critical 语义错误)
+- 负数字面量丢符号(Spark grammar 的 `number: MINUS? INTEGER_VALUE` 把负号折进 number,`visitNumber` 现在读 `MINUS()`)
+- `SELECT DISTINCT` 被静默丢弃(Project 加 `distinct`)
+- `DECIMAL(p,s)` cast 变 VARCHAR(新增 `DecimalType` IR 类型)
+- 反引号标识符保留 `` ` `` 当名字一部分(统一 `unquote`)
+- DuckDB 保留字(`null`/`returns`/`at`/`order` 等)不引号化(`quote()` 加保留字集合)
+- `SubqueryAlias` 别名为 Java null 时生成 `AS null`
+- FROM 聚合子查询时外层投影被丢(`visitQuerySpecification` 的 `instanceof Aggregate` 短路误伤,改显式 `aggregated` 标志)
+- `LIKE`/`RLIKE` 生成不存在的 `like()` 函数(改 `x LIKE y` / `x REGEXP y` 语法)
 
 `DuckDbSqlGenerator` 的 `emitProject`/`emitAggregate` 会把直接子 `Filter` **内联为自身 WHERE**(不包子查询),否则子查询作用域会丢掉表别名限定(`FROM date_dim AS dt` 在派生表里会让外层 `dt.d_year` 失效)。
 

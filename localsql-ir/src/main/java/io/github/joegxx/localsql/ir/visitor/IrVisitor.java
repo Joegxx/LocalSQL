@@ -62,6 +62,16 @@ public class IrVisitor<R, C> {
     public R visitFunctionCall(FunctionCall e, C ctx) {
         R r = defaultResult(e, ctx);
         for (Expression arg : e.arguments()) r = aggregateResult(r, visit(arg, ctx));
+        if (e.windowSpec() != null) {
+            for (Expression p : e.windowSpec().partitionBy()) r = aggregateResult(r, visit(p, ctx));
+            for (Sort.SortOrder o : e.windowSpec().orderBy()) r = aggregateResult(r, visit(o.expr(), ctx));
+            if (e.windowSpec().frame() != null) {
+                if (e.windowSpec().frame().start().offset() != null)
+                    r = aggregateResult(r, visit(e.windowSpec().frame().start().offset(), ctx));
+                if (e.windowSpec().frame().end() != null && e.windowSpec().frame().end().offset() != null)
+                    r = aggregateResult(r, visit(e.windowSpec().frame().end().offset(), ctx));
+            }
+        }
         return r;
     }
 
@@ -156,6 +166,11 @@ public class IrVisitor<R, C> {
         res = aggregateResult(res, visitRelation(r.child(), ctx));
         for (Expression e : r.groupingExpressions()) res = aggregateResult(res, visit(e, ctx));
         for (Expression e : r.aggregateExpressions()) res = aggregateResult(res, visit(e, ctx));
+        for (Aggregate.GroupingAnalytics ga : r.groupingAnalytics()) {
+            for (List<Expression> set : ga.sets()) {
+                for (Expression e : set) res = aggregateResult(res, visit(e, ctx));
+            }
+        }
         if (r.havingCondition() != null) res = aggregateResult(res, visit(r.havingCondition(), ctx));
         return res;
     }

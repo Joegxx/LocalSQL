@@ -98,7 +98,8 @@ public final class SparkAstBuilder {
         }
         if (having != null && input instanceof Aggregate aggregate) {
             input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
-                    aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()));
+                    aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()),
+                    aggregate.groupingAnalytics());
         } else if (having != null && input != null) {
             input = new Aggregate(input, List.of(), selectItems, exprBuilder.visit(having.booleanExpression()));
         }
@@ -124,16 +125,61 @@ public final class SparkAstBuilder {
 
     private Relation visitAggregate(AggregationClauseContext agg, Relation input, List<Expression> selectItems) {
         List<Expression> grouping = new ArrayList<>();
+        List<Aggregate.GroupingAnalytics> analytics = new ArrayList<>();
         if (agg.groupingExpressions != null) {
             for (ExpressionContext e : agg.groupingExpressions) grouping.add(exprBuilder.visit(e));
+            if (agg.kind != null) {
+                // legacy: GROUP BY a, b WITH ROLLUP / WITH CUBE / GROUPING SETS (...)
+                int kind = agg.kind.getType();
+                if (kind == SqlBaseParser.ROLLUP) analytics.add(Aggregate.GroupingAnalytics.rollup(grouping));
+                else if (kind == SqlBaseParser.CUBE) analytics.add(Aggregate.GroupingAnalytics.cube(grouping));
+                else analytics.add(Aggregate.GroupingAnalytics.groupingSets(visitGroupingSets(agg.groupingSet())));
+                if (!analytics.isEmpty()) grouping = new ArrayList<>();
+            }
         }
         if (agg.groupingExpressionsWithGroupingAnalytics != null) {
             for (GroupByClauseContext gbc : agg.groupingExpressionsWithGroupingAnalytics) {
                 if (gbc.expression() != null) grouping.add(exprBuilder.visit(gbc.expression()));
-                else throw new UnsupportedOperationException("ROLLUP/CUBE/GROUPING SETS not in MVP");
+                else analytics.add(visitGroupingAnalytics(gbc.groupingAnalytics()));
             }
         }
-        return new Aggregate(input, grouping, selectItems);
+        return new Aggregate(input, grouping, selectItems, null, analytics);
+    }
+
+    private Aggregate.GroupingAnalytics visitGroupingAnalytics(GroupingAnalyticsContext ga) {
+        if (ga.ROLLUP() != null || ga.CUBE() != null) {
+            List<Expression> exprs = new ArrayList<>();
+            for (GroupingSetContext gs : ga.groupingSet()) {
+                if (gs.expression() == null || gs.expression().size() != 1) {
+                    throw new UnsupportedOperationException("ROLLUP/CUBE element must be a single expression list");
+                }
+                exprs.add(exprBuilder.visit(gs.expression(0)));
+            }
+            return ga.ROLLUP() != null
+                    ? Aggregate.GroupingAnalytics.rollup(exprs)
+                    : Aggregate.GroupingAnalytics.cube(exprs);
+        }
+        // GROUPING SETS '(' groupingElement (',' groupingElement)* ')'
+        List<List<Expression>> sets = new ArrayList<>();
+        for (GroupingElementContext ge : ga.groupingElement()) {
+            if (ge.groupingAnalytics() != null) {
+                throw new UnsupportedOperationException("Nested grouping analytics not in MVP");
+            }
+            sets.add(visitGroupingSet(ge.groupingSet()));
+        }
+        return Aggregate.GroupingAnalytics.groupingSets(sets);
+    }
+
+    private List<List<Expression>> visitGroupingSets(List<GroupingSetContext> sets) {
+        List<List<Expression>> out = new ArrayList<>();
+        for (GroupingSetContext gs : sets) out.add(visitGroupingSet(gs));
+        return out;
+    }
+
+    private List<Expression> visitGroupingSet(GroupingSetContext gs) {
+        List<Expression> exprs = new ArrayList<>();
+        if (gs.expression() != null) for (ExpressionContext e : gs.expression()) exprs.add(exprBuilder.visit(e));
+        return exprs;
     }
 
     private Relation visitFrom(FromClauseContext from) {

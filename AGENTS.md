@@ -124,7 +124,7 @@ Generator 永远不用查 Catalog。
 
 - DDL 未实现(CREATE / ALTER / DROP 是 Phase 2)
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
-- ROLLUP / CUBE / GROUPING SETS 抛 `UnsupportedOperationException`(在 `SparkAstBuilder.visitAggregate`)
+- 命名窗口(`WINDOW w AS ...`)和聚合 `FILTER` 子句抛 `UnsupportedOperationException`
 - Catalog 当前是内存 `LinkedHashMap`(MVP);后续换 DuckDB-backed store,**不改调用方**
 
 ## TPC-DS 统一测试
@@ -133,7 +133,7 @@ Generator 永远不用查 Catalog。
 - `localsql-thrift/src/test/resources/tpcds-v2.7.0/` - 32 个查询,apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0`
 - `localsql-thrift/src/test/resources/tpcds/` - 103 个查询,apache/spark `master` 的 `sql/core/src/test/resources/tpcds`(完整 q1..q99 + a/b 变体)
 
-MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过,其余必须翻译成功,防止回归。当前跳过:ROLLUP/CUBE/GROUPING SETS 的 12 个查询 + 窗口函数(OVER)的 22 个查询。**窗口函数和 ROLLUP 显式抛 `UnsupportedOperationException`**,禁止静默丢弃 OVER 子句产生错误语义。
+MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过(当前为空,136/136 全部翻译成功),防止回归。窗口函数(`OVER` 含 `ROWS BETWEEN` frame)和 ROLLUP/CUBE/GROUPING SETS 已实现:`FunctionCall.windowSpec`(可变,挂 `WindowSpec`)、`Aggregate.groupingAnalytics`(`ROLLUP`/`CUBE`/`GROUPING SETS`,含 legacy `WITH ROLLUP` 形式)。命名窗口(`WINDOW w AS ...`)和聚合 `FILTER` 子句仍显式抛 `UnsupportedOperationException`。
 
 ### 分层测试架构
 

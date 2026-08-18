@@ -7,6 +7,7 @@ public final class FunctionCall extends Expression {
     private String name;
     private final List<Expression> arguments;
     private final boolean distinct;
+    private WindowSpec windowSpec;
 
     public FunctionCall(String name, List<Expression> arguments) {
         this(name, arguments, false);
@@ -22,9 +23,12 @@ public final class FunctionCall extends Expression {
     public void rename(String newName) { this.name = newName; }
     public List<Expression> arguments() { return arguments; }
     public boolean distinct() { return distinct; }
+    public WindowSpec windowSpec() { return windowSpec; }
+    public void setWindowSpec(WindowSpec spec) { this.windowSpec = spec; }
 
     @Override
     public String toString() {
-        return name + "(" + (distinct ? "DISTINCT " : "") + String.join(", ", arguments.stream().map(Object::toString).toList()) + ")";
+        return name + "(" + (distinct ? "DISTINCT " : "") + String.join(", ", arguments.stream().map(Object::toString).toList()) + ")"
+                + (windowSpec != null ? " " + windowSpec : "");
     }
 }

@@ -133,16 +133,56 @@ public final class DuckDbSqlGenerator {
             sb.append(" WHERE ");
             emitExpr(inlinedFilter, sb);
         }
-        if (!a.groupingExpressions().isEmpty()) {
+        boolean hasGroupBy = !a.groupingExpressions().isEmpty() || !a.groupingAnalytics().isEmpty();
+        if (hasGroupBy) {
             sb.append(" GROUP BY ");
-            for (int i = 0; i < a.groupingExpressions().size(); i++) {
-                if (i > 0) sb.append(", ");
-                emitExpr(a.groupingExpressions().get(i), sb);
+            boolean first = true;
+            for (Expression g : a.groupingExpressions()) {
+                if (!first) sb.append(", ");
+                emitExpr(g, sb);
+                first = false;
+            }
+            for (Aggregate.GroupingAnalytics ga : a.groupingAnalytics()) {
+                if (!first) sb.append(", ");
+                emitGroupingAnalytics(ga, sb);
+                first = false;
             }
         }
         if (a.havingCondition() != null) {
             sb.append(" HAVING ");
             emitExpr(a.havingCondition(), sb);
+        }
+    }
+
+    private void emitGroupingAnalytics(Aggregate.GroupingAnalytics ga, StringBuilder sb) {
+        switch (ga.kind()) {
+            case ROLLUP -> {
+                sb.append("ROLLUP(");
+                appendExprList(ga.sets().get(0), sb);
+                sb.append(")");
+            }
+            case CUBE -> {
+                sb.append("CUBE(");
+                appendExprList(ga.sets().get(0), sb);
+                sb.append(")");
+            }
+            case GROUPING_SETS -> {
+                sb.append("GROUPING SETS(");
+                for (int i = 0; i < ga.sets().size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("(");
+                    appendExprList(ga.sets().get(i), sb);
+                    sb.append(")");
+                }
+                sb.append(")");
+            }
+        }
+    }
+
+    private void appendExprList(List<Expression> exprs, StringBuilder sb) {
+        for (int i = 0; i < exprs.size(); i++) {
+            if (i > 0) sb.append(", ");
+            emitExpr(exprs.get(i), sb);
         }
     }
 
@@ -339,6 +379,16 @@ public final class DuckDbSqlGenerator {
 
     private void emitFunctionCall(FunctionCall f, StringBuilder sb) {
         String name = f.name().toLowerCase();
+        if (name.equals("between") && f.arguments().size() == 3) {
+            sb.append("(");
+            emitExpr(f.arguments().get(0), sb);
+            sb.append(" BETWEEN ");
+            emitExpr(f.arguments().get(1), sb);
+            sb.append(" AND ");
+            emitExpr(f.arguments().get(2), sb);
+            sb.append(")");
+            return;
+        }
         String mapped = FN_MAP.getOrDefault(name, name);
         sb.append(mapped).append("(");
         if (f.distinct()) sb.append("DISTINCT ");
@@ -347,6 +397,50 @@ public final class DuckDbSqlGenerator {
             emitExpr(f.arguments().get(i), sb);
         }
         sb.append(")");
+        if (f.windowSpec() != null) emitWindowSpec(f.windowSpec(), sb);
+    }
+
+    private void emitWindowSpec(WindowSpec w, StringBuilder sb) {
+        sb.append(" OVER (");
+        boolean first = true;
+        if (!w.partitionBy().isEmpty()) {
+            sb.append("PARTITION BY ");
+            for (int i = 0; i < w.partitionBy().size(); i++) {
+                if (i > 0) sb.append(", ");
+                emitExpr(w.partitionBy().get(i), sb);
+            }
+            first = false;
+        }
+        if (!w.orderBy().isEmpty()) {
+            if (!first) sb.append(" ");
+            sb.append("ORDER BY ");
+            for (int i = 0; i < w.orderBy().size(); i++) {
+                if (i > 0) sb.append(", ");
+                Sort.SortOrder o = w.orderBy().get(i);
+                emitExpr(o.expr(), sb);
+                sb.append(o.ascending() ? " ASC" : " DESC");
+                sb.append(o.nullsLast() ? " NULLS LAST" : " NULLS FIRST");
+            }
+            first = false;
+        }
+        if (w.frame() != null) {
+            if (!first) sb.append(" ");
+            sb.append(w.frame().rows() ? "ROWS" : "RANGE").append(" BETWEEN ");
+            emitFrameBound(w.frame().start(), sb);
+            sb.append(" AND ");
+            emitFrameBound(w.frame().end() != null ? w.frame().end() : WindowSpec.Bound.currentRow(), sb);
+        }
+        sb.append(")");
+    }
+
+    private void emitFrameBound(WindowSpec.Bound b, StringBuilder sb) {
+        switch (b.type()) {
+            case UNBOUNDED_PRECEDING -> sb.append("UNBOUNDED PRECEDING");
+            case UNBOUNDED_FOLLOWING -> sb.append("UNBOUNDED FOLLOWING");
+            case CURRENT_ROW -> sb.append("CURRENT ROW");
+            case PRECEDING -> { emitExpr(b.offset(), sb); sb.append(" PRECEDING"); }
+            case FOLLOWING -> { emitExpr(b.offset(), sb); sb.append(" FOLLOWING"); }
+        }
     }
 
     private void emitCaseWhen(CaseWhen cw, StringBuilder sb) {

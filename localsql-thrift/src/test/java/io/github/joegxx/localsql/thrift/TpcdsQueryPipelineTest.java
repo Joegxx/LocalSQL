@@ -41,20 +41,6 @@ class TpcdsQueryPipelineTest {
 
     /** Queries that exercise features the MVP has not implemented yet. */
     private static final List<String> UNSUPPORTED = List.of(
-            // Window functions (OVER) - SparkExpressionBuilder throws
-            "tpcds-v2.7.0/q12.sql", "tpcds-v2.7.0/q20.sql", "tpcds-v2.7.0/q36a.sql",
-            "tpcds-v2.7.0/q47.sql", "tpcds-v2.7.0/q49.sql", "tpcds-v2.7.0/q51a.sql",
-            "tpcds-v2.7.0/q57.sql", "tpcds-v2.7.0/q67a.sql", "tpcds-v2.7.0/q70a.sql",
-            "tpcds-v2.7.0/q86a.sql", "tpcds-v2.7.0/q98.sql",
-            "tpcds/q12.sql", "tpcds/q20.sql", "tpcds/q44.sql", "tpcds/q47.sql",
-            "tpcds/q49.sql", "tpcds/q51.sql", "tpcds/q53.sql", "tpcds/q57.sql",
-            "tpcds/q63.sql", "tpcds/q89.sql", "tpcds/q98.sql",
-
-            // ROLLUP / CUBE / GROUPING SETS (SparkAstBuilder.visitAggregate throws)
-            "tpcds-v2.7.0/q22.sql",
-            "tpcds/q14a.sql", "tpcds/q18.sql", "tpcds/q22.sql", "tpcds/q27.sql",
-            "tpcds/q36.sql", "tpcds/q5.sql", "tpcds/q67.sql", "tpcds/q70.sql",
-            "tpcds/q77.sql", "tpcds/q80.sql", "tpcds/q86.sql"
     );
 
     private static final SparkSqlParser parser = new SparkSqlParser();

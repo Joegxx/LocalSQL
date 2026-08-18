@@ -2,6 +2,7 @@ package io.github.joegxx.localsql.spark;
 
 import io.github.joegxx.localsql.ir.expression.*;
 import io.github.joegxx.localsql.ir.relation.Relation;
+import io.github.joegxx.localsql.ir.relation.Sort;
 import io.github.joegxx.localsql.ir.type.DataType;
 import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -146,9 +147,6 @@ final class SparkExpressionBuilder {
             return new Cast(child, t);
         }
         if (ctx instanceof FunctionCallContext c) {
-            if (c.windowSpec() != null) {
-                throw new UnsupportedOperationException("Window functions (OVER) not in MVP");
-            }
             if (c.FILTER() != null) {
                 throw new UnsupportedOperationException("Aggregate FILTER clause not in MVP");
             }
@@ -156,7 +154,9 @@ final class SparkExpressionBuilder {
             List<Expression> args = new ArrayList<>();
             if (c.argument != null) for (ExpressionContext e : c.argument) args.add(visit(e));
             boolean distinct = c.setQuantifier() != null && c.setQuantifier().DISTINCT() != null;
-            return new FunctionCall(name, args, distinct);
+            FunctionCall call = new FunctionCall(name, args, distinct);
+            if (c.windowSpec() != null) call.setWindowSpec(visitWindowSpec(c.windowSpec()));
+            return call;
         }
         if (ctx instanceof SearchedCaseContext c) return buildCase(c.whenClause(), c.elseExpression != null ? visit(c.elseExpression) : null, null);
         if (ctx instanceof SimpleCaseContext c) return buildCase(c.whenClause(), c.elseExpression != null ? visit(c.elseExpression) : null, visit(c.value));
@@ -309,6 +309,48 @@ final class SparkExpressionBuilder {
         if (n instanceof TinyIntLiteralContext t) return Literal.ofInt(Long.parseLong(t.TINYINT_LITERAL().getText().replaceFirst("[Yy]$", "")));
         if (n instanceof ExponentLiteralContext e) return Literal.ofDouble(Double.parseDouble(e.EXPONENT_VALUE().getText()));
         return Literal.ofNull();
+    }
+
+    private WindowSpec visitWindowSpec(WindowSpecContext ctx) {
+        if (ctx instanceof WindowRefContext) {
+            throw new UnsupportedOperationException("Named window reference not in MVP");
+        }
+        WindowDefContext def = (WindowDefContext) ctx;
+        List<Expression> partitionBy = new ArrayList<>();
+        for (ExpressionContext e : def.partition) partitionBy.add(visit(e));
+        List<Sort.SortOrder> orderBy = new ArrayList<>();
+        if (def.sortItem() != null) {
+            for (SortItemContext si : def.sortItem()) orderBy.add(sortItem(si));
+        }
+        WindowSpec.Frame frame = def.windowFrame() != null ? visitWindowFrame(def.windowFrame()) : null;
+        return new WindowSpec(partitionBy, orderBy, frame);
+    }
+
+    private WindowSpec.Frame visitWindowFrame(WindowFrameContext ctx) {
+        boolean rows = ctx.frameType.getType() == SqlBaseParser.ROWS;
+        WindowSpec.Bound start = visitFrameBound(ctx.start);
+        WindowSpec.Bound end = ctx.end != null ? visitFrameBound(ctx.end) : null;
+        return new WindowSpec.Frame(rows, start, end);
+    }
+
+    private WindowSpec.Bound visitFrameBound(FrameBoundContext ctx) {
+        if (ctx.UNBOUNDED() != null) {
+            return ctx.boundType.getType() == SqlBaseParser.PRECEDING
+                    ? WindowSpec.Bound.unboundedPreceding() : WindowSpec.Bound.unboundedFollowing();
+        }
+        if (ctx.CURRENT() != null) return WindowSpec.Bound.currentRow();
+        Expression offset = visit(ctx.expression());
+        return new WindowSpec.Bound(
+                ctx.boundType.getType() == SqlBaseParser.PRECEDING
+                        ? WindowSpec.Bound.Type.PRECEDING : WindowSpec.Bound.Type.FOLLOWING,
+                offset);
+    }
+
+    private Sort.SortOrder sortItem(SortItemContext si) {
+        Expression e = visit(si.expression());
+        boolean asc = si.ordering == null || si.ordering.getType() == SqlBaseParser.ASC;
+        boolean nullsLast = si.nullOrder == null || si.nullOrder.getType() == SqlBaseParser.LAST;
+        return new Sort.SortOrder(e, asc, nullsLast);
     }
 
     static List<String> parts(QualifiedNameContext q) {

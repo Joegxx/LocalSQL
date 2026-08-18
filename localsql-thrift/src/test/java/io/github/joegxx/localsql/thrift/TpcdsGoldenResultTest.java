@@ -63,7 +63,24 @@ class TpcdsGoldenResultTest {
                 // q15: d_qoy=2 AND d_year=2001; zip-prefix OR state OR price>500
                 new GoldenCase("q15", List.of(
                         List.of("85669", "400.0"),
-                        List.of("99999", "700.0"))));
+                        List.of("99999", "700.0"))),
+                // q22: GROUP BY ROLLUP(product, brand, class, category) over inventory rows
+                // qoh values: item10 -> (10,20,30) avg 20.0; item11 -> 40 avg 40.0; grand 25.0
+                new GoldenCase("q22", List.of(
+                        List.of("P1", "brandA", "B1", "Books", "20.0"),
+                        java.util.Arrays.asList("P1", "brandA", "B1", null, "20.0"),
+                        java.util.Arrays.asList("P1", "brandA", null, null, "20.0"),
+                        java.util.Arrays.asList("P1", null, null, null, "20.0"),
+                        java.util.Arrays.asList(null, null, null, null, "25.0"),
+                        List.of("P2", "brandB", "B2", "Sports", "40.0"),
+                        java.util.Arrays.asList("P2", "brandB", "B2", null, "40.0"),
+                        java.util.Arrays.asList("P2", "brandB", null, null, "40.0"),
+                        java.util.Arrays.asList("P2", null, null, null, "40.0"))),
+                // q98: window revenueratio = sum*100 / sum(sum) OVER (PARTITION BY i_class);
+                // one item per class -> ratio always 100.0
+                new GoldenCase("q98", List.of(
+                        List.of("descA", "Books", "B1", "10.0", "37.75", "100.0"),
+                        List.of("descB", "Sports", "B2", "20.0", "5.0", "100.0"))));
     }
 
     static List<String> caseIds() {

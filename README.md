@@ -4,6 +4,10 @@
 
 Run Spark SQL locally without deploying Spark, Hadoop, or Hive.
 
+> 使用指南（构建、启动、JDBC 客户端连接、SQL 支持范围、FAQ）：[docs/usage.md](docs/usage.md)
+>
+> User guide (build, run, JDBC client setup, SQL coverage, FAQ): [docs/usage.md](docs/usage.md)（中文）
+
 LocalSQL 是一个基于 Java 21 的嵌入式 SQL Runtime。它使用 Spark SQL 3.2.0 语法解析查询，将查询转换为独立的 Common IR，再生成 DuckDB SQL 并在进程内执行。LocalSQL 同时提供 HiveServer2 Thrift 接口，可供 JDBC 客户端和数据库 IDE 连接。
 
 LocalSQL is a Java 21 embedded SQL runtime. It parses Spark SQL 3.2.0 syntax, converts queries into an independent Common IR, generates DuckDB SQL, and executes it in-process. It also exposes a HiveServer2 Thrift endpoint for JDBC clients and database IDEs.

@@ -1,0 +1,30 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsMiniData.java
+  s_b33fc4f71998f0::t_dd21b5ba34cc84 1-136
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsGoldenResultTest.java
+  s_b33fc4f71998f0::t_63b3206ffcc0ba 1-126
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_9e5641225cb9ef 123-129,131-135
+  s_b33fc4f71998f0::t_1eba78565bf371 58-66
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftQueryRunner.java
+  s_b33fc4f71998f0::t_6387667cbbe2c8 24,29-30,33,39,47,50-51,61,64,69,81,89
+  s_b33fc4f71998f0::t_e967923fb8d249 1-23,25-28,31-32,34-38,40-46,48-49,52-60,62-63,65-68,70-80,82-87,90-107
+  s_b33fc4f71998f0::t_4eeed07bce2f33 88
+AGENTS.md
+  s_b33fc4f71998f0::t_4d5c292dd2ae28 138-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "fffc89b35aacd6dcc76e004b3fdf13ade95259bb",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

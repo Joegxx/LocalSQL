@@ -1,0 +1,136 @@
+package io.github.joegxx.localsql.thrift;
+
+import io.github.joegxx.localsql.catalog.CatalogService;
+import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
+import io.github.joegxx.localsql.ir.type.FractionalType;
+import io.github.joegxx.localsql.ir.type.IntegralType;
+import io.github.joegxx.localsql.ir.type.StringType;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Deterministic mini TPC-DS dataset. Small enough to derive expected results by
+ * hand (Spark semantics), with deliberate distractor rows so joins/filters are
+ * actually exercised. Registers physical DuckDB tables and catalog metadata.
+ */
+final class TpcdsMiniData {
+
+    static void register(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        dateDim(catalog, executor);
+        item(catalog, executor);
+        storeSales(catalog, executor);
+        customer(catalog, executor);
+        customerAddress(catalog, executor);
+        catalogSales(catalog, executor);
+    }
+
+    private static void dateDim(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("date_dim",
+                List.of(new DuckDbExecutor.ColDef("d_date_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("d_year", "INT"),
+                        new DuckDbExecutor.ColDef("d_moy", "INT"),
+                        new DuckDbExecutor.ColDef("d_qoy", "INT")),
+                List.<List<Object>>of(
+                        List.of(1L, 1999, 11, 4),
+                        List.of(2L, 2000, 11, 4),
+                        List.of(3L, 2001, 2, 2),
+                        List.of(4L, 2000, 12, 4)));
+        catalog.registerTable("default", "date_dim", "TABLE",
+                List.of(new CatalogService.ColumnDef("d_date_sk", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("d_year", IntegralType.INT, true, null),
+                        new CatalogService.ColumnDef("d_moy", IntegralType.INT, true, null),
+                        new CatalogService.ColumnDef("d_qoy", IntegralType.INT, true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private static void item(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("item",
+                List.of(new DuckDbExecutor.ColDef("i_item_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("i_brand_id", "INT"),
+                        new DuckDbExecutor.ColDef("i_brand", "VARCHAR"),
+                        new DuckDbExecutor.ColDef("i_manufact_id", "INT"),
+                        new DuckDbExecutor.ColDef("i_category_id", "INT"),
+                        new DuckDbExecutor.ColDef("i_category", "VARCHAR"),
+                        new DuckDbExecutor.ColDef("i_manager_id", "INT")),
+                List.<List<Object>>of(
+                        List.of(10L, 100, "brandA", 128, 1, "Books", 1),
+                        List.of(11L, 101, "brandB", 128, 2, "Sports", 1),
+                        List.of(12L, 102, "brandC", 200, 3, "Home", 2)));
+        catalog.registerTable("default", "item", "TABLE",
+                List.of(new CatalogService.ColumnDef("i_item_sk", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("i_brand_id", IntegralType.INT, true, null),
+                        new CatalogService.ColumnDef("i_brand", new StringType(), true, null),
+                        new CatalogService.ColumnDef("i_manufact_id", IntegralType.INT, true, null),
+                        new CatalogService.ColumnDef("i_category_id", IntegralType.INT, true, null),
+                        new CatalogService.ColumnDef("i_category", new StringType(), true, null),
+                        new CatalogService.ColumnDef("i_manager_id", IntegralType.INT, true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private static void storeSales(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("store_sales",
+                List.of(new DuckDbExecutor.ColDef("ss_sold_date_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("ss_item_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("ss_ext_sales_price", "DOUBLE")),
+                List.<List<Object>>of(
+                        List.of(1L, 10L, 10.50),
+                        List.of(1L, 10L, 20.00),
+                        List.of(1L, 11L, 5.00),
+                        List.of(2L, 10L, 7.25),
+                        List.of(4L, 12L, 99.99),   // d_moy=12 distractor
+                        List.of(3L, 10L, 300.00))); // d_moy=2 distractor
+        catalog.registerTable("default", "store_sales", "TABLE",
+                List.of(new CatalogService.ColumnDef("ss_sold_date_sk", IntegralType.BIGINT, true, null),
+                        new CatalogService.ColumnDef("ss_item_sk", IntegralType.BIGINT, true, null),
+                        new CatalogService.ColumnDef("ss_ext_sales_price", FractionalType.DOUBLE, true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private static void customer(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("customer",
+                List.of(new DuckDbExecutor.ColDef("c_customer_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("c_current_addr_sk", "BIGINT")),
+                List.<List<Object>>of(
+                        List.of(1L, 101L),
+                        List.of(2L, 102L)));
+        catalog.registerTable("default", "customer", "TABLE",
+                List.of(new CatalogService.ColumnDef("c_customer_sk", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("c_current_addr_sk", IntegralType.BIGINT, true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private static void customerAddress(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("customer_address",
+                List.of(new DuckDbExecutor.ColDef("ca_address_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("ca_zip", "VARCHAR"),
+                        new DuckDbExecutor.ColDef("ca_state", "VARCHAR")),
+                List.<List<Object>>of(
+                        List.of(101L, "85669", "NY"),
+                        List.of(102L, "99999", "CA")));
+        catalog.registerTable("default", "customer_address", "TABLE",
+                List.of(new CatalogService.ColumnDef("ca_address_sk", IntegralType.BIGINT, false, null),
+                        new CatalogService.ColumnDef("ca_zip", new StringType(), true, null),
+                        new CatalogService.ColumnDef("ca_state", new StringType(), true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private static void catalogSales(CatalogService catalog, DuckDbExecutor executor) throws Exception {
+        executor.registerTable("catalog_sales",
+                List.of(new DuckDbExecutor.ColDef("cs_sold_date_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("cs_bill_customer_sk", "BIGINT"),
+                        new DuckDbExecutor.ColDef("cs_sales_price", "DOUBLE")),
+                List.<List<Object>>of(
+                        List.of(3L, 1L, 400.00),  // matches zip-prefix branch
+                        List.of(3L, 2L, 600.00),  // matches state branch (and >500)
+                        List.of(3L, 2L, 100.00),  // matches state branch
+                        List.of(1L, 1L, 700.00))); // >500 but wrong date (distractor)
+        catalog.registerTable("default", "catalog_sales", "TABLE",
+                List.of(new CatalogService.ColumnDef("cs_sold_date_sk", IntegralType.BIGINT, true, null),
+                        new CatalogService.ColumnDef("cs_bill_customer_sk", IntegralType.BIGINT, true, null),
+                        new CatalogService.ColumnDef("cs_sales_price", FractionalType.DOUBLE, true, null)),
+                null, "duckdb", null, Map.of(), null);
+    }
+
+    private TpcdsMiniData() {}
+}

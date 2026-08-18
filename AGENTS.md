@@ -135,6 +135,19 @@ Generator 永远不用查 Catalog。
 
 MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过,其余必须翻译成功,防止回归。当前跳过:ROLLUP/CUBE/GROUPING SETS 的 12 个查询 + 窗口函数(OVER)的 22 个查询。**窗口函数和 ROLLUP 显式抛 `UnsupportedOperationException`**,禁止静默丢弃 OVER 子句产生错误语义。
 
+### 分层测试架构
+
+- **L1 翻译回归** - `TpcdsQueryPipelineTest`:parse -> analyze -> rewrite -> generate,不执行
+- **L3 结果一致性** - `TpcdsGoldenResultTest`:走真实 Thrift 端点(OpenSession -> ExecuteStatement -> FetchResults)执行 TPC-DS 查询,结果与 Spark 语义的 golden 期望对比
+
+L3 组件(全部 DuckDB 自举):
+- `ThriftQueryRunner` - Thrift 客户端封装,启动 in-process server 并执行查询取回行
+- `TpcdsMiniData` - 24 张表的确定性 mini 数据集(当前覆盖 6 张),带干扰行;同时注册 Catalog 元数据 + DuckDB 物理表
+- golden 期望 - 按 Spark 语义对 mini 数据**人工校准**固化在测试里(未来可接真 Spark 环境刷新)
+- 对比 - 实际/期望都灌成 DuckDB VARCHAR 表(`actual_qN`/`expected_qN`),双向 `EXCEPT ALL` 计数为 0 即通过(严格多重集相等)
+
+`DuckDbSqlGenerator` 的 `emitProject`/`emitAggregate` 会把直接子 `Filter` **内联为自身 WHERE**(不包子查询),否则子查询作用域会丢掉表别名限定(`FROM date_dim AS dt` 在派生表里会让外层 `dt.d_year` 失效)。
+
 ## MVP 不做什么(不要主动加)
 
 - optimizer / cost model / statistics

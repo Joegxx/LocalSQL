@@ -55,7 +55,15 @@ public final class DuckDbSqlGenerator {
                 emitExpr(p.projectList().get(i), sb);
             }
         }
-        if (!(p.child() instanceof Values)) {
+        if (p.child() instanceof Filter f && !(f.child() instanceof Values)) {
+            // Inline the filter instead of wrapping it in a subquery: wrapping would
+            // drop alias qualifiers (FROM t AS x inside a derived table makes x.x
+            // invisible to the outer select list).
+            sb.append(" FROM ");
+            emitChildSource(f.child(), sb);
+            sb.append(" WHERE ");
+            emitExpr(f.condition(), sb);
+        } else if (!(p.child() instanceof Values)) {
             sb.append(" FROM ");
             emitChildSource(p.child(), sb);
         }
@@ -112,8 +120,19 @@ public final class DuckDbSqlGenerator {
             if (i > 0) sb.append(", ");
             emitExpr(out.get(i), sb);
         }
+        Relation src = a.child();
+        Expression inlinedFilter = null;
+        if (src instanceof Filter f && !(f.child() instanceof Values)) {
+            // Inline the filter to keep alias qualifiers visible (see emitProject).
+            inlinedFilter = f.condition();
+            src = f.child();
+        }
         sb.append(" FROM ");
-        emitChildSource(a.child(), sb);
+        emitChildSource(src, sb);
+        if (inlinedFilter != null) {
+            sb.append(" WHERE ");
+            emitExpr(inlinedFilter, sb);
+        }
         if (!a.groupingExpressions().isEmpty()) {
             sb.append(" GROUP BY ");
             for (int i = 0; i < a.groupingExpressions().size(); i++) {

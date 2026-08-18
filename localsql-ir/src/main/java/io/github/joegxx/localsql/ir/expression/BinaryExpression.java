@@ -5,10 +5,13 @@ import java.util.Objects;
 
 public final class BinaryExpression extends Expression {
     public enum Op {
-        ADD("+"), SUB("-"), MUL("*"), DIV("/"), MOD("%"),
+        ADD("+"), SUB("-"), MUL("*"), DIV("/"), INT_DIV("//"), MOD("%"),
         EQ("="), NEQ("<>"), LT("<"), LTE("<="), GT(">"), GTE(">="),
         AND("AND"), OR("OR"),
-        STRING_CONCAT("||");
+        STRING_CONCAT("||"),
+        BIT_AND("&"), BIT_OR("|"), BIT_XOR("xor"),
+        // Spark null-safe equality <=>, SQL standard IS NOT DISTINCT FROM
+        EQ_NULL_SAFE("IS NOT DISTINCT FROM");
 
         private final String symbol;
         Op(String s) { this.symbol = s; }

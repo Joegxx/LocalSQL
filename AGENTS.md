@@ -124,7 +124,8 @@ Generator 永远不用查 Catalog。
 
 - DDL 未实现(CREATE / ALTER / DROP 是 Phase 2)
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
-- 命名窗口(`WINDOW w AS ...`)和聚合 `FILTER` 子句抛 `UnsupportedOperationException`
+- 命名窗口(`WINDOW w AS ...`)、聚合 `FILTER` 子句、`NATURAL JOIN`(需要同名列解析)抛 `UnsupportedOperationException`
+- 位运算/整数除法/`<=>`/`JOIN USING` 已正确映射(`INT_DIV` -> `//`、`BIT_XOR` -> `xor()`、`EQ_NULL_SAFE` -> `IS NOT DISTINCT FROM`)
 - Catalog 当前是内存 `LinkedHashMap`(MVP);后续换 DuckDB-backed store,**不改调用方**
 
 ## TPC-DS 统一测试

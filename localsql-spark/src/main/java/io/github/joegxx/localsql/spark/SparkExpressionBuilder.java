@@ -111,7 +111,7 @@ final class SparkExpressionBuilder {
             case SqlBaseParser.LTE -> BinaryExpression.Op.LTE;
             case SqlBaseParser.GT -> BinaryExpression.Op.GT;
             case SqlBaseParser.GTE -> BinaryExpression.Op.GTE;
-            case SqlBaseParser.NSEQ -> BinaryExpression.Op.EQ;
+            case SqlBaseParser.NSEQ -> BinaryExpression.Op.EQ_NULL_SAFE;
             default -> throw new IllegalStateException("Unsupported comparison: " + op.getText());
         };
     }
@@ -123,11 +123,11 @@ final class SparkExpressionBuilder {
             case SqlBaseParser.ASTERISK -> BinaryExpression.Op.MUL;
             case SqlBaseParser.SLASH -> BinaryExpression.Op.DIV;
             case SqlBaseParser.PERCENT -> BinaryExpression.Op.MOD;
-            case SqlBaseParser.DIV -> BinaryExpression.Op.DIV;
+            case SqlBaseParser.DIV -> BinaryExpression.Op.INT_DIV;
             case SqlBaseParser.CONCAT_PIPE -> BinaryExpression.Op.STRING_CONCAT;
-            case SqlBaseParser.AMPERSAND -> BinaryExpression.Op.MUL;
-            case SqlBaseParser.HAT -> BinaryExpression.Op.MUL;
-            case SqlBaseParser.PIPE -> BinaryExpression.Op.STRING_CONCAT;
+            case SqlBaseParser.AMPERSAND -> BinaryExpression.Op.BIT_AND;
+            case SqlBaseParser.HAT -> BinaryExpression.Op.BIT_XOR;
+            case SqlBaseParser.PIPE -> BinaryExpression.Op.BIT_OR;
             default -> throw new IllegalStateException("Unsupported arithmetic op: " + t);
         };
     }

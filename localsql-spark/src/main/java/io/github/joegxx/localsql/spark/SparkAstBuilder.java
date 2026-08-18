@@ -196,7 +196,7 @@ public final class SparkAstBuilder {
         Relation left = visitRelation(from.relation(0));
         for (int i = 1; i < from.relation().size(); i++) {
             Relation right = visitRelation(from.relation(i));
-            left = new Join(left, right, Join.JoinType.CROSS, null, false);
+            left = new Join(left, right, Join.JoinType.CROSS, null, List.of());
         }
         return left;
     }
@@ -213,14 +213,25 @@ public final class SparkAstBuilder {
         Relation right = visitRelationPrimary(jr.right);
         Join.JoinType jt = Join.JoinType.INNER;
         if (jr.joinType() != null) jt = mapJoinType(jr.joinType());
-        if (jr.NATURAL() != null) jt = Join.JoinType.CROSS;
-        Expression cond = null;
-        boolean using = false;
-        if (jr.joinCriteria() != null) {
-            if (jr.joinCriteria().ON() != null) cond = exprBuilder.visit(jr.joinCriteria().booleanExpression());
-            else using = true;
+        if (jr.NATURAL() != null) {
+            // NATURAL join needs schema analysis to find common columns; the
+            // MVP has no column-resolution for this, so refuse explicitly
+            // instead of silently degrading to a cartesian product.
+            throw new UnsupportedOperationException("NATURAL JOIN not supported: requires common-column resolution");
         }
-        return new Join(left, right, jt, cond, using);
+        Expression cond = null;
+        List<String> usingColumns = List.of();
+        if (jr.joinCriteria() != null) {
+            if (jr.joinCriteria().ON() != null) {
+                cond = exprBuilder.visit(jr.joinCriteria().booleanExpression());
+            } else {
+                usingColumns = new ArrayList<>();
+                for (var id : jr.joinCriteria().identifierList().identifierSeq().ident) {
+                    usingColumns.add(SparkExpressionBuilder.unquote(id.getText()));
+                }
+            }
+        }
+        return new Join(left, right, jt, cond, usingColumns);
     }
 
     private Join.JoinType mapJoinType(JoinTypeContext jt) {

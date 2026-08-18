@@ -92,6 +92,7 @@ class TpcdsConsistencyTest {
             // expected: native DuckDB execution, with Spark backquoted identifiers
             // normalized to DuckDB double quotes
             var nativeRes = runner.executor().execute(normalizeBackquotes(sql));
+            System.out.println(nativeRes);
             expected = stringify(nativeRes.rows());
             cols = nativeRes.columns().size();
         } else {
@@ -103,6 +104,7 @@ class TpcdsConsistencyTest {
         List<List<String>> actual;
         try {
             actual = runner.query(sql);
+            System.out.println(actual);
         } catch (Exception e) {
             fail(relPath + " thrift execution failed: " + e.getMessage());
             return;

@@ -82,7 +82,14 @@ public final class DuckDbSqlGenerator {
         emitChildSource(j.left(), sb);
         sb.append(" ").append(joinKeyword(j.joinType())).append(" ");
         emitChildSource(j.right(), sb);
-        if (j.condition() != null) {
+        if (j.isUsing()) {
+            sb.append(" USING (");
+            for (int i = 0; i < j.usingColumns().size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(quote(j.usingColumns().get(i)));
+            }
+            sb.append(")");
+        } else if (j.condition() != null) {
             sb.append(" ON ");
             emitExpr(j.condition(), sb);
         }
@@ -289,11 +296,26 @@ public final class DuckDbSqlGenerator {
             else sb.append(String.join(".", s.qualifier().stream().map(this::quote).toList())).append(".*");
         }
         else if (e instanceof BinaryExpression b) {
-            sb.append("(");
-            emitExpr(b.left(), sb);
-            sb.append(" ").append(b.op().symbol()).append(" ");
-            emitExpr(b.right(), sb);
-            sb.append(")");
+            if (b.op() == BinaryExpression.Op.BIT_XOR) {
+                // DuckDB's ^ is power-of; bit xor needs the function form
+                sb.append("xor(");
+                emitExpr(b.left(), sb);
+                sb.append(", ");
+                emitExpr(b.right(), sb);
+                sb.append(")");
+            } else if (b.op() == BinaryExpression.Op.EQ_NULL_SAFE) {
+                sb.append("(");
+                emitExpr(b.left(), sb);
+                sb.append(" IS NOT DISTINCT FROM ");
+                emitExpr(b.right(), sb);
+                sb.append(")");
+            } else {
+                sb.append("(");
+                emitExpr(b.left(), sb);
+                sb.append(" ").append(b.op().symbol()).append(" ");
+                emitExpr(b.right(), sb);
+                sb.append(")");
+            }
         }
         else if (e instanceof UnaryExpression u) {
             switch (u.op()) {

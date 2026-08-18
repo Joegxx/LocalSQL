@@ -203,4 +203,34 @@ class ThriftServerSmokeTest {
         assertEquals(List.of("name"), result.columns());
         assertEquals(List.of(List.of("alice"), List.of("carol")), result.rows());
     }
+
+    @Test
+    void operatorsBitwiseIntDivAndNullSafeEq() throws Exception {
+        // Spark: 6 & 3 = 2, 6 ^ 3 = 5, 4 | 1 = 5, 5 DIV 2 = 2
+        var bits = server.executeSparkSql("SELECT 6 & 3 AS a, 6 ^ 3 AS b, 4 | 1 AS c, 5 DIV 2 AS d");
+        assertEquals(List.of(List.of(2, 5, 5, 2), List.of(2, 5, 5, 2)).get(0),
+                bits.rows().get(0).stream().map(v -> ((Number) v).intValue()).toList());
+
+        // null-safe equality: NULL <=> NULL is TRUE, 1 <=> NULL is FALSE
+        var nseq = server.executeSparkSql(
+                "SELECT NULL <=> NULL AS a, 1 <=> NULL AS b, 1 <=> 1 AS c FROM users LIMIT 1");
+        assertEquals(List.of(true, false, true), nseq.rows().get(0));
+    }
+
+    @Test
+    void joinUsing() throws Exception {
+        // JOIN ... USING(id): users.id joined against a derived table with matching id
+        var result = server.executeSparkSql(
+                "SELECT u.name, t.cnt FROM users u JOIN (" +
+                        "SELECT id, count(*) AS cnt FROM orders GROUP BY id" +
+                        ") t USING (id) ORDER BY u.name");
+        // users ids 1,2,3; derived ids are order ids 100..102 -> no match
+        assertEquals(List.of(), result.rows());
+
+        var result2 = server.executeSparkSql(
+                "SELECT name, cnt FROM users u JOIN (" +
+                        "SELECT user_id, count(*) AS cnt FROM orders GROUP BY user_id" +
+                        ") t ON u.id = t.user_id ORDER BY name");
+        assertEquals(List.of(List.of("alice", 2L), List.of("bob", 1L)), result2.rows());
+    }
 }

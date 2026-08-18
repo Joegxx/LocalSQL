@@ -1,0 +1,45 @@
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_d9cad98a1494a0 136-137,139-148,157-185
+  s_b33fc4f71998f0::t_a6afd2e3f8f1d7 400-443
+  s_b33fc4f71998f0::t_0c079f6b27605b 382-391
+AGENTS.md
+  s_b33fc4f71998f0::t_cf8d841d6682b9 127
+  s_b33fc4f71998f0::t_26ed695d380d68 136
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_5e5515a99ff599 5
+  s_b33fc4f71998f0::t_b531bb40f6ab66 157-159
+  s_b33fc4f71998f0::t_88096303e0b005 314-355
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsGoldenResultTest.java
+  s_b33fc4f71998f0::t_9daf83b4372ae8 66-70,75,79-83
+  s_b33fc4f71998f0::t_9be6b48c6ba5fa 71-74,76-78
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/WindowSpec.java
+  s_b33fc4f71998f0::t_35c78421ba0874 1-41
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/visitor/IrVisitor.java
+  s_b33fc4f71998f0::t_94d0faac1bff75 65-74
+  s_b33fc4f71998f0::t_e71646599690f3 169-173
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_ff9e0f73b552b7 101-102
+  s_b33fc4f71998f0::t_99e00c2fbac610 128,131-138,143-156,158-160,162-182
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsMiniData.java
+  s_b33fc4f71998f0::t_9f4537c400af9e 26-27,35-37,39-42,47-49,56-59,62,68-70,73-76,79,151-175
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/FunctionCall.java
+  s_b33fc4f71998f0::t_ff64345eeb579d 10,26-27,31-32
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Aggregate.java
+  s_b33fc4f71998f0::t_4fa7ae41351290 9-26,31,34,39-44,49,56,63-64,66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "8ffc514069356f001767d6673aaa919e8ed58d07",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

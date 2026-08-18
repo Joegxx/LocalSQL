@@ -129,7 +129,11 @@ Generator 永远不用查 Catalog。
 
 ## TPC-DS 统一测试
 
-`localsql-thrift/src/test/resources/tpcds-v2.7.0/` 是从 apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0` 拉取的 32 个查询。`TpcdsQueryPipelineTest` 参数化跑每个查询的完整流水线(parse -> analyze -> rewrite -> generate),不执行。MVP 未支持特性的查询进 `UNSUPPORTED` 列表(目前只有 `q22.sql` 的 ROLLUP);其余必须翻译成功,防止回归。
+`TpcdsQueryPipelineTest` 参数化跑每个查询的完整流水线(parse -> analyze -> rewrite -> generate),不执行。两组资源:
+- `localsql-thrift/src/test/resources/tpcds-v2.7.0/` - 32 个查询,apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0`
+- `localsql-thrift/src/test/resources/tpcds/` - 103 个查询,apache/spark `master` 的 `sql/core/src/test/resources/tpcds`(完整 q1..q99 + a/b 变体)
+
+MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过,其余必须翻译成功,防止回归。当前跳过:ROLLUP/CUBE/GROUPING SETS 的 12 个查询 + 窗口函数(OVER)的 22 个查询。**窗口函数和 ROLLUP 显式抛 `UnsupportedOperationException`**,禁止静默丢弃 OVER 子句产生错误语义。
 
 ## MVP 不做什么(不要主动加)
 

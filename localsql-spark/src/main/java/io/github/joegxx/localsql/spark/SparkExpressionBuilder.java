@@ -146,6 +146,12 @@ final class SparkExpressionBuilder {
             return new Cast(child, t);
         }
         if (ctx instanceof FunctionCallContext c) {
+            if (c.windowSpec() != null) {
+                throw new UnsupportedOperationException("Window functions (OVER) not in MVP");
+            }
+            if (c.FILTER() != null) {
+                throw new UnsupportedOperationException("Aggregate FILTER clause not in MVP");
+            }
             String name = c.functionName().getText();
             List<Expression> args = new ArrayList<>();
             if (c.argument != null) for (ExpressionContext e : c.argument) args.add(visit(e));

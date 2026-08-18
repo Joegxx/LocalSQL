@@ -24,8 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Unified TPC-DS pipeline test. Each query from tpcds-v2.7.0 resources is run
- * through the full local pipeline: parse -> IR -> analyze -> rewrite -> DuckDB SQL.
+ * Unified TPC-DS pipeline test. Queries from the Spark repo TPC-DS resources are
+ * run through the full local pipeline: parse -> IR -> analyze -> rewrite -> DuckDB SQL.
+ *
+ * Two resource sets:
+ *   tpcds-v2.7.0/  - 32 queries from apache/spark a2da2926 (v2.7.0 subset)
+ *   tpcds/         - 103 queries from apache/spark master (full q1..q99 + a/b variants)
  *
  * Queries whose SQL features are not yet supported by the MVP are listed in
  * UNSUPPORTED and reported as skipped; every other query must translate
@@ -33,10 +37,24 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class TpcdsQueryPipelineTest {
 
+    private static final String[] RESOURCE_DIRS = {"tpcds-v2.7.0", "tpcds"};
+
     /** Queries that exercise features the MVP has not implemented yet. */
     private static final List<String> UNSUPPORTED = List.of(
-            // ROLLUP grouping analytics (q22)
-            "q22.sql"
+            // Window functions (OVER) - SparkExpressionBuilder throws
+            "tpcds-v2.7.0/q12.sql", "tpcds-v2.7.0/q20.sql", "tpcds-v2.7.0/q36a.sql",
+            "tpcds-v2.7.0/q47.sql", "tpcds-v2.7.0/q49.sql", "tpcds-v2.7.0/q51a.sql",
+            "tpcds-v2.7.0/q57.sql", "tpcds-v2.7.0/q67a.sql", "tpcds-v2.7.0/q70a.sql",
+            "tpcds-v2.7.0/q86a.sql", "tpcds-v2.7.0/q98.sql",
+            "tpcds/q12.sql", "tpcds/q20.sql", "tpcds/q44.sql", "tpcds/q47.sql",
+            "tpcds/q49.sql", "tpcds/q51.sql", "tpcds/q53.sql", "tpcds/q57.sql",
+            "tpcds/q63.sql", "tpcds/q89.sql", "tpcds/q98.sql",
+
+            // ROLLUP / CUBE / GROUPING SETS (SparkAstBuilder.visitAggregate throws)
+            "tpcds-v2.7.0/q22.sql",
+            "tpcds/q14a.sql", "tpcds/q18.sql", "tpcds/q22.sql", "tpcds/q27.sql",
+            "tpcds/q36.sql", "tpcds/q5.sql", "tpcds/q67.sql", "tpcds/q70.sql",
+            "tpcds/q77.sql", "tpcds/q80.sql", "tpcds/q86.sql"
     );
 
     private static final SparkSqlParser parser = new SparkSqlParser();
@@ -47,16 +65,23 @@ class TpcdsQueryPipelineTest {
             new SemanticAnalyzer(new CatalogService().catalog());
 
     static List<String> queryFiles() throws IOException {
-        Path dir = Path.of("src/test/resources/tpcds-v2.7.0");
-        if (!Files.isDirectory(dir)) {
-            dir = Path.of("localsql-thrift/src/test/resources/tpcds-v2.7.0");
+        List<String> files = new ArrayList<>();
+        for (String dirName : RESOURCE_DIRS) {
+            Path dir = resourceDir(dirName);
+            try (var stream = Files.list(dir)) {
+                stream.map(p -> dirName + "/" + p.getFileName())
+                        .filter(n -> n.endsWith(".sql"))
+                        .sorted()
+                        .forEach(files::add);
+            }
         }
-        try (var stream = Files.list(dir)) {
-            return stream.map(p -> p.getFileName().toString())
-                    .filter(n -> n.startsWith("q") && n.endsWith(".sql"))
-                    .sorted()
-                    .toList();
-        }
+        return files;
+    }
+
+    private static Path resourceDir(String name) {
+        Path p = Path.of("src/test/resources", name);
+        if (Files.isDirectory(p)) return p;
+        return Path.of("localsql-thrift/src/test/resources", name);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -65,11 +90,9 @@ class TpcdsQueryPipelineTest {
         assumeTrue(!UNSUPPORTED.contains(fileName),
                 "query uses an MVP-unsupported feature");
 
-        Path dir = Path.of("src/test/resources/tpcds-v2.7.0");
-        if (!Files.isDirectory(dir)) {
-            dir = Path.of("localsql-thrift/src/test/resources/tpcds-v2.7.0");
-        }
-        String sql = Files.readString(dir.resolve(fileName));
+        int slash = fileName.indexOf('/');
+        Path dir = resourceDir(fileName.substring(0, slash));
+        String sql = Files.readString(dir.resolve(fileName.substring(slash + 1)));
 
         Exception failure = null;
         try {
@@ -102,7 +125,7 @@ class TpcdsQueryPipelineTest {
         System.out.println("TPC-DS coverage: " + files.size() + " queries");
         int translated = (int) statuses.values().stream().filter("TRANSLATE"::equals).count();
         int skipped = (int) statuses.values().stream().filter(s -> s.startsWith("SKIP")).count();
-        for (var e : statuses.entrySet()) System.out.printf("  %-12s %s%n", e.getKey(), e.getValue());
+        for (var e : statuses.entrySet()) System.out.printf("  %-14s %s%n", e.getKey(), e.getValue());
         System.out.printf("=> %d translate, %d unsupported%n", translated, skipped);
         assertTrue(translated >= files.size() - UNSUPPORTED.size());
     }

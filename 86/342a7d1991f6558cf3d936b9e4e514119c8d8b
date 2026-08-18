@@ -1,0 +1,36 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsConsistencyTest.java
+  ai_agent 95,107
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_0ab0630be6abcd 199,216-221,223,225-228,230-232,234
+  s_b33fc4f71998f0::t_590b79e154bde8 229
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_42c925c66a2f20 85-92
+  s_b33fc4f71998f0::t_584f52540f14e0 299-318
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/BinaryExpression.java
+  s_b33fc4f71998f0::t_31d483d7d65ead 8,11-14,37
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_8d77511a0b95f8 206-216,218-235
+  s_b33fc4f71998f0::t_0a6b8e9b94b47f 217
+AGENTS.md
+  s_b33fc4f71998f0::t_b0e9df5401408b 127-128
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_37bc801c07c4e2 114,126,128-130
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Join.java
+  s_b33fc4f71998f0::t_ec468647ed7e3c 15,17-21,26,33-34,45-46,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "86342a7d1991f6558cf3d936b9e4e514119c8d8b",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

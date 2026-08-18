@@ -1,0 +1,21 @@
+docs/usage.md
+  s_b33fc4f71998f0::t_abd57650d79eb1 1-254
+README.md
+  s_b33fc4f71998f0::t_4540dd605a9ca3 7-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "13415d0c3b90266988d8e8c4ac38c647a5113869",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

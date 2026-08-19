@@ -78,6 +78,12 @@ final class AdminStatementHandler {
         m = USE.matcher(s);
         if (m.matches()) {
             String db = m.group(1).toLowerCase(Locale.ROOT);
+            // IDEs issue 'USE spark_catalog' (the catalog name, not a database).
+            // Treat the catalog name as a no-op switch to the default database.
+            if (db.equals("spark_catalog")) {
+                return Optional.of(new Outcome(
+                        new DuckDbExecutor.QueryResult(List.of("result"), new ArrayList<>()), "default"));
+            }
             if (catalog.catalog().getDatabase(db).isEmpty()) {
                 throw new IllegalArgumentException("Database does not exist: " + db);
             }

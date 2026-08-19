@@ -285,6 +285,12 @@ class ThriftServerSmokeTest {
             assertEquals(TStatusCode.SUCCESS_STATUS, use.getStatus().getStatusCode(),
                     "USE default: " + use.getStatus());
 
+            // USE spark_catalog - IDEs switch to the catalog name on connect
+            TExecuteStatementResp useCatalog = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "use spark_catalog"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, useCatalog.getStatus().getStatusCode(),
+                    "use spark_catalog: " + useCatalog.getStatus());
+
             client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
         }
     }

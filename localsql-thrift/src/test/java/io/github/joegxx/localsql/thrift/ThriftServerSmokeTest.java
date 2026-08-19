@@ -297,6 +297,21 @@ class ThriftServerSmokeTest {
     }
 
     @Test
+    void databaseQualifiedTableName() throws Exception {
+        // IDEs emit qualified names when opening a table: default.orders AS t
+        var result = server.executeSparkSql(
+                "SELECT * FROM default.orders AS t ORDER BY t.id LIMIT 2");
+        assertEquals(List.of("id", "user_id", "amount"), result.columns());
+        assertEquals(2, result.rows().size());
+        assertEquals(100L, ((Number) result.rows().get(0).get(0)).longValue());
+
+        // and with the catalog prefix spark_catalog.default.orders
+        var result2 = server.executeSparkSql(
+                "SELECT count(*) AS c FROM spark_catalog.default.orders");
+        assertEquals(3L, ((Number) result2.rows().get(0).get(0)).longValue());
+    }
+
+    @Test
     void incrementalFetchNextHasNoDuplicates() throws Exception {
         try (TTransport transport = new TSocket("localhost", port)) {
             transport.open();

@@ -245,7 +245,11 @@ public final class DuckDbSqlGenerator {
     }
 
     private void emitTableScan(TableScan t, StringBuilder sb) {
-        sb.append(String.join(".", t.tableName().stream().map(this::quote).toList()));
+        // Logical name may be [catalog,] database, table (e.g. default.orders
+        // from IDEs or qualified SQL). Physical tables all live in DuckDB's
+        // main schema, so emit the bare table name.
+        String table = t.tableName().get(t.tableName().size() - 1);
+        sb.append(quote(table));
         if (t.alias() != null) sb.append(" AS ").append(quote(t.alias()));
     }
 

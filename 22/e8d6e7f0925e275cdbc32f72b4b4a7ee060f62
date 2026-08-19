@@ -1,0 +1,40 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_c74bd29d085f9f 58
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_b33fc4f71998f0::t_f83d07ecbd9e8b 58-66
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/HiveServerTTransportFactory.java
+  s_b33fc4f71998f0::t_479c0566e2944d 10,13
+  s_b33fc4f71998f0::t_d38978cb353766 3,11,15,17,19-27,33-34,36-42,58,64,69,73,83
+  s_b33fc4f71998f0::t_3a454b9aebc63f 48
+  s_b33fc4f71998f0::t_a4d4cb25005fd9 84-90
+  s_b33fc4f71998f0::t_154a795a4d4d49 8,53,66-68,70-72,74-82,91-126
+  s_b33fc4f71998f0::t_2262a1df5195c2 43-45,50-51,62-63
+  s_b33fc4f71998f0::t_8b2ef2841a28c4 1-2,4-7,9,12,14,16,18,28-30,46-47,49,52,127-129
+  s_b33fc4f71998f0::t_1891e2fdf8c546 61
+  s_b33fc4f71998f0::t_b906844c9b7561 54-57,59-60
+  s_b33fc4f71998f0::t_bb2249114d8489 65
+  s_b33fc4f71998f0::t_c664ad23154267 31-32,35
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftSaslTest.java
+  s_b33fc4f71998f0::t_5d9f30498b4345 1-101
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/PlainSaslServer.java
+  s_b33fc4f71998f0::t_96b9512435a936 1-144
+docs/usage.md
+  s_b33fc4f71998f0::t_639c8fff63a735 227
+  s_b33fc4f71998f0::t_2e5ed3e8dfc1a8 222-224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "22e8d6e7f0925e275cdbc32f72b4b4a7ee060f62",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

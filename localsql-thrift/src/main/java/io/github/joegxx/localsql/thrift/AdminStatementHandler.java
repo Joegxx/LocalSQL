@@ -31,6 +31,10 @@ final class AdminStatementHandler {
             Pattern.compile("(?i)^(DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern USE =
             Pattern.compile("(?i)^USE\\s+([A-Za-z_][\\w]*)\\s*$");
+    private static final Pattern CURRENT_DATABASE =
+            Pattern.compile("(?i)^SELECT\\s+current_database\\s*\\(\\s*\\)\\s*(AS\\s+[A-Za-z_][\\w]*)?\\s*$");
+    private static final Pattern CURRENT_SCHEMA =
+            Pattern.compile("(?i)^SELECT\\s+current_schema\\s*\\(\\s*\\)\\s*(AS\\s+[A-Za-z_][\\w]*)?\\s*$");
 
     private AdminStatementHandler() {}
 
@@ -81,7 +85,21 @@ final class AdminStatementHandler {
                     new DuckDbExecutor.QueryResult(List.of("result"), new ArrayList<>()), db));
         }
 
+        // IDEs probe the current database/schema on connect. Passing these to
+        // DuckDB would return 'memory'/'main', which clients then use as a
+        // schema filter and see zero tables. Spark semantics: session database.
+        if (CURRENT_DATABASE.matcher(s).matches() || CURRENT_SCHEMA.matcher(s).matches()) {
+            return Optional.of(new Outcome(new DuckDbExecutor.QueryResult(
+                    List.of(currentDatabaseAlias(s)), List.of(List.of(currentDatabase))), null));
+        }
+
         return Optional.empty();
+    }
+
+    private static String currentDatabaseAlias(String sql) {
+        java.util.regex.Matcher am = java.util.regex.Pattern.compile(
+                "(?i)\\bAS\\s+([A-Za-z_][\\w]*)").matcher(sql);
+        return am.find() ? am.group(1) : "current_database()";
     }
 
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {

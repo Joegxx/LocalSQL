@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -293,5 +294,42 @@ class ThriftServerSmokeTest {
                 new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 10_000));
         assertEquals(TStatusCode.SUCCESS_STATUS, res.getStatus().getStatusCode());
         return res.getResults().getColumns().get(0).getStringVal().getValues();
+    }
+
+    @Test
+    void incrementalFetchNextHasNoDuplicates() throws Exception {
+        try (TTransport transport = new TSocket("localhost", port)) {
+            transport.open();
+            TCLIService.Client client = new TCLIService.Client(
+                    new TBinaryProtocol(transport), new TBinaryProtocol(transport));
+            TOpenSessionResp open = client.OpenSession(
+                    new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
+
+            // probe statements IDEs issue on connect
+            TExecuteStatementResp db = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(), "SELECT current_database()"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, db.getStatus().getStatusCode());
+            assertEquals(List.of("default"), fetchFirstColumn(client, db.getOperationHandle()));
+
+            // query with more rows than one fetch batch: loop FETCH_NEXT like IDE drivers
+            TExecuteStatementResp exec = client.ExecuteStatement(
+                    new TExecuteStatementReq(open.getSessionHandle(),
+                            "SELECT name FROM users ORDER BY name"));
+            TOperationHandle op = exec.getOperationHandle();
+            List<String> all = new ArrayList<>();
+            TFetchResultsResp first = client.FetchResults(
+                    new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 1));
+            all.addAll(first.getResults().getColumns().get(0).getStringVal().getValues());
+            int guard = 0;
+            while (first.isHasMoreRows() && guard++ < 10) {
+                TFetchResultsResp next = client.FetchResults(
+                        new TFetchResultsReq(op, TFetchOrientation.FETCH_NEXT, 1));
+                all.addAll(next.getResults().getColumns().get(0).getStringVal().getValues());
+                if (!next.isHasMoreRows()) break;
+            }
+            assertEquals(List.of("alice", "bob", "carol"), all, "FETCH_NEXT loop must see each row exactly once");
+
+            client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
+        }
     }
 }

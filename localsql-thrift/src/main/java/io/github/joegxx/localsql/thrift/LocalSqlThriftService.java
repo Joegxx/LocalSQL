@@ -50,8 +50,20 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         volatile String currentDatabase = "default";
         SessionState(TSessionHandle handle) { this.handle = handle; }
     }
-    private record OperationState(TOperationHandle handle, List<String> columns,
-                                  List<List<Object>> rows, boolean fetched) {}
+
+    private static final class OperationState {
+        final TOperationHandle handle;
+        final List<String> columns;
+        final List<List<Object>> rows;
+        boolean fetched;
+        int fetchOffset = 0;
+        OperationState(TOperationHandle handle, List<String> columns, List<List<Object>> rows, boolean fetched) {
+            this.handle = handle;
+            this.columns = columns;
+            this.rows = rows;
+            this.fetched = fetched;
+        }
+    }
 
     @Override
     public TOpenSessionResp OpenSession(TOpenSessionReq req) {
@@ -308,8 +320,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         TGetResultSetMetadataResp resp = new TGetResultSetMetadataResp(ok());
         TTableSchema schema = new TTableSchema();
         if (op != null) {
-            for (int i = 0; i < op.columns().size(); i++) {
-                schema.addToColumns(new TColumnDesc(op.columns().get(i), stringType(), i));
+            for (int i = 0; i < op.columns.size(); i++) {
+                schema.addToColumns(new TColumnDesc(op.columns.get(i), stringType(), i));
             }
         }
         resp.setSchema(schema);
@@ -329,13 +341,25 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             resp.setResults(rs);
             return resp;
         }
+        // Standard HiveServer2 cursor semantics: FETCH_FIRST resets to the
+        // beginning, FETCH_NEXT advances. Clients (IDEA/DBeaver Hive drivers)
+        // loop on FETCH_NEXT until an empty batch; without a server-side
+        // offset every fetch returned the same head rows and the client
+        // appended duplicates.
+        if (req.getOrientation() == TFetchOrientation.FETCH_FIRST) {
+            op.fetchOffset = 0;
+        }
         long maxRows = req.getMaxRows() > 0 ? req.getMaxRows() : 1000;
-        List<List<Object>> all = op.rows();
-        List<List<Object>> batch = all.size() <= maxRows ? all : all.subList(0, (int) maxRows);
-        TRowSet rowSet = toRowSet(op.columns(), batch);
+        List<List<Object>> all = op.rows;
+        int from = Math.min(op.fetchOffset, all.size());
+        int to = (int) Math.min(from + maxRows, all.size());
+        List<List<Object>> batch = all.subList(from, to);
+        op.fetchOffset = to;
+        TRowSet rowSet = toRowSet(op.columns, batch);
+        rowSet.setStartRowOffset(from);
         TFetchResultsResp resp = new TFetchResultsResp(ok());
         resp.setResults(rowSet);
-        resp.setHasMoreRows(false);
+        resp.setHasMoreRows(to < all.size());
         return resp;
     }
 

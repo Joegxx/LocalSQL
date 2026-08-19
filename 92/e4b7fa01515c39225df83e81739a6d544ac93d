@@ -1,0 +1,21 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_260620b1848763 300-313
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_c8fa06614f2705 248-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "92e4b7fa01515c39225df83e81739a6d544ac93d",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

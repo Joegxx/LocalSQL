@@ -1,0 +1,21 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/AdminStatementHandler.java
+  s_b33fc4f71998f0::t_b15d5b52848acb 81-86
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftServerSmokeTest.java
+  s_b33fc4f71998f0::t_3af3c18a46d14f 288-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "073dee3113bc6d494e3cacea6e6fec47067f415a",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

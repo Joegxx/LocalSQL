@@ -55,8 +55,15 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     @Override
     public TOpenSessionResp OpenSession(TOpenSessionReq req) {
-        LOG.info("OpenSession user={} clientProtocol={}", req.getUsername(), req.getClient_protocol());
-        TOpenSessionResp resp = new TOpenSessionResp(ok(), TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11);
+        TProtocolVersion requested = req.getClient_protocol();
+        LOG.info("OpenSession user={} clientProtocol={}", req.getUsername(), requested);
+        // Negotiate: echo the client's requested version when valid; our
+        // wire format is identical across V1..V11. Some JDBC drivers (Hive 1.2)
+        // fail hard if serverProtocolVersion is not set on the response.
+        TProtocolVersion negotiated = (requested != null) ? requested
+                : TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11;
+        TOpenSessionResp resp = new TOpenSessionResp(ok(), negotiated);
+        resp.setServerProtocolVersion(negotiated);
         resp.setSessionHandle(newSessionHandle());
         resp.setConfiguration(new java.util.HashMap<>());
         return resp;

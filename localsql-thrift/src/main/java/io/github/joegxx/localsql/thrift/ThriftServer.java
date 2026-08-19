@@ -55,6 +55,7 @@ public final class ThriftServer {
                 TServerSocket transport = new TServerSocket(port);
                 TThreadPoolServer.Args args = new TThreadPoolServer.Args(transport)
                         .processor(processor)
+                        .transportFactory(new HiveServerTTransportFactory())
                         .minWorkerThreads(5)
                         .maxWorkerThreads(50);
                 server = new TThreadPoolServer(args);

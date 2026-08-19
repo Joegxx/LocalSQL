@@ -219,11 +219,12 @@ ORDER BY cnt DESC;
 **客户端连不上?**
 1. `lsof -iTCP:10000 -sTCP:LISTEN` 确认进程监听;若提示端口被占,说明有旧实例还在跑——先 `pkill -f runtime.jar` 再启动(当前版本端口被占会直接报错退出,不会静默假活);
 2. 客户端 JDBC URL 必须是 `jdbc:hive2://` 前缀(不是 `jdbc:duckdb`);
-3. 用了自定义端口时,URL 里的端口要一致;
-4. IDEA/DataGrip 选驱动 **Apache Hive**,URL 填 `jdbc:hive2://localhost:10000/default`。如果客户端尝试 SASL 握手失败,在 URL 后追加 `;auth=noSasl`。
+3. 用了自定义端口时,URL 里的端口要一致。
+
+服务端**同时支持 SASL PLAIN(标准 Hive JDBC 默认)和 NOSASL(`;auth=noSasl`)两种传输**——按连接首字节自动识别,无需特殊配置。查询卡住无响应时,先看服务端日志是否收到 `ExecuteStatement`;完全没日志通常是连到了旧实例或别的进程占了端口。
 
 **IDEA 里看不到 database/schema 或表?**
-DataGrip/IntelliJ 的内省依赖 `SHOW DATABASES` / `SHOW TABLES` / `DESCRIBE` 语句,当前版本已支持;若仍为空,确认连接的是**新启动**的进程(旧版本进程不支持这些语句)。服务端日志会打印收到的每条 SQL(`ExecuteStatement [session=.., db=..]: ...`),可直接对照排查客户端到底发了什么。
+DataGrip/IntelliJ 的内省依赖 `SHOW DATABASES` / `SHOW TABLES` / `DESCRIBE` 语句,当前版本已支持;若仍为空,确认连接的是**新启动**的进程(旧版本进程不支持这些语句)。服务端日志会打印收到的每条 SQL(`ExecuteStatement [session=.., db=..]: ...`),可直接对照排查客户端到底发了什么。另外确认 OpenSession 返回的协议版本正常(Hive 1.2 驱动对 `serverProtocolVersion` 为空会直接报 `Required field 'serverProtocolVersion' is unset`,当前版本会回显客户端请求的版本)。
 
 **查询报 `Referenced table "xxx" not found`?**
 表名拼写要和注册进 Catalog 的一致(当前内置 `users`/`orders`,在 `default` 库)。

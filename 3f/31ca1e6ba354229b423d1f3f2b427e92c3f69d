@@ -1,0 +1,37 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DdlDmlPipelineTest.java
+  s_b33fc4f71998f0::t_a2ae1e67ef2b3a 273-274
+  s_b33fc4f71998f0::t_ace8b84941f994 264-272,275-328
+docs/usage.md
+  s_b33fc4f71998f0::t_d03abccb73c1a7 211
+  s_b33fc4f71998f0::t_34ac606a86bcd0 220
+README.md
+  s_b33fc4f71998f0::t_ed6b1c171ca47c 294
+  s_b33fc4f71998f0::t_a8c0bdf359c39c 73
+AGENTS.md
+  s_b33fc4f71998f0::t_21c40dd3c16e2c 136
+  s_b33fc4f71998f0::t_3adfe5cc621907 99
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/DropTable.java
+  s_b33fc4f71998f0::t_592091773dbce3 1-25
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_d69650c2f3b029 61,66-90
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_f7f5fe4ba8d4d0 31-32,36-46
+new.md
+  ai_agent 1-1136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "3f31ca1e6ba354229b423d1f3f2b427e92c3f69d",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -1,0 +1,81 @@
+docs/usage.md
+  s_b33fc4f71998f0::t_223d8340086c11 202-212,219-222
+README.md
+  s_b33fc4f71998f0::t_3dc133108808d7 294
+  s_b33fc4f71998f0::t_4976f67c944322 73
+  s_b33fc4f71998f0::t_8a27266f743e1b 377
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/QueryStatement.java
+  s_b33fc4f71998f0::t_652aad5f765d57 1-17
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/Insert.java
+  s_b33fc4f71998f0::t_26c94e8d0e5b45 1-35
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/CreateTable.java
+  s_b33fc4f71998f0::t_35d7fce80f59dd 1-46
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/Statement.java
+  s_b33fc4f71998f0::t_577aa2ad3a2550 1-9
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/Catalog.java
+  s_b33fc4f71998f0::t_ce89d57093b6bf 75-89
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_98c982ec1ce930 79
+  s_b33fc4f71998f0::t_a792dbfdf0ee67 32,39
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_b33fc4f71998f0::t_b03fad100b442b 74-81
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_d5e10f3cee3c42 117
+  s_b33fc4f71998f0::t_c3203ddff8bae9 155
+  s_b33fc4f71998f0::t_9ef7a9327d2304 1-116,118-145,151-154,156-198
+  s_b33fc4f71998f0::t_f463df0b706c76 146-150
+AGENTS.md
+  s_b33fc4f71998f0::t_3a5c7b17d52eb7 180
+  s_b33fc4f71998f0::t_35238af0cd0ae8 66
+  s_b33fc4f71998f0::t_8ab0e2a2549988 84,86-100
+  s_b33fc4f71998f0::t_34615b84cfb8c7 135
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_3c3e0e27344ad3 44-74,76-77,83
+  s_b33fc4f71998f0::t_48d23c4d79ca22 5
+  s_b33fc4f71998f0::t_41c29ea9342645 17,22,25,27-43,75,78-82,84-112,114-116,118-183
+  s_b33fc4f71998f0::t_84b65cb85db95b 427-436
+  s_b33fc4f71998f0::t_d39db63edf0bb8 113,117
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TpcdsQueryPipelineTest.java
+  s_b33fc4f71998f0::t_c05ff0c14f6243 91-93
+  s_b33fc4f71998f0::t_675efa21c9b1c1 7
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_b33fc4f71998f0::t_074d7777117110 116
+  s_b33fc4f71998f0::t_c714f87c050632 27,35
+localsql-duckdb/src/test/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGeneratorDdlTest.java
+  s_b33fc4f71998f0::t_6720043109c3a9 1-31,33-43,47-53,56-67,71-74,78-82,84-85
+  s_b33fc4f71998f0::t_6f842a2a3d62a8 32,44-46,54-55,68-70,75-77,83
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DdlDmlPipelineTest.java
+  s_b33fc4f71998f0::t_367225aee5d14e 89
+  s_b33fc4f71998f0::t_d73261e6e79712 73
+  s_b33fc4f71998f0::t_04f84081f0f3b3 157-159
+  s_b33fc4f71998f0::t_1696853fed3003 1-30,33-35,70-72,74-88,90-153,155-156,160-200,212-215,217-293
+  s_b33fc4f71998f0::t_ae7ff2e74f649b 201-211
+  s_b33fc4f71998f0::t_4d85c3802ca7a6 31-32,36-69
+  s_b33fc4f71998f0::t_5d810fec07c730 154
+  s_b33fc4f71998f0::t_43ee38c543eab0 216
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_a5828006a74679 597
+  s_b33fc4f71998f0::t_181557255f0039 559-573,576-577
+  s_b33fc4f71998f0::t_d247bd29e5e063 20-73
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_578329fb4fc592 88
+  s_b33fc4f71998f0::t_10702392b97837 25-80
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/CreateView.java
+  s_b33fc4f71998f0::t_22b02610ab6084 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "235b4ec32d1d706877e1102b7a80f8b88619b439",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -71,6 +71,14 @@ public final class CatalogService {
         return catalog.getTable(database, tableName);
     }
 
+    /** Drop a table: remove from memory and delete from the persistent store. */
+    public void dropTable(String database, String tableName) throws Exception {
+        Catalog.Table removed = catalog.removeTable(database, tableName);
+        if (removed != null && store != null) {
+            store.deleteTable(removed.tableId());
+        }
+    }
+
     public record ColumnDef(String name, DataType type, boolean nullable, String comment,
                             String defaultValue, String expression) {
         public ColumnDef(String name, DataType type, boolean nullable, String comment) {

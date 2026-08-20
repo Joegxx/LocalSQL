@@ -72,6 +72,21 @@ public final class Catalog {
         return Optional.ofNullable(tables.get(String.join(".", name).toLowerCase()));
     }
 
+    /**
+     * Resolve raw identifier parts to a catalog table:
+     * [t] -> default.t; [db, t] -> db.t; [catalog, db, t] (or longer) -> last two parts.
+     */
+    public Optional<Table> resolveTable(List<String> parts) {
+        if (parts == null || parts.isEmpty()) return Optional.empty();
+        if (parts.size() == 1) return getTable("default", parts.get(0));
+        return getTable(parts.get(parts.size() - 2), parts.get(parts.size() - 1));
+    }
+
+    /** Remove a table from the in-memory catalog; returns the removed table or null. */
+    public Table removeTable(String database, String tableName) {
+        return tables.remove(database.toLowerCase() + "." + tableName.toLowerCase());
+    }
+
     public Optional<Table> getTable(String database, String tableName) {
         return getTable(List.of(database, tableName));
     }

@@ -63,7 +63,7 @@ ir -> (nothing)
 ```
 
 - `localsql-parser` - ANTLR4 语法 + `SparkSqlParser` 入口。**只有 parse-tree,不做任何逻辑。**
-- `localsql-ir` - 公共 IR。`Relation`(relation/)和 `Expression`(expression/)是类 sealed 层级;`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源,任何后端不得绕过 IR 直接读 parse-tree。
+- `localsql-ir` - 公共 IR。`Relation`(relation/)和 `Expression`(expression/)是类 sealed 层级;`Statement`(statement/)是顶层语句(Query/Insert/CreateTable/CreateView);`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源,任何后端不得绕过 IR 直接读 parse-tree。
 - `localsql-spark` - `SparkAstBuilder` 把 ParseTree 转成 IR。`SparkExpressionBuilder` 和 `SparkDataTypeBuilder` 是 package-private 辅助类。
 - `localsql-catalog` - **只存逻辑元数据**(`Catalog` / `Column` / `Table` / `Database`)+ 持久化抽象(`CatalogStore`)。**禁止**:执行 SQL、访问 JDBC、生成 DuckDB SQL、存 runtime 执行状态。当前 MVP 是内存 `LinkedHashMap`,后续会换成 DuckDB-backed store,**不改调用方**。
 - `localsql-duckdb` - `DuckDbSqlGenerator`(IR -> SQL 串,无状态序列化器)+ `DuckDbExecutor`(JDBC 操作进程内 DuckDB)+ `DuckDbCatalogStore`(实现 `CatalogStore`,把元数据落到 4 张 DuckDB 表)。DuckDB 负责**物理执行**,不是逻辑元数据。
@@ -81,13 +81,23 @@ ir -> (nothing)
 
 ## 流水线执行顺序
 
-执行查询时(见 `ThriftServer.executeSparkSql`):
+执行查询时(见 `ThriftServer.executeSparkSql` 与 `LocalSqlThriftService.ExecuteStatement`,两者都经 `SqlPipeline.execute` 收敛):
 1. `SparkSqlParser.parseStatement` -> `SingleStatementContext`
-2. `SparkAstBuilder.buildStatement` -> IR `Relation`
-3. `SemanticAnalyzer.analyze(rel)` -> 填 `TableScan.output` + 给 `AttributeReference`/`Literal` 设 DataType
-4. `RewriteEngine.rewrite(rel)` -> 原地重命名函数(`size`->`array_length` 等)
-5. `DuckDbSqlGenerator.generate` -> DuckDB SQL 串
-6. `DuckDbExecutor.execute` -> `QueryResult`
+2. `SparkAstBuilder.buildStatement` -> IR `Statement`(`QueryStatement` / `Insert` / `CreateTable` / `CreateView`)
+3. DQL(`QueryStatement`):`SemanticAnalyzer.analyze(rel)` -> `RewriteEngine.rewrite(rel)` -> `DuckDbSqlGenerator.generate` -> `DuckDbExecutor.execute`
+4. DML/DDL 由 `SqlPipeline` 按类型编排(见下节)
+
+### DML/DDL 编排(SqlPipeline)
+
+- `Insert`:analyzer 校验目标表存在 + 列清单 ⊆ 表列;rewrite query;生成 `INSERT INTO tbl [(cols)] <query>`;`executeUpdate` 返回受影响行数,结果集为单列 `count`。
+- `Insert.overwrite`:DuckDB 无 OVERWRITE,用 `BEGIN; DELETE FROM tbl; INSERT ...; COMMIT` 包裹(失败 ROLLBACK),替换整表数据。
+- `CreateTable`(纯 DDL):`CREATE TABLE tbl (col TYPE [NOT NULL], ...)`;之后 `DESCRIBE tbl` 取物理 schema,经 `Catalog.parseDataType` 反推 IR 类型,`CatalogService.registerTable` 写元数据 + `saveRuntimeInfo` 写 `runtime_table`。
+- `CreateTable` CTAS:`CREATE TABLE tbl AS <query>`(物理 schema 同样 DESCRIBE 反推);列定义 + AS query 组合 = 先建空表再走 Insert 路径。
+- `CreateTable` LIKE:`tbl LIKE src`,从 Catalog 读源表 schema 生成 DDL。
+- `CreateTable` PARTITIONED BY:分区字段带类型 -> AST builder 追加到列定义末尾(Spark 分区列在最后);分区字段裸引用 -> 校验已存在不改变 schema;`PARTITIONED BY + AS query` 显式拒绝。DuckDB 无分区概念,分区列就是普通列。
+- `CreateView`:analyzer 校验 + rewrite query;生成 `CREATE [OR REPLACE] VIEW v AS <query>`;注册 tableType=`VIEW`。OR REPLACE 时先 `CatalogService.dropTable`(清 store 4 张表)+ `DROP VIEW IF EXISTS` 再建。
+
+**语义注意**:`INSERT INTO t VALUES (1,'a')` 的每一行在语法上是 `#rowConstructor`(`struct(...)`),AST builder 的 `visitInlineTable` 必须把它**展开成列**(`StructExpr.fields()` 当行内容),否则每行只算 1 列(DuckDB 报 "n columns but 1 values")。
 
 ## SQL 生成约定(不要破坏)
 
@@ -122,7 +132,7 @@ Generator 永远不用查 Catalog。
 
 ## 已知 MVP 缺口
 
-- DDL 未实现(CREATE / ALTER / DROP 是 Phase 2)
+- DML/DDL 支持:`INSERT INTO/OVERWRITE`、`CREATE TABLE`(含 CTAS / LIKE / PARTITIONED BY)、`CREATE VIEW` 已实现;`CREATE/ALTER/DROP DATABASE`、`ALTER/DROP TABLE/VIEW`、`DELETE/UPDATE/MERGE`、multi-INSERT 未实现
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - 命名窗口(`WINDOW w AS ...`)、聚合 `FILTER` 子句、`NATURAL JOIN`(需要同名列解析)抛 `UnsupportedOperationException`
 - 位运算/整数除法/`<=>`/`JOIN USING` 已正确映射(`INT_DIV` -> `//`、`BIT_XOR` -> `xor()`、`EQ_NULL_SAFE` -> `IS NOT DISTINCT FROM`)
@@ -167,7 +177,7 @@ L3 组件(全部 DuckDB 自举):
 - materialized view
 - transaction / ACID / snapshot
 - distributed execution
-- DDL(CREATE / ALTER / DROP 是 Phase 2)
+- DDL 高级操作(ALTER / DROP TABLE/VIEW、CREATE/ALTER/DROP DATABASE)未实现
 - 权限/认证
 
 ## 在途工作:DuckDB 元数据 + Analyzer / RewriteEngine 接入

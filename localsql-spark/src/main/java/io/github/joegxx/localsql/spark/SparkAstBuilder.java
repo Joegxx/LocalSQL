@@ -2,6 +2,7 @@ package io.github.joegxx.localsql.spark;
 
 import io.github.joegxx.localsql.ir.expression.*;
 import io.github.joegxx.localsql.ir.relation.*;
+import io.github.joegxx.localsql.ir.statement.Statement;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.apache.spark.sql.catalyst.parser.SqlBaseParser;
 import org.apache.spark.sql.catalyst.parser.SqlBaseParser.*;
@@ -13,17 +14,173 @@ public final class SparkAstBuilder {
 
     private final SparkExpressionBuilder exprBuilder = new SparkExpressionBuilder(this);
 
-    public Relation buildStatement(String sql, SparkSqlParserAccess parserAccess) {
+    public io.github.joegxx.localsql.ir.statement.Statement buildStatement(String sql, SparkSqlParserAccess parserAccess) {
         SingleStatementContext ctx = parserAccess.parse(sql);
         return visitSingleStatement(ctx);
     }
 
-    Relation visitSingleStatement(SingleStatementContext ctx) {
+    io.github.joegxx.localsql.ir.statement.Statement visitSingleStatement(SingleStatementContext ctx) {
         StatementContext stmt = ctx.statement();
         if (stmt instanceof StatementDefaultContext sd) {
-            return visitQuery(sd.query());
+            return new io.github.joegxx.localsql.ir.statement.QueryStatement(visitQuery(sd.query()));
         }
-        throw new UnsupportedOperationException("MVP only supports DQL (SELECT). Got: " + stmt.getText());
+        if (stmt instanceof DmlStatementContext dml) return buildInsert(dml);
+        if (stmt instanceof CreateTableContext ct) return buildCreateTable(ct);
+        if (stmt instanceof CreateTableLikeContext ctl) return buildCreateTableLike(ctl);
+        if (stmt instanceof CreateViewContext cv) return buildCreateView(cv);
+        throw new UnsupportedOperationException("MVP only supports DQL and basic DDL/DML. Got: " + stmt.getText());
+    }
+
+    private io.github.joegxx.localsql.ir.statement.Insert buildInsert(DmlStatementContext dml) {
+        DmlStatementNoWithContext noWith = dml.dmlStatementNoWith();
+        if (!(noWith instanceof SingleInsertQueryContext sq)) {
+            throw new UnsupportedOperationException(
+                    "Only single-target INSERT is supported (multi-insert / DELETE / UPDATE / MERGE are not)");
+        }
+        InsertIntoContext i = sq.insertInto();
+        if (i instanceof InsertOverwriteHiveDirContext || i instanceof InsertOverwriteDirContext) {
+            throw new UnsupportedOperationException("INSERT OVERWRITE DIRECTORY is not supported");
+        }
+        MultipartIdentifierContext target;
+        boolean overwrite;
+        if (i instanceof InsertOverwriteTableContext ow) {
+            overwrite = true;
+            target = ow.multipartIdentifier();
+            if (ow.partitionSpec() != null) {
+                throw new UnsupportedOperationException("INSERT with PARTITION spec is not supported");
+            }
+            if (ow.identifierList() != null) {
+                throw new UnsupportedOperationException(
+                        "INSERT OVERWRITE with column list is not supported");
+            }
+        } else if (i instanceof InsertIntoTableContext into) {
+            overwrite = false;
+            target = into.multipartIdentifier();
+            if (into.partitionSpec() != null) {
+                throw new UnsupportedOperationException("INSERT with PARTITION spec is not supported");
+            }
+            if (into.IF() != null) {
+                throw new UnsupportedOperationException("INSERT IF NOT EXISTS is not supported");
+            }
+            if (into.identifierList() != null) {
+                List<String> cols = new ArrayList<>();
+                for (ErrorCapturingIdentifierContext id : into.identifierList().identifierSeq().ident) {
+                    cols.add(SparkExpressionBuilder.unquote(id.getText()));
+                }
+                Relation withCols = visitQueryTerm(sq.queryTerm());
+                withCols = visitQueryOrganization(sq.queryOrganization(), withCols);
+                if (dml.ctes() != null) withCols = visitCtes(dml.ctes(), withCols);
+                return new io.github.joegxx.localsql.ir.statement.Insert(
+                        parts(target), false, cols, withCols);
+            }
+        } else {
+            throw new UnsupportedOperationException("Unsupported INSERT form");
+        }
+        Relation body = visitQueryTerm(sq.queryTerm());
+        body = visitQueryOrganization(sq.queryOrganization(), body);
+        if (dml.ctes() != null) body = visitCtes(dml.ctes(), body);
+        return new io.github.joegxx.localsql.ir.statement.Insert(
+                parts(target), overwrite, null, body);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.CreateTable buildCreateTable(CreateTableContext ct) {
+        CreateTableHeaderContext header = ct.createTableHeader();
+        if (header.TEMPORARY() != null) {
+            throw new UnsupportedOperationException("CREATE TEMPORARY TABLE is not supported");
+        }
+        if (header.EXTERNAL() != null) {
+            throw new UnsupportedOperationException("CREATE EXTERNAL TABLE is not supported");
+        }
+        CreateTableClausesContext clauses = ct.createTableClauses();
+        if (clauses != null) {
+            if (!clauses.skewSpec().isEmpty() || !clauses.bucketSpec().isEmpty()) {
+                throw new UnsupportedOperationException("SKEWED BY / CLUSTERED BY (bucketing) are not supported");
+            }
+        }
+        boolean ifNotExists = header.IF() != null;
+        List<io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef> columns = new ArrayList<>();
+        if (ct.colTypeList() != null) {
+            for (ColTypeContext c : ct.colTypeList().colType()) {
+                columns.add(new io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef(
+                        SparkExpressionBuilder.unquote(c.colName.getText()),
+                        SparkDataTypeBuilder.build(c.dataType()),
+                        c.NOT() == null,
+                        comment(c.commentSpec())));
+            }
+        }
+        // PARTITIONED BY: fields with a type are appended to the schema (Spark puts
+        // partition columns last); bare column references must exist in the schema.
+        if (clauses != null && !clauses.partitionFieldList().isEmpty()) {
+            if (ct.query() != null) {
+                throw new UnsupportedOperationException("PARTITIONED BY together with AS query is not supported");
+            }
+            for (PartitionFieldContext pf : clauses.partitionFieldList().get(0).partitionField()) {
+                if (pf instanceof PartitionTransformContext t) {
+                    if (t.transform() instanceof IdentityTransformContext id) {
+                        String name = SparkExpressionBuilder.parts(id.qualifiedName()).get(
+                                SparkExpressionBuilder.parts(id.qualifiedName()).size() - 1);
+                        if (columns.stream().noneMatch(c -> c.name().equalsIgnoreCase(name))) {
+                            throw new IllegalArgumentException(
+                                    "PARTITIONED BY column not defined in table schema: " + name);
+                        }
+                    } else {
+                        throw new UnsupportedOperationException(
+                                "Partition transforms (e.g. years(dt)) are not supported");
+                    }
+                } else if (pf instanceof PartitionColumnContext pc) {
+                    columns.add(new io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef(
+                            SparkExpressionBuilder.unquote(pc.colType().colName.getText()),
+                            SparkDataTypeBuilder.build(pc.colType().dataType()),
+                            pc.colType().NOT() == null,
+                            comment(pc.colType().commentSpec())));
+                }
+            }
+        }
+        Relation query = ct.query() != null ? visitQuery(ct.query()) : null;
+        if (columns.isEmpty() && query == null) {
+            throw new IllegalArgumentException("CREATE TABLE requires a column list or AS query");
+        }
+        return new io.github.joegxx.localsql.ir.statement.CreateTable(
+                parts(header.multipartIdentifier()), ifNotExists, columns, query, null);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.CreateTable buildCreateTableLike(CreateTableLikeContext ctl) {
+        boolean ifNotExists = ctl.IF() != null;
+        List<String> target = new ArrayList<>();
+        if (ctl.target.db != null) target.add(SparkExpressionBuilder.unquote(ctl.target.db.getText()));
+        target.add(SparkExpressionBuilder.unquote(ctl.target.table.getText()));
+        List<String> source = new ArrayList<>();
+        if (ctl.source.db != null) source.add(SparkExpressionBuilder.unquote(ctl.source.db.getText()));
+        source.add(SparkExpressionBuilder.unquote(ctl.source.table.getText()));
+        return new io.github.joegxx.localsql.ir.statement.CreateTable(
+                target, ifNotExists, List.of(), null, source);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.CreateView buildCreateView(CreateViewContext cv) {
+        if (cv.TEMPORARY() != null) {
+            throw new UnsupportedOperationException("CREATE TEMPORARY VIEW is not supported");
+        }
+        if (cv.GLOBAL() != null) {
+            throw new UnsupportedOperationException("CREATE GLOBAL TEMPORARY VIEW is not supported");
+        }
+        if (cv.identifierCommentList() != null) {
+            throw new UnsupportedOperationException("CREATE VIEW with column alias list is not supported");
+        }
+        if (!cv.PARTITIONED().isEmpty()) {
+            throw new UnsupportedOperationException("CREATE VIEW ... PARTITIONED ON is not supported");
+        }
+        boolean orReplace = cv.OR() != null;
+        boolean ifNotExists = cv.IF() != null;
+        if (cv.query() == null) {
+            throw new IllegalArgumentException("CREATE VIEW requires AS query");
+        }
+        return new io.github.joegxx.localsql.ir.statement.CreateView(
+                parts(cv.multipartIdentifier()), orReplace, ifNotExists, visitQuery(cv.query()));
+    }
+
+    private static String comment(CommentSpecContext cs) {
+        return cs == null || cs.STRING() == null ? null
+                : SparkExpressionBuilder.unquote(cs.STRING().getText());
     }
 
     Relation visitQuery(QueryContext ctx) {
@@ -267,7 +424,16 @@ public final class SparkAstBuilder {
 
     private Relation visitInlineTable(InlineTableContext c) {
         List<List<Expression>> rows = new ArrayList<>();
-        for (ExpressionContext e : c.expression()) rows.add(List.of(exprBuilder.visit(e)));
+        for (ExpressionContext e : c.expression()) {
+            Expression expr = exprBuilder.visit(e);
+            // VALUES (1, 'a'), (2, 'b'): each row is a struct() row-constructor
+            // that must be unfolded into columns; a bare VALUES 1 is a single column.
+            if (expr instanceof StructExpr s && !s.fields().isEmpty()) {
+                rows.add(s.fields());
+            } else {
+                rows.add(List.of(expr));
+            }
+        }
         return alias(new Values(rows), c.tableAlias());
     }
 

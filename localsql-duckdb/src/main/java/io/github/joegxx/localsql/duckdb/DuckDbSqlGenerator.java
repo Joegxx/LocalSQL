@@ -17,6 +17,60 @@ public final class DuckDbSqlGenerator {
         return sb.toString();
     }
 
+    public String generateInsert(io.github.joegxx.localsql.ir.statement.Insert i) {
+        StringBuilder sb = new StringBuilder("INSERT INTO ");
+        sb.append(bareName(i.tableName()));
+        if (i.columns() != null) {
+            sb.append(" (");
+            for (int c = 0; c < i.columns().size(); c++) {
+                if (c > 0) sb.append(", ");
+                sb.append(quote(i.columns().get(c)));
+            }
+            sb.append(")");
+        }
+        sb.append(" ");
+        emit(i.query(), sb);
+        return sb.toString();
+    }
+
+    public String generateCreateTable(io.github.joegxx.localsql.ir.statement.CreateTable t) {
+        StringBuilder sb = new StringBuilder("CREATE TABLE ");
+        sb.append(bareName(t.tableName()));
+        sb.append(" (");
+        List<io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef> cols = t.columns();
+        for (int c = 0; c < cols.size(); c++) {
+            if (c > 0) sb.append(", ");
+            var col = cols.get(c);
+            sb.append(quote(col.name())).append(" ").append(duckType(col.type()));
+            if (!col.nullable()) sb.append(" NOT NULL");
+        }
+        sb.append(")");
+        return sb.toString();
+    }
+
+    public String generateCreateTableAs(io.github.joegxx.localsql.ir.statement.CreateTable t) {
+        StringBuilder sb = new StringBuilder("CREATE TABLE ");
+        sb.append(bareName(t.tableName()));
+        sb.append(" AS ");
+        emit(t.query(), sb);
+        return sb.toString();
+    }
+
+    public String generateCreateView(io.github.joegxx.localsql.ir.statement.CreateView v) {
+        StringBuilder sb = new StringBuilder("CREATE ");
+        if (v.orReplace()) sb.append("OR REPLACE ");
+        sb.append("VIEW ");
+        sb.append(bareName(v.tableName()));
+        sb.append(" AS ");
+        emit(v.query(), sb);
+        return sb.toString();
+    }
+
+    /** Physical tables all live in DuckDB's main schema: emit only the last part. */
+    private String bareName(List<String> parts) {
+        return quote(parts.get(parts.size() - 1));
+    }
+
     private void emit(Relation rel, StringBuilder sb) {
         if (rel instanceof With w) emitWith(w, sb);
         else if (rel instanceof Project p) emitProject(p, sb);
@@ -502,8 +556,25 @@ public final class DuckDbSqlGenerator {
     private String duckType(DataType t) {
         if (t == null) return "VARCHAR";
         if (t instanceof DecimalType d) return "DECIMAL(" + d.precision() + "," + d.scale() + ")";
+        if (t instanceof io.github.joegxx.localsql.ir.type.ArrayType a) {
+            return duckType(a.elementType()) + "[]";
+        }
+        if (t instanceof io.github.joegxx.localsql.ir.type.MapType m) {
+            return "MAP(" + duckType(m.keyType()) + ", " + duckType(m.valueType()) + ")";
+        }
+        if (t instanceof io.github.joegxx.localsql.ir.type.StructType s) {
+            StringBuilder sb = new StringBuilder("STRUCT(");
+            for (int i = 0; i < s.fields().size(); i++) {
+                if (i > 0) sb.append(", ");
+                var f = s.fields().get(i);
+                sb.append(quote(f.name())).append(" ").append(duckType(f.dataType()));
+            }
+            return sb.append(")").toString();
+        }
         return switch (t.typeName()) {
             case "BOOLEAN" -> "BOOLEAN";
+            case "TINYINT" -> "TINYINT";
+            case "SMALLINT" -> "SMALLINT";
             case "INT" -> "INTEGER";
             case "BIGINT" -> "BIGINT";
             case "FLOAT" -> "FLOAT";
@@ -523,7 +594,7 @@ public final class DuckDbSqlGenerator {
     }
 
     /** DuckDB reserved words that would break unquoted SQL if used as identifiers. */
-    private static final java.util.Set<String> DUCKDB_RESERVED = java.util.Set.of(
+    public static final java.util.Set<String> DUCKDB_RESERVED = java.util.Set.of(
             "all", "analyse", "analyze", "and", "anti", "any", "array", "as", "asc",
             "asymmetric", "at", "authorization", "between", "bigint", "binary", "bit",
             "boolean", "both", "by", "case", "cast", "char", "character", "check",

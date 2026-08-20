@@ -199,13 +199,27 @@ ORDER BY cnt DESC;
 - **常用函数**:`count/sum/avg/min/max`、`coalesce`、`substring`、`concat`、`row_number/rank/dense_rank`、`size`(-> `array_length`)、`explode`(-> `unnest`)等
 - 标识符支持反引号(`` `order count` ``)和大小写混合;DuckDB 保留字自动引号化
 
+## DML / DDL(建表、插入、视图)
+
+- **`CREATE TABLE`**:`CREATE TABLE t (id BIGINT, name STRING, score DOUBLE)`(支持 `NOT NULL`、`IF NOT EXISTS`)
+- **`CREATE TABLE ... AS SELECT`**(CTAS):从查询结果建表,类型自动推导
+- **`CREATE TABLE ... LIKE src`**:复制源表 schema 建空表
+- **`PARTITIONED BY (col TYPE)`**:分区列追加到 schema 末尾(DuckDB 无分区概念,当普通列用);裸列引用需已存在于 schema
+- **`INSERT INTO t [(c1, c2)]`** + `VALUES` / `SELECT`:追加数据,返回受影响行数(`count` 列)
+- **`INSERT OVERWRITE TABLE t`**:事务内 `DELETE` + `INSERT`,整表替换
+- **`CREATE VIEW v AS SELECT ...`** / **`CREATE OR REPLACE VIEW`** / `IF NOT EXISTS`;视图可被查询,出现在 `SHOW TABLES`
+- 运行期建的表/视图注册进 Catalog,IDEA 数据源刷新后可见,`DESCRIBE` 能看到真实列类型
+
 ## 显式不支持的特性
 
 遇到这些语法会明确报错(而不是静默出错结果):
 
 | 特性 | 说明 |
 |---|---|
-| DDL(CREATE/ALTER/DROP) | Phase 2 |
+| ALTER / DROP TABLE/VIEW、CREATE/ALTER/DROP DATABASE | 后续版本 |
+| `INSERT` 带 `PARTITION (…)`、`INSERT OVERWRITE DIRECTORY`、multi-INSERT、`DELETE` / `UPDATE` / `MERGE` | |
+| `CREATE TEMPORARY/EXTERNAL TABLE`、`CREATE TEMPORARY VIEW`、`CREATE VIEW v (col, …)` 列别名 | |
+| `SKEWED BY` / `CLUSTERED BY`(bucketing)、分区 transform(如 `years(dt)`)、`PARTITIONED BY` + `AS SELECT` 组合 | |
 | `NATURAL JOIN` | 需要同名列解析 |
 | 命名窗口 `WINDOW w AS ...` | 先写 `OVER (...)` 内联形式 |
 | 聚合 `FILTER (WHERE ...)` 子句 | |

@@ -22,6 +22,62 @@ public final class SemanticAnalyzer {
         return rel;
     }
 
+    /** Analyze a top-level statement: resolves query children and validates DML/DDL targets. */
+    public io.github.joegxx.localsql.ir.statement.Statement analyze(
+            io.github.joegxx.localsql.ir.statement.Statement stmt) {
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.QueryStatement q) {
+            analyze(q.query());
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.Insert i) {
+            analyze(i.query());
+            validateInsert(i);
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateTable ct) {
+            if (ct.query() != null) analyze(ct.query());
+            if (ct.likeSource() != null
+                    && catalog.resolveTable(ct.likeSource()).isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Source table does not exist: " + String.join(".", ct.likeSource()));
+            }
+            String db = databaseOf(ct.tableName());
+            if (catalog.getDatabase(db).isEmpty()) {
+                throw new IllegalArgumentException("Database does not exist: " + db);
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateView cv) {
+            analyze(cv.query());
+            return stmt;
+        }
+        throw new UnsupportedOperationException("Unsupported statement: " + stmt.getClass().getSimpleName());
+    }
+
+    private void validateInsert(io.github.joegxx.localsql.ir.statement.Insert i) {
+        Catalog.Table target = catalog.resolveTable(i.tableName())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Table does not exist: " + String.join(".", i.tableName())));
+        if (!"TABLE".equalsIgnoreCase(target.tableType())) {
+            throw new IllegalArgumentException("INSERT target is not a table: "
+                    + String.join(".", i.tableName()));
+        }
+        if (i.columns() != null) {
+            for (String col : i.columns()) {
+                boolean found = target.columns().stream()
+                        .anyMatch(c -> c.name().equalsIgnoreCase(col));
+                if (!found) {
+                    throw new IllegalArgumentException(
+                            "Column does not exist in table " + String.join(".", i.tableName()) + ": " + col);
+                }
+            }
+        }
+    }
+
+    private static String databaseOf(List<String> parts) {
+        return parts.size() >= 2 ? parts.get(parts.size() - 2) : "default";
+    }
+
     private static final class AnalyzerVisitor extends IrVisitor<Void, Void> {
         private final Catalog catalog;
 
@@ -29,7 +85,7 @@ public final class SemanticAnalyzer {
 
         @Override
         public Void visitTableScan(TableScan r, Void ctx) {
-            catalog.getTable(r.tableName()).ifPresent(table -> {
+            catalog.resolveTable(r.tableName()).ifPresent(table -> {
                 List<AttributeReference> out = new ArrayList<>();
                 List<String> qualifier = r.alias() != null
                         ? List.of(r.alias())

@@ -28,7 +28,22 @@ public final class SparkAstBuilder {
         if (stmt instanceof CreateTableContext ct) return buildCreateTable(ct);
         if (stmt instanceof CreateTableLikeContext ctl) return buildCreateTableLike(ctl);
         if (stmt instanceof CreateViewContext cv) return buildCreateView(cv);
+        if (stmt instanceof DropTableContext dt) return buildDrop(dt);
+        if (stmt instanceof DropViewContext dv) return buildDrop(dv);
         throw new UnsupportedOperationException("MVP only supports DQL and basic DDL/DML. Got: " + stmt.getText());
+    }
+
+    private io.github.joegxx.localsql.ir.statement.DropTable buildDrop(DropTableContext dt) {
+        if (dt.PURGE() != null) {
+            throw new UnsupportedOperationException("DROP TABLE PURGE is not supported");
+        }
+        return new io.github.joegxx.localsql.ir.statement.DropTable(
+                parts(dt.multipartIdentifier()), false, dt.IF() != null);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.DropTable buildDrop(DropViewContext dv) {
+        return new io.github.joegxx.localsql.ir.statement.DropTable(
+                parts(dv.multipartIdentifier()), true, dv.IF() != null);
     }
 
     private io.github.joegxx.localsql.ir.statement.Insert buildInsert(DmlStatementContext dml) {

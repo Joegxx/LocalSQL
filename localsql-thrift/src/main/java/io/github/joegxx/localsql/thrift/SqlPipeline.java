@@ -58,8 +58,36 @@ final class SqlPipeline {
         if (stmt instanceof Insert i) return executeInsert(i);
         if (stmt instanceof CreateTable ct) return executeCreateTable(ct);
         if (stmt instanceof CreateView cv) return executeCreateView(cv);
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropTable dr) return executeDrop(dr);
         throw new UnsupportedOperationException(
                 "Unsupported statement: " + stmt.getClass().getSimpleName());
+    }
+
+    private DuckDbExecutor.QueryResult executeDrop(io.github.joegxx.localsql.ir.statement.DropTable dr)
+            throws SQLException {
+        String db = databaseOf(dr.tableName());
+        String name = dr.tableName().get(dr.tableName().size() - 1);
+        Catalog.Table existing = catalogService.getTable(db, name).orElse(null);
+        if (existing == null) {
+            if (dr.ifExists()) return empty();
+            throw new IllegalArgumentException(
+                    (dr.view() ? "View" : "Table") + " does not exist: " + String.join(".", dr.tableName()));
+        }
+        if (dr.view() && !"VIEW".equalsIgnoreCase(existing.tableType())) {
+            throw new IllegalArgumentException(
+                    "DROP VIEW target is not a view: " + String.join(".", dr.tableName()));
+        }
+        if (!dr.view() && "VIEW".equalsIgnoreCase(existing.tableType())) {
+            throw new IllegalArgumentException(
+                    "DROP TABLE target is a view (use DROP VIEW): " + String.join(".", dr.tableName()));
+        }
+        try {
+            catalogService.dropTable(db, name);
+        } catch (Exception e) {
+            throw new SQLException("Failed to drop catalog entry for " + name + ": " + e.getMessage(), e);
+        }
+        executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ") + quote(name));
+        return empty();
     }
 
     private DuckDbExecutor.QueryResult executeInsert(Insert i) throws SQLException {

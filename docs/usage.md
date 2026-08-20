@@ -208,6 +208,7 @@ ORDER BY cnt DESC;
 - **`INSERT INTO t [(c1, c2)]`** + `VALUES` / `SELECT`:追加数据,返回受影响行数(`count` 列)
 - **`INSERT OVERWRITE TABLE t`**:事务内 `DELETE` + `INSERT`,整表替换
 - **`CREATE VIEW v AS SELECT ...`** / **`CREATE OR REPLACE VIEW`** / `IF NOT EXISTS`;视图可被查询,出现在 `SHOW TABLES`
+- **`DROP TABLE [IF EXISTS] t`** / **`DROP VIEW [IF EXISTS] v`**:删物理对象 + 清 Catalog 元数据;类型不匹配(DROP TABLE 删视图等)报错
 - 运行期建的表/视图注册进 Catalog,IDEA 数据源刷新后可见,`DESCRIBE` 能看到真实列类型
 
 ## 显式不支持的特性
@@ -216,7 +217,7 @@ ORDER BY cnt DESC;
 
 | 特性 | 说明 |
 |---|---|
-| ALTER / DROP TABLE/VIEW、CREATE/ALTER/DROP DATABASE | 后续版本 |
+| ALTER TABLE/VIEW、RENAME、CREATE/ALTER/DROP DATABASE | 后续版本 |
 | `INSERT` 带 `PARTITION (…)`、`INSERT OVERWRITE DIRECTORY`、multi-INSERT、`DELETE` / `UPDATE` / `MERGE` | |
 | `CREATE TEMPORARY/EXTERNAL TABLE`、`CREATE TEMPORARY VIEW`、`CREATE VIEW v (col, …)` 列别名 | |
 | `SKEWED BY` / `CLUSTERED BY`(bucketing)、分区 transform(如 `years(dt)`)、`PARTITIONED BY` + `AS SELECT` 组合 | |

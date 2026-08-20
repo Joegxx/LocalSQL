@@ -70,7 +70,7 @@ AI / Developer
 - ✅ **Spark SQL 3.2.0 syntax** — full ANTLR grammar support
 - ✅ **DQL queries** — SELECT, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT
 - ✅ **Advanced SQL** — CTE, UNION, subqueries, window functions, ROLLUP/CUBE/GROUPING SETS
-- ✅ **DML/DDL** — INSERT INTO/OVERWRITE, CREATE TABLE (incl. CTAS / LIKE / PARTITIONED BY), CREATE [OR REPLACE] VIEW
+- ✅ **DML/DDL** — INSERT INTO/OVERWRITE, CREATE TABLE (incl. CTAS / LIKE / PARTITIONED BY), CREATE [OR REPLACE] VIEW, DROP TABLE/VIEW
 - ✅ **HiveServer2 Thrift** — connect with DBeaver, DataGrip, or any Hive JDBC client
 - ✅ **Common IR** — clean abstraction layer between parsers and execution backends
 - ✅ **Semantic analyzer** — name resolution, type inference, catalog lookup
@@ -291,7 +291,7 @@ Validated through TPC-DS differential consistency testing (135/135 queries):
 
 ### Explicitly Unsupported (Phase 2)
 
-- ALTER / DROP TABLE/VIEW, CREATE/ALTER/DROP DATABASE, DELETE / UPDATE / MERGE, multi-INSERT
+- ALTER TABLE/VIEW, RENAME, CREATE/ALTER/DROP DATABASE, DELETE / UPDATE / MERGE, multi-INSERT
 - `NATURAL JOIN`
 - Named windows (`WINDOW w AS ...`)
 - Aggregate `FILTER (WHERE ...)` clause

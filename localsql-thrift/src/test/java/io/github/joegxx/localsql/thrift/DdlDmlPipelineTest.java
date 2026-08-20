@@ -261,6 +261,72 @@ class DdlDmlPipelineTest {
     }
 
     @Test
+    void dropTableRemovesEverything() throws Exception {
+        exec("CREATE TABLE t (id BIGINT)");
+        exec("INSERT INTO t VALUES (1)");
+        exec("DROP TABLE t");
+        // gone from DuckDB and from catalog metadata
+        try {
+            exec("SELECT * FROM t");
+            fail("should have thrown");
+        } catch (Exception e) {
+            assertTrue(e.getMessage().toLowerCase().contains("t"),
+                    "expected table-not-found error, got: " + e.getMessage());
+        }
+        assertFalse(exec("SHOW TABLES").rows().stream().map(row -> String.valueOf(row.get(0))).anyMatch("t"::equals));
+        // recreate works
+        exec("CREATE TABLE t (id BIGINT)");
+        exec("INSERT INTO t VALUES (2)");
+        assertEquals(2L, ((Number) exec("SELECT id FROM t").rows().get(0).get(0)).longValue());
+    }
+
+    @Test
+    void dropTableIfExistsNoop() throws Exception {
+        exec("DROP TABLE IF EXISTS nonexistent");
+        exec("CREATE TABLE t (id BIGINT)");
+        exec("DROP TABLE IF EXISTS t");
+        // no error second time
+        exec("DROP TABLE IF EXISTS t");
+    }
+
+    @Test
+    void dropMissingTableFailsWithoutIfExists() throws Exception {
+        try {
+            exec("DROP TABLE nonexistent");
+            fail("should have thrown");
+        } catch (Exception e) {
+            assertTrue(e.getMessage().toLowerCase().contains("does not exist"));
+        }
+    }
+
+    @Test
+    void dropViewAndTypeMismatch() throws Exception {
+        exec("CREATE VIEW v AS SELECT id FROM users");
+        exec("DROP VIEW v");
+        assertFalse(exec("SHOW TABLES").rows().stream().map(row -> String.valueOf(row.get(0))).anyMatch("v"::equals));
+        // DROP TABLE on a view fails
+        exec("CREATE VIEW v AS SELECT id FROM users");
+        try {
+            exec("DROP TABLE v");
+            fail("should have thrown");
+        } catch (Exception e) {
+            assertTrue(e.getMessage().toLowerCase().contains("view"));
+        }
+        // DROP VIEW on a table fails
+        exec("CREATE TABLE t (id BIGINT)");
+        try {
+            exec("DROP VIEW t");
+            fail("should have thrown");
+        } catch (Exception e) {
+            assertTrue(e.getMessage().toLowerCase().contains("not a view"));
+        }
+        // or replace view can reuse the name after drop
+        exec("DROP TABLE t");
+        exec("CREATE VIEW t AS SELECT name FROM users");
+        assertEquals("name", exec("SELECT * FROM t").columns().get(0));
+    }
+
+    @Test
     void unsupportedStatementsRejected() throws Exception {
         assertThrows(UnsupportedOperationException.class,
                 () -> exec("CREATE TEMPORARY TABLE tmp (id INT)"));

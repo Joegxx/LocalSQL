@@ -1,0 +1,23 @@
+README.zh-CN.md
+  s_a15cc7f10cda64::t_178ba02b67f43c 121-131
+  s_a15cc7f10cda64::t_7701c9eaf51751 224-225
+README.md
+  s_a15cc7f10cda64::t_29a4d5c7442c1a 122-132
+  s_a15cc7f10cda64::t_6b86392a218427 225-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "3cd29e9b4a71c2a3409573d5a176df2a58c0c55f",
+  "prompts": {},
+  "sessions": {
+    "s_a15cc7f10cda64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8e24cfaa-e44e-478a-bef2-b77b754e632e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

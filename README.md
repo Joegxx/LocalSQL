@@ -1,268 +1,166 @@
 # LocalSQL
 
-在本地运行 Spark SQL，无需部署 Spark、Hadoop 或 Hive。
+**[中文文档](./README.zh-CN.md)** | English
 
-Run Spark SQL locally without deploying Spark, Hadoop, or Hive.
+> **A lightweight SQL Sandbox enabling developers and AI agents to complete 90% of SQL development, debugging, and verification locally — without touching production data platforms.**
+> **让任何人，尤其是 AI，在不触碰生产数据平台的情况下完成 90% 的 SQL 开发、调试和验证。**
 
-> 使用指南（构建、启动、JDBC 客户端连接、SQL 支持范围、FAQ）：[docs/usage.md](docs/usage.md)
->
-> User guide (build, run, JDBC client setup, SQL coverage, FAQ): [docs/usage.md](docs/usage.md)（中文）
+LocalSQL is an embedded SQL runtime that lets you write and test production SQL locally using Spark SQL 3.2.0 syntax, executed in-process via DuckDB. It exposes a standard HiveServer2 Thrift interface for JDBC clients and database IDEs, requiring no Spark, Hadoop, or Hive deployment.
 
-LocalSQL 是一个基于 Java 21 的嵌入式 SQL Runtime。它使用 Spark SQL 3.2.0 语法解析查询，将查询转换为独立的 Common IR，再生成 DuckDB SQL 并在进程内执行。LocalSQL 同时提供 HiveServer2 Thrift 接口，可供 JDBC 客户端和数据库 IDE 连接。
-
-LocalSQL is a Java 21 embedded SQL runtime. It parses Spark SQL 3.2.0 syntax, converts queries into an independent Common IR, generates DuckDB SQL, and executes it in-process. It also exposes a HiveServer2 Thrift endpoint for JDBC clients and database IDEs.
-
-## 中文
-
-### 项目目标
-
-LocalSQL 面向需要在开发机、测试环境或嵌入式应用中运行数仓 SQL 的场景：
-
-- 本地验证 Spark SQL，无需启动完整的大数据集群
-- 使用 DuckDB 提供轻量、进程内的物理执行能力
-- 通过 HiveServer2 Thrift 协议兼容常见 JDBC 客户端
-- 使用公共 IR 隔离 Spark Parser 与执行后端
-- 为后续扩展 Analyzer、Rewrite、DDL 和其他执行后端保留清晰边界
-
-当前版本是 MVP，重点支持 DQL 查询，不包含分布式执行、事务、权限和优化器。
-
-### 执行流程
+**Core Philosophy:** Production is for execution. LocalSQL is for experimentation.
 
 ```text
-Spark SQL
-   -> ANTLR ParseTree
-   -> Common IR
-   -> Semantic Analyzer
-   -> Rewrite Engine
-   -> DuckDB SQL
-   -> DuckDB Executor
-   -> Query Result
+Production Data Platform
+        │
+        │  Schema / Metadata / Samples
+        ▼
+┌───────────────────────────┐
+│     LocalSQL Sandbox      │
+│                           │
+│  Production Metadata      │
+│  Production Samples       │
+│  Relationship-aware Data  │
+│  Local SQL Execution      │
+│  AI Test Cases            │
+│  Assertions               │
+│  Production Risk Analysis │
+└──────────────┬────────────┘
+               │
+               │ Verified SQL
+               ▼
+       Production Execution
 ```
 
-IR 是各模块之间的唯一查询表示。DuckDB 后端只消费 IR，不直接依赖 Spark ParseTree 或 ANTLR Tree。
+---
 
-### 当前能力
+## Why LocalSQL?
 
-- Spark SQL 3.2.0 ANTLR 语法解析
-- SELECT、WHERE、JOIN、GROUP BY、HAVING、ORDER BY、LIMIT
-- 表别名和子查询别名
-- UNION、CTE、VALUES、常用表达式和函数
-- Catalog 表和列元数据
-- DuckDB 持久化 CatalogStore
-- HiveServer2 `TCLIService` Thrift RPC
-- `OpenSession -> ExecuteStatement -> FetchResults` 查询链路
-- `GetTables`、`GetColumns` 等元数据接口
+Traditional SQL development means running queries directly against production clusters — every iteration, every debugging cycle, every AI-generated attempt. This creates:
 
-端到端测试覆盖 JOIN/GROUP BY、WHERE/ORDER BY/LIMIT、HAVING、子查询别名和 Thrift 元数据访问。
+- **Unnecessary compute costs** from repeated trial-and-error
+- **Production risk** from untested queries hitting real data
+- **Slow feedback loops** waiting for cluster scheduling
+- **AI amplified problems** when agents iterate blindly against production
 
-### 环境要求
-
-- JDK 21
-- Maven 3.9+
-
-确认 Java 版本：
-
-```bash
-java -version
-mvn -version
-```
-
-### 构建和测试
-
-运行全部测试：
-
-```bash
-mvn clean test
-```
-
-构建可执行 JAR：
-
-```bash
-mvn clean package -DskipTests
-```
-
-生成文件：
+LocalSQL moves the entire debug cycle local:
 
 ```text
-localsql-app/target/runtime.jar
+AI / Developer
+      │
+      ▼
+ LocalSQL Sandbox
+      │
+      ├── Parse
+      ├── Validate
+      ├── Execute locally
+      ├── Test with cases
+      ├── Assert correctness
+      └── Analyze production risk
+      │
+      ▼
+ Production (only verified SQL)
 ```
 
-### 启动
+---
 
-默认监听 HiveServer2 Thrift 端口 `10000`：
+## Features
 
-```bash
-java -jar localsql-app/target/runtime.jar
-```
+### Current (MVP)
 
-指定端口：
+- ✅ **Spark SQL 3.2.0 syntax** — full ANTLR grammar support
+- ✅ **DQL queries** — SELECT, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT
+- ✅ **Advanced SQL** — CTE, UNION, subqueries, window functions, ROLLUP/CUBE/GROUPING SETS
+- ✅ **HiveServer2 Thrift** — connect with DBeaver, DataGrip, or any Hive JDBC client
+- ✅ **Common IR** — clean abstraction layer between parsers and execution backends
+- ✅ **Semantic analyzer** — name resolution, type inference, catalog lookup
+- ✅ **Rewrite engine** — function translation (e.g., `size` → `array_length`)
+- ✅ **DuckDB execution** — fast in-process SQL engine, single-file database
+- ✅ **135/135 TPC-DS queries** — differential consistency testing against DuckDB native execution
 
-```bash
-java -jar localsql-app/target/runtime.jar 10001
-```
+### Roadmap
 
-启动后会注册 `users` 和 `orders` 示例表，并执行一条 JOIN/GROUP BY 演示查询。服务会持续运行，直到进程退出。
+#### Phase 1 — Local SQL Sandbox
+- ⬜ Sandbox database packaging
+- ⬜ Production schema import
+- ⬜ Sample data generation
+- ⬜ Local SQL CLI
 
-### JDBC 连接
+#### Phase 2 — Production Dataset Mirror
+- ⬜ Production metadata extraction
+- ⬜ Table sampling with relationship preservation
+- ⬜ Data masking
+- ⬜ Column statistics and cardinality
+- ⬜ Partition metadata
+- ⬜ Reproducible dataset versioning
 
-使用兼容 HiveServer2 的 JDBC 客户端连接：
+#### Phase 3 — AI SQL Testing
+- ⬜ Test case API
+- ⬜ Synthetic test data generation
+- ⬜ Edge-case generation
+- ⬜ Assertions framework
+- ⬜ Result comparison
+- ⬜ SQL regression tests
+- ⬜ AI agent interface
 
-```text
-jdbc:hive2://localhost:10000/default
-```
+#### Phase 4 — Production Risk Analysis
+- ⬜ Full-scan detection
+- ⬜ Partition filter detection
+- ⬜ Join explosion detection
+- ⬜ Cardinality analysis
+- ⬜ Production row-count awareness
+- ⬜ Query complexity analysis
+- ⬜ Configurable risk policies
 
-当前 MVP 不启用认证。可在 DBeaver、DataGrip 或其他支持 Hive JDBC 的工具中使用该地址。
+#### Phase 5 — Production Submission Gateway
+- ⬜ Verification report
+- ⬜ Sandbox versioning
+- ⬜ Query approval workflow
+- ⬜ Production execution gateway
+- ⬜ Execution limits
+- ⬜ Audit records
 
-示例查询：
+---
 
-```sql
-SELECT u.name, count(*) AS cnt
-FROM users u
-JOIN orders o ON u.id = o.user_id
-GROUP BY u.name
-ORDER BY cnt DESC;
-```
-
-预期结果：
-
-```text
-alice  2
-bob    1
-```
-
-### 模块结构
-
-| 模块 | 职责 |
-| --- | --- |
-| `localsql-parser` | ANTLR 语法和 Spark SQL ParseTree |
-| `localsql-ir` | 与 Parser 和执行后端解耦的 Common IR |
-| `localsql-spark` | Spark ParseTree 到 Common IR |
-| `localsql-analyzer` | 标识符解析、类型推导和 Catalog 查询 |
-| `localsql-rewrite` | IR 重写和函数名转换 |
-| `localsql-catalog` | 逻辑数据库、表、列和 CatalogStore 抽象 |
-| `localsql-duckdb` | DuckDB SQL 生成、执行和 CatalogStore 实现 |
-| `localsql-thrift` | HiveServer2 Thrift 服务和查询编排 |
-| `localsql-app` | 应用入口、示例数据和可执行 JAR |
-
-### 当前限制
-
-- 仅支持 DQL；CREATE、ALTER、DROP 尚未实现
-- ROLLUP、CUBE、GROUPING SETS 尚未实现
-- 窗口函数覆盖仍在完善
-- 不包含优化器、统计信息和成本模型
-- 不支持事务、ACID、权限和认证
-- 不支持分布式执行
-
-### 开发说明
-
-- 必须使用 Java 21 构建
-- Parser 只负责解析，Analyzer 负责解析名称和类型，Generator 只负责序列化 IR
-- 所有执行后端必须消费 Common IR，不得直接读取 Spark ParseTree
-- Spark 3.2.0 grammar 中的 `LETTER` 规则保留了小写字母支持，不要恢复为仅 `[A-Z]`
-- 完整协作和架构约束见 `AGENTS.md`
-
-## English
-
-### Goals
-
-LocalSQL targets development, testing, and embedded scenarios where warehouse SQL needs to run without a full data platform:
-
-- Validate Spark SQL locally without starting a big-data cluster
-- Use DuckDB as a lightweight in-process execution engine
-- Connect JDBC clients through the HiveServer2 Thrift protocol
-- Isolate the Spark parser from execution backends through a Common IR
-- Preserve clear boundaries for analyzers, rewrites, DDL, and future backends
-
-The current release is an MVP focused on DQL. Distributed execution, transactions, authorization, and query optimization are out of scope.
-
-### Execution Pipeline
-
-```text
-Spark SQL
-   -> ANTLR ParseTree
-   -> Common IR
-   -> Semantic Analyzer
-   -> Rewrite Engine
-   -> DuckDB SQL
-   -> DuckDB Executor
-   -> Query Result
-```
-
-The Common IR is the only query representation shared across modules. The DuckDB backend consumes IR and never reads Spark ParseTree or ANTLR trees directly.
-
-### Current Features
-
-- Spark SQL 3.2.0 ANTLR grammar
-- SELECT, WHERE, JOIN, GROUP BY, HAVING, ORDER BY, and LIMIT
-- Table aliases and subquery aliases
-- UNION, CTE, VALUES, common expressions, and functions
-- Table and column metadata through the Catalog
-- DuckDB-backed CatalogStore persistence
-- HiveServer2 `TCLIService` Thrift RPC
-- `OpenSession -> ExecuteStatement -> FetchResults` query flow
-- Metadata operations including `GetTables` and `GetColumns`
-
-End-to-end tests cover JOIN/GROUP BY, WHERE/ORDER BY/LIMIT, HAVING, subquery aliases, and Thrift metadata access.
+## Quick Start
 
 ### Requirements
 
 - JDK 21
 - Maven 3.9+
 
-Verify the toolchain:
-
 ```bash
-java -version
+java -version    # should show 21.x
 mvn -version
 ```
 
-### Build and Test
-
-Run all tests:
-
-```bash
-mvn clean test
-```
-
-Build the executable JAR:
+### Build
 
 ```bash
 mvn clean package -DskipTests
 ```
 
-The application is generated at:
-
-```text
-localsql-app/target/runtime.jar
-```
+Produces: `localsql-app/target/runtime.jar`
 
 ### Run
 
-Start the HiveServer2 Thrift service on the default port `10000`:
-
 ```bash
+# Start HiveServer2 Thrift on port 10000
 java -jar localsql-app/target/runtime.jar
-```
 
-Use a custom port:
-
-```bash
+# Custom port
 java -jar localsql-app/target/runtime.jar 10001
 ```
 
-At startup, LocalSQL registers sample `users` and `orders` tables and runs a JOIN/GROUP BY demonstration query. The process keeps serving requests until it is terminated.
+### Connect
 
-### JDBC Connection
-
-Connect with a HiveServer2-compatible JDBC client:
-
-```text
+**JDBC URL:**
+```
 jdbc:hive2://localhost:10000/default
 ```
 
-Authentication is disabled in the current MVP. The URL can be used with DBeaver, DataGrip, or another client that supports Hive JDBC.
+Use with DBeaver, DataGrip, or any HiveServer2-compatible client. No authentication required in MVP.
 
-Example query:
+**Example query:**
 
 ```sql
 SELECT u.name, count(*) AS cnt
@@ -272,44 +170,246 @@ GROUP BY u.name
 ORDER BY cnt DESC;
 ```
 
-Expected result:
-
-```text
+**Expected result:**
+```
 alice  2
 bob    1
 ```
 
+---
+
+## Architecture
+
+LocalSQL maintains a lightweight, non-Calcite architecture focused on clean separation:
+
+```text
+Spark SQL
+   ↓
+ANTLR ParseTree
+   ↓
+Common IR (single source of truth)
+   ↓
+Semantic Analyzer
+   ↓
+Rewrite Engine
+   ↓
+DuckDB SQL
+   ↓
+DuckDB Executor
+   ↓
+Query Result
+```
+
+### Design Principles
+
+1. **Module independence** — strict layer boundaries, no cross-layer leaks
+2. **IR is the single source of truth** — backends consume IR, never ParseTree
+3. **Parser only parses** — produces parse trees, no logic
+4. **Analyzer only resolves** — name resolution, type inference, catalog queries
+5. **Generator only serializes** — IR → SQL string, stateless, no catalog access
+6. **Executor only executes** — runs SQL, returns results, doesn't touch IR
+7. **Catalog only stores metadata** — databases/tables/columns, no SQL execution
+8. **Metadata vs Runtime separation** — Catalog is logical, DuckDB is physical
+
 ### Modules
 
 | Module | Responsibility |
-| --- | --- |
-| `localsql-parser` | ANTLR grammar and Spark SQL ParseTree |
+|--------|----------------|
+| `localsql-parser` | ANTLR grammar + Spark SQL ParseTree |
 | `localsql-ir` | Common IR independent of parsers and backends |
-| `localsql-spark` | Spark ParseTree to Common IR conversion |
-| `localsql-analyzer` | Name resolution, type inference, and Catalog lookup |
+| `localsql-spark` | Spark ParseTree → Common IR conversion |
+| `localsql-analyzer` | Name resolution, type inference, catalog lookup |
 | `localsql-rewrite` | IR rewrites and function-name translation |
-| `localsql-catalog` | Logical databases, tables, columns, and CatalogStore API |
-| `localsql-duckdb` | DuckDB SQL generation, execution, and CatalogStore implementation |
+| `localsql-catalog` | Logical databases, tables, columns, CatalogStore API |
+| `localsql-duckdb` | DuckDB SQL generation, execution, CatalogStore implementation |
 | `localsql-thrift` | HiveServer2 Thrift service and query orchestration |
-| `localsql-app` | Application entry point, sample data, and executable JAR |
+| `localsql-app` | Application entry point, sample data, executable JAR |
 
-### Limitations
+---
 
-- DQL only; CREATE, ALTER, and DROP are not implemented
-- ROLLUP, CUBE, and GROUPING SETS are not implemented
-- Window-function coverage is still in progress
+## Testing
+
+```bash
+# All tests (284 total)
+mvn clean test
+
+# TPC-DS consistency (135 queries, requires network for DuckDB tpcds extension)
+mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest
+
+# Translation regression (136 queries, no execution)
+mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest
+```
+
+### Test Architecture
+
+| Layer | Test Class | Content |
+|-------|------------|---------|
+| L1 Translation | `TpcdsQueryPipelineTest` | 136 TPC-DS queries parse→generate, no execution |
+| L3 Manual Golden | `TpcdsGoldenResultTest` | Execute via real Thrift, compare with hand-verified Spark semantics |
+| L3 Differential Oracle | `TpcdsConsistencyTest` | Same data + same SQL: DuckDB native vs. Thrift pipeline, bidirectional `EXCEPT ALL` strict comparison, **135/135 passing** |
+
+---
+
+## Documentation
+
+- **[Usage Guide](docs/usage.md)** — detailed setup, JDBC connection, SQL features, troubleshooting
+- **[AGENTS.md](AGENTS.md)** — architecture rules, module boundaries, development guidelines
+
+---
+
+## Supported SQL Features
+
+Validated through TPC-DS differential consistency testing (135/135 queries):
+
+- **Basic queries**: `SELECT` / `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT`
+- **Joins**: `INNER` / `LEFT` / `RIGHT` / `FULL OUTER` / `CROSS` / `SEMI` / `ANTI`, plus `JOIN ... USING (col)`
+- **Set operations**: `UNION [ALL]` / `INTERSECT` / `EXCEPT`
+- **CTEs**: `WITH a AS (...), b AS (...) SELECT ...`
+- **Subqueries**: scalar, `EXISTS` / `NOT EXISTS`, `IN (subquery)`, derived tables with aliases
+- **Window functions**: `OVER (PARTITION BY ... ORDER BY ...)` with `ROWS|RANGE BETWEEN` frames
+- **Grouping extensions**: `ROLLUP` / `CUBE` / `GROUPING SETS` (including legacy `WITH ROLLUP`)
+- **Expressions**: `CASE WHEN`, `IN` lists, `BETWEEN`, `LIKE` / `RLIKE`, `IS [NOT] NULL`
+- **Operators**: `+ - * / %`, integer division `DIV` (→ `//`), bitwise `& | ^`, string `||`, null-safe `<=>` (`IS NOT DISTINCT FROM`)
+- **CAST**: including `DECIMAL(p,s)`
+- **Literals**: integers, decimals, scientific notation, strings, dates (`DATE '2020-01-01'`), `INTERVAL 30 days`
+- **Functions**: `count/sum/avg/min/max`, `coalesce`, `substring`, `concat`, `row_number/rank/dense_rank`, `size` (→ `array_length`), `explode` (→ `unnest`)
+- **Identifiers**: backtick-quoted (`` `order count` ``), case-insensitive, DuckDB reserved words auto-quoted
+
+### Explicitly Unsupported (Phase 2)
+
+- DDL (`CREATE` / `ALTER` / `DROP`)
+- `NATURAL JOIN`
+- Named windows (`WINDOW w AS ...`)
+- Aggregate `FILTER (WHERE ...)` clause
+- Lambda expressions / `TRANSFORM`
+
+---
+
+## AI-Native SQL Workflow
+
+LocalSQL is designed for AI agents to iterate safely:
+
+```text
+User Request
+     │
+     ▼
+   AI Agent
+     │
+     ▼
+Generate SQL
+     │
+     ▼
+Inspect Schema
+     │
+     ▼
+Run in LocalSQL
+     │
+     ▼
+Generate Test Cases
+     │
+     ▼
+Execute Test Cases
+     │
+     ▼
+Assertions
+     │
+     ▼
+Risk Analysis
+     │
+     ├──── FAIL ────► Fix SQL ────┐
+     │                             │
+     │                             └──► Run Again
+     │
+     ▼
+   PASS
+     │
+     ▼
+Production Submission
+```
+
+AI can iterate unlimited times locally without consuming production compute or risking production stability.
+
+---
+
+## Why DuckDB?
+
+- **Single-file** — `company-sandbox.duckdb` is the entire database
+- **In-process** — no server dependencies
+- **Fast startup** — immediate query execution
+- **Strong SQL** — comprehensive analytics capabilities
+- **Distribution-friendly** — share sandbox datasets as files
+
+---
+
+## Non-Goals
+
+
+LocalSQL does NOT aim to be:
+
+- A distributed compute engine
+- A production data warehouse
+- A Spark / StarRocks / Trino replacement
+- A general-purpose OLTP database
+- A query optimizer or cost-based planner
+
+LocalSQL's goal:
+
+> **Provide a safe, lightweight, local experimentation environment between developers/AI and production SQL submission.**
+
+---
+
+## Current Limitations
+
+- DQL only; DDL is Phase 2
 - No optimizer, statistics, or cost model
-- No transactions, ACID guarantees, authorization, or authentication
+- No transactions, ACID, or authorization
 - No distributed execution
+- Sandbox results ≠ production results (by design — sandbox tests logic, not scale)
 
-### Development Notes
+---
 
-- Java 21 is required
-- The parser only parses, the analyzer resolves names and types, and generators only serialize IR
-- Every execution backend must consume the Common IR instead of Spark ParseTree
-- Keep the lowercase-letter support in the Spark 3.2.0 grammar `LETTER` rule; do not restore it to `[A-Z]` only
-- See `AGENTS.md` for detailed architecture and collaboration rules
+## Contributing
+
+Contributions welcome. Before submitting:
+
+1. Read [AGENTS.md](AGENTS.md) for architecture rules
+2. Run full test suite: `mvn clean test`
+3. Ensure TPC-DS consistency tests pass: `mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest`
+4. Follow existing code style and module boundaries
+
+---
 
 ## License
 
-No license has been declared yet.
+Apache License 2.0
+
+---
+
+## Philosophy
+
+```text
+Production is for execution.
+LocalSQL is for experimentation.
+```
+
+Or put another way:
+
+```text
+Let AI make mistakes locally,
+not in production.
+```
+
+The goal is to shift SQL development from:
+
+```text
+Write → Execute in Production → Observe → Fix → Repeat
+```
+
+To:
+
+```text
+Write → Execute Locally → Test → Assert → Analyze Risk → Verify → Production
+```
+
+Only verified SQL reaches production.
+

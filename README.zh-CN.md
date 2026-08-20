@@ -118,6 +118,17 @@ AI / 开发者
 - ⬜ 执行限制
 - ⬜ 审计记录
 
+#### Phase 6 — 多引擎支持
+- ⬜ Spark SQL 4.x 语法支持
+- ⬜ Doris SQL 方言
+- ⬜ Snowflake SQL 方言
+- ⬜ BigQuery SQL 方言
+- ⬜ ClickHouse SQL 方言
+- ⬜ Trino/Presto SQL 方言
+- ⬜ 可插拔解析器架构
+- ⬜ 方言特定的函数映射
+- ⬜ 跨方言查询翻译
+
 ---
 
 ## 快速开始
@@ -209,6 +220,8 @@ DuckDB 执行器
 6. **Executor 只负责执行** — 运行 SQL，返回结果，不触碰 IR
 7. **Catalog 只存储元数据** — databases/tables/columns，不执行 SQL
 8. **元数据与运行时分离** — Catalog 是逻辑的，DuckDB 是物理的
+
+**多引擎扩展性：** Common IR 设计使 LocalSQL 能够支持多种 SQL 方言（Spark 3.x/4.x、Doris、Snowflake、BigQuery、ClickHouse、Trino），只需添加新的解析器将其转换为相同的 IR。每种方言的解析器是独立的；分析器、重写器和 DuckDB 后端保持不变。
 
 ### 模块
 

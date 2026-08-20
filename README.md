@@ -119,6 +119,17 @@ AI / Developer
 - ⬜ Execution limits
 - ⬜ Audit records
 
+#### Phase 6 — Multi-Engine Support
+- ⬜ Spark SQL 4.x syntax support
+- ⬜ Doris SQL dialect
+- ⬜ Snowflake SQL dialect
+- ⬜ BigQuery SQL dialect
+- ⬜ ClickHouse SQL dialect
+- ⬜ Trino/Presto SQL dialect
+- ⬜ Pluggable parser architecture
+- ⬜ Dialect-specific function mapping
+- ⬜ Cross-dialect query translation
+
 ---
 
 ## Quick Start
@@ -210,6 +221,8 @@ Query Result
 6. **Executor only executes** — runs SQL, returns results, doesn't touch IR
 7. **Catalog only stores metadata** — databases/tables/columns, no SQL execution
 8. **Metadata vs Runtime separation** — Catalog is logical, DuckDB is physical
+
+**Multi-engine extensibility:** The Common IR design allows LocalSQL to support multiple SQL dialects (Spark 3.x/4.x, Doris, Snowflake, BigQuery, ClickHouse, Trino) by adding new parsers that convert to the same IR. Each dialect's parser is independent; the analyzer, rewriter, and DuckDB backend remain unchanged.
 
 ### Modules
 

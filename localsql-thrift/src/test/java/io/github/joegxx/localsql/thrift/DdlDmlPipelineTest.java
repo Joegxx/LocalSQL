@@ -270,7 +270,8 @@ class DdlDmlPipelineTest {
             exec("SELECT * FROM t");
             fail("should have thrown");
         } catch (Exception e) {
-            assertTrue(e.getMessage().toLowerCase().contains("t"),
+            String msg = e.getMessage().toLowerCase();
+            assertTrue(msg.contains("does not exist") || msg.contains("not found"),
                     "expected table-not-found error, got: " + e.getMessage());
         }
         assertFalse(exec("SHOW TABLES").rows().stream().map(row -> String.valueOf(row.get(0))).anyMatch("t"::equals));

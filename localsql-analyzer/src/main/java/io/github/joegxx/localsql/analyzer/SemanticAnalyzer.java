@@ -49,6 +49,10 @@ public final class SemanticAnalyzer {
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateView cv) {
             analyze(cv.query());
+            String db = databaseOf(cv.tableName());
+            if (catalog.getDatabase(db).isEmpty()) {
+                throw new IllegalArgumentException("Database does not exist: " + db);
+            }
             return stmt;
         }
         throw new UnsupportedOperationException("Unsupported statement: " + stmt.getClass().getSimpleName());

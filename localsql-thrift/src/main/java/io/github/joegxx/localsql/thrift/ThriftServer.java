@@ -28,19 +28,17 @@ public final class ThriftServer {
     private static final Logger LOG = LoggerFactory.getLogger(ThriftServer.class);
 
     private final CatalogService catalogService;
-    private final DuckDbExecutor executor;
     private final SqlPipeline pipeline;
     private TServer server;
     private LocalSqlThriftService service;
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor) {
         this.catalogService = catalogService;
-        this.executor = executor;
         this.pipeline = new SqlPipeline(catalogService, executor);
     }
 
     public void start(int port) {
-        service = new LocalSqlThriftService(catalogService, executor);
+        service = new LocalSqlThriftService(catalogService, pipeline);
         TCLIService.Processor<LocalSqlThriftService> processor = new TCLIService.Processor<>(service);
         Thread serverThread = new Thread(() -> {
             try {

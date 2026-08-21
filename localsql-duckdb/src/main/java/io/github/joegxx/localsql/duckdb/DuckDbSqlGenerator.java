@@ -343,7 +343,7 @@ public final class DuckDbSqlGenerator {
         else if (e instanceof Identifier id) sb.append(quote(id.name()));
         else if (e instanceof AttributeReference a) {
             if (a.qualifier().isEmpty()) sb.append(quote(a.name()));
-            else sb.append(String.join(".", a.qualifier().stream().map(this::quote).toList())).append(".").append(quote(a.name()));
+            else sb.append(String.join(".", a.qualifier().stream().map(DuckDbSqlGenerator::quote).toList())).append(".").append(quote(a.name()));
         }
         else if (e instanceof Alias al) {
             emitExpr(al.child(), sb);
@@ -351,7 +351,7 @@ public final class DuckDbSqlGenerator {
         }
         else if (e instanceof Star s) {
             if (s.qualifier().isEmpty()) sb.append("*");
-            else sb.append(String.join(".", s.qualifier().stream().map(this::quote).toList())).append(".*");
+            else sb.append(String.join(".", s.qualifier().stream().map(DuckDbSqlGenerator::quote).toList())).append(".*");
         }
         else if (e instanceof BinaryExpression b) {
             if (b.op() == BinaryExpression.Op.BIT_XOR) {
@@ -587,7 +587,8 @@ public final class DuckDbSqlGenerator {
         };
     }
 
-    private String quote(String id) {
+    /** Quote an identifier for DuckDB (public so the pipeline can share the exact rules). */
+    public static String quote(String id) {
         if (id == null || id.isEmpty()) return id;
         if (id.matches("[a-z_][a-z0-9_]*") && !DUCKDB_RESERVED.contains(id)) return id;
         return "\"" + id.replace("\"", "\"\"") + "\"";

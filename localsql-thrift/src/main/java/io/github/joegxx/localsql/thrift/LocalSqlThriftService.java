@@ -23,16 +23,14 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     private static final Logger LOG = LoggerFactory.getLogger(LocalSqlThriftService.class);
 
     private final CatalogService catalogService;
-    private final DuckDbExecutor executor;
     private final SqlPipeline pipeline;
 
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
     private final Map<String, OperationState> operations = new ConcurrentHashMap<>();
 
-    LocalSqlThriftService(CatalogService catalogService, DuckDbExecutor executor) {
+    LocalSqlThriftService(CatalogService catalogService, SqlPipeline pipeline) {
         this.catalogService = catalogService;
-        this.executor = executor;
-        this.pipeline = new SqlPipeline(catalogService, executor);
+        this.pipeline = pipeline;
     }
 
     private static final class SessionState {

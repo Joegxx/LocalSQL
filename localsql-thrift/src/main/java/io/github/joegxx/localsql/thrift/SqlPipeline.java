@@ -8,6 +8,7 @@ import io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator;
 import io.github.joegxx.localsql.ir.relation.Relation;
 import io.github.joegxx.localsql.ir.statement.CreateTable;
 import io.github.joegxx.localsql.ir.statement.CreateView;
+import io.github.joegxx.localsql.ir.statement.DropTable;
 import io.github.joegxx.localsql.ir.statement.Insert;
 import io.github.joegxx.localsql.ir.statement.QueryStatement;
 import io.github.joegxx.localsql.ir.statement.Statement;
@@ -20,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * End-to-end pipeline for one Spark SQL statement: parse -> IR -> analyze ->
@@ -45,7 +45,14 @@ final class SqlPipeline {
         this.analyzer = new SemanticAnalyzer(catalogService.catalog());
     }
 
-    DuckDbExecutor.QueryResult execute(String sql) throws SQLException {
+    /**
+     * Serializes statement execution: INSERT OVERWRITE runs a BEGIN/DELETE/
+     * INSERT/COMMIT sequence across several Statements on the shared DuckDB
+     * connection, and interleaved requests from the multi-threaded Thrift
+     * server would corrupt each other's transactions. A local single-user
+     * runtime trades concurrency for correctness here.
+     */
+    synchronized DuckDbExecutor.QueryResult execute(String sql) throws SQLException {
         Statement stmt = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
         if (stmt instanceof QueryStatement q) {
             Relation rel = q.query();
@@ -58,12 +65,12 @@ final class SqlPipeline {
         if (stmt instanceof Insert i) return executeInsert(i);
         if (stmt instanceof CreateTable ct) return executeCreateTable(ct);
         if (stmt instanceof CreateView cv) return executeCreateView(cv);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropTable dr) return executeDrop(dr);
+        if (stmt instanceof DropTable dr) return executeDrop(dr);
         throw new UnsupportedOperationException(
                 "Unsupported statement: " + stmt.getClass().getSimpleName());
     }
 
-    private DuckDbExecutor.QueryResult executeDrop(io.github.joegxx.localsql.ir.statement.DropTable dr)
+    private DuckDbExecutor.QueryResult executeDrop(DropTable dr)
             throws SQLException {
         String db = databaseOf(dr.tableName());
         String name = dr.tableName().get(dr.tableName().size() - 1);
@@ -86,7 +93,7 @@ final class SqlPipeline {
         } catch (Exception e) {
             throw new SQLException("Failed to drop catalog entry for " + name + ": " + e.getMessage(), e);
         }
-        executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ") + quote(name));
+        executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ") + DuckDbSqlGenerator.quote(name));
         return empty();
     }
 
@@ -176,10 +183,10 @@ final class SqlPipeline {
             } catch (Exception e) {
                 throw new SQLException("Failed to drop view " + name + ": " + e.getMessage(), e);
             }
-            executor.run("DROP VIEW IF EXISTS " + quote(name));
-        } else if (cv.ifNotExists() && cv.orReplace()) {
-            return empty();
+            executor.run("DROP VIEW IF EXISTS " + DuckDbSqlGenerator.quote(name));
         }
+        // view does not exist: IF NOT EXISTS only matters in the branch above;
+        // always create it here
         rewriter.rewrite(cv.query());
         String createSql = generator.generateCreateView(cv);
         executor.run(createSql);
@@ -189,13 +196,15 @@ final class SqlPipeline {
 
     private void registerPhysical(String db, String table, String type, String createSql) throws SQLException {
         try {
-            DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + quote(table));
+            DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + DuckDbSqlGenerator.quote(table));
             List<CatalogService.ColumnDef> cols = new ArrayList<>();
             for (List<Object> row : desc.rows()) {
+                // DESCRIBE columns: 0=name 1=type 2=null(YES/NO) 3=key 4=default 5=extra
+                boolean nullable = row.size() <= 2 || !"NO".equalsIgnoreCase(String.valueOf(row.get(2)));
                 cols.add(new CatalogService.ColumnDef(
                         String.valueOf(row.get(0)),
                         Catalog.parseDataType(String.valueOf(row.get(1))),
-                        true, null));
+                        nullable, null));
             }
             Catalog.Table t = catalogService.registerTable(
                     db, table, type, cols, null, null, null, null, null);
@@ -212,12 +221,7 @@ final class SqlPipeline {
     }
 
     private static String bare(List<String> parts) {
-        return quote(parts.get(parts.size() - 1));
-    }
-
-    private static String quote(String id) {
-        if (id.matches("[a-z_][a-z0-9_]*") && !DuckDbSqlGenerator.DUCKDB_RESERVED.contains(id)) return id;
-        return "\"" + id.replace("\"", "\"\"") + "\"";
+        return DuckDbSqlGenerator.quote(parts.get(parts.size() - 1));
     }
 
     private static String databaseOf(List<String> parts) {

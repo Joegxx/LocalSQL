@@ -77,25 +77,21 @@ public final class SparkAstBuilder {
             if (into.IF() != null) {
                 throw new UnsupportedOperationException("INSERT IF NOT EXISTS is not supported");
             }
-            if (into.identifierList() != null) {
-                List<String> cols = new ArrayList<>();
-                for (ErrorCapturingIdentifierContext id : into.identifierList().identifierSeq().ident) {
-                    cols.add(SparkExpressionBuilder.unquote(id.getText()));
-                }
-                Relation withCols = visitQueryTerm(sq.queryTerm());
-                withCols = visitQueryOrganization(sq.queryOrganization(), withCols);
-                if (dml.ctes() != null) withCols = visitCtes(dml.ctes(), withCols);
-                return new io.github.joegxx.localsql.ir.statement.Insert(
-                        parts(target), false, cols, withCols);
-            }
         } else {
             throw new UnsupportedOperationException("Unsupported INSERT form");
+        }
+        List<String> cols = null;
+        if (i instanceof InsertIntoTableContext into && into.identifierList() != null) {
+            cols = new ArrayList<>();
+            for (ErrorCapturingIdentifierContext id : into.identifierList().identifierSeq().ident) {
+                cols.add(SparkExpressionBuilder.unquote(id.getText()));
+            }
         }
         Relation body = visitQueryTerm(sq.queryTerm());
         body = visitQueryOrganization(sq.queryOrganization(), body);
         if (dml.ctes() != null) body = visitCtes(dml.ctes(), body);
         return new io.github.joegxx.localsql.ir.statement.Insert(
-                parts(target), overwrite, null, body);
+                parts(target), overwrite, cols, body);
     }
 
     private io.github.joegxx.localsql.ir.statement.CreateTable buildCreateTable(CreateTableContext ct) {

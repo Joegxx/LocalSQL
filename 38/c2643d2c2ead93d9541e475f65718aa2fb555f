@@ -1,0 +1,27 @@
+docs/usage.md
+  s_b33fc4f71998f0::t_33f4ce28ca792a 223
+  s_b33fc4f71998f0::t_929c4b79e14758 207
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_7621c547ee98d0 106-107
+  s_b33fc4f71998f0::t_732df3474a34fd 119-125
+AGENTS.md
+  s_b33fc4f71998f0::t_038d4ae4f3580c 97
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DdlDmlPipelineTest.java
+  s_b33fc4f71998f0::t_70d98701999ca7 336-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "38c2643d2c2ead93d9541e475f65718aa2fb555f",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "muse-spark-1.2-contributor-free"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

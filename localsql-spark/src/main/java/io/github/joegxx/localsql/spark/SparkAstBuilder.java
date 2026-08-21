@@ -30,6 +30,19 @@ public final class SparkAstBuilder {
         if (stmt instanceof CreateViewContext cv) return buildCreateView(cv);
         if (stmt instanceof DropTableContext dt) return buildDrop(dt);
         if (stmt instanceof DropViewContext dv) return buildDrop(dv);
+        if (stmt instanceof CreateNamespaceContext cns) return buildCreateDatabase(cns);
+        if (stmt instanceof DropNamespaceContext dns) return buildDropDatabase(dns);
+        if (stmt instanceof SetNamespacePropertiesContext snp) return buildAlterDatabaseProps(snp);
+        if (stmt instanceof SetNamespaceLocationContext snl) return buildAlterDatabaseLocation(snl);
+        if (stmt instanceof RenameTableContext rt) return buildRenameTable(rt);
+        if (stmt instanceof SetTablePropertiesContext stp) return buildSetTableProperties(stp);
+        if (stmt instanceof UnsetTablePropertiesContext utp) return buildUnsetTableProperties(utp);
+        if (stmt instanceof AddTableColumnsContext atc) return buildAddColumns(atc);
+        if (stmt instanceof DropTableColumnsContext dtc) return buildDropColumns(dtc);
+        if (stmt instanceof RenameTableColumnContext rtc) return buildRenameColumn(rtc);
+        if (stmt instanceof AlterTableAlterColumnContext atac) return buildAlterColumn(atac);
+        if (stmt instanceof HiveChangeColumnContext hcc) return buildHiveChangeColumn(hcc);
+        if (stmt instanceof HiveReplaceColumnsContext hrc) return buildReplaceColumns(hrc);
         throw new UnsupportedOperationException("MVP only supports DQL and basic DDL/DML. Got: " + stmt.getText());
     }
 
@@ -185,6 +198,167 @@ public final class SparkAstBuilder {
         }
         return new io.github.joegxx.localsql.ir.statement.CreateView(
                 parts(cv.multipartIdentifier()), orReplace, ifNotExists, visitQuery(cv.query()));
+    }
+
+    private io.github.joegxx.localsql.ir.statement.CreateDatabase buildCreateDatabase(CreateNamespaceContext cns) {
+        String name = parts(cns.multipartIdentifier()).get(parts(cns.multipartIdentifier()).size() - 1);
+        boolean ifNotExists = cns.IF() != null;
+        String comment = null;
+        if (!cns.commentSpec().isEmpty() && cns.commentSpec(0).STRING() != null) {
+            comment = SparkExpressionBuilder.unquote(cns.commentSpec(0).STRING().getText());
+        }
+        String location = null;
+        if (!cns.locationSpec().isEmpty() && cns.locationSpec(0).STRING() != null) {
+            location = SparkExpressionBuilder.unquote(cns.locationSpec(0).STRING().getText());
+        }
+        return new io.github.joegxx.localsql.ir.statement.CreateDatabase(name, ifNotExists, comment, location, java.util.Map.of());
+    }
+
+    private io.github.joegxx.localsql.ir.statement.DropDatabase buildDropDatabase(DropNamespaceContext dns) {
+        String name = parts(dns.multipartIdentifier()).get(parts(dns.multipartIdentifier()).size() - 1);
+        boolean ifExists = dns.IF() != null;
+        boolean cascade = dns.CASCADE() != null;
+        return new io.github.joegxx.localsql.ir.statement.DropDatabase(name, ifExists, cascade);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.RenameTable buildRenameTable(RenameTableContext rt) {
+        return new io.github.joegxx.localsql.ir.statement.RenameTable(parts(rt.from), parts(rt.to));
+    }
+
+    private io.github.joegxx.localsql.ir.statement.SetTableProperties buildSetTableProperties(SetTablePropertiesContext stp) {
+        java.util.Map<String, String> props = new java.util.HashMap<>();
+        if (stp.tablePropertyList() != null) {
+            for (TablePropertyContext tp : stp.tablePropertyList().tableProperty()) {
+                String key = SparkExpressionBuilder.unquote(tp.key.getText());
+                String val = tp.value != null ? SparkExpressionBuilder.unquote(tp.value.getText()) : "";
+                props.put(key, val);
+            }
+        }
+        return new io.github.joegxx.localsql.ir.statement.SetTableProperties(parts(stp.multipartIdentifier()), props);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.UnsetTableProperties buildUnsetTableProperties(UnsetTablePropertiesContext utp) {
+        java.util.Map<String, String> props = new java.util.HashMap<>();
+        if (utp.tablePropertyList() != null) {
+            for (TablePropertyContext tp : utp.tablePropertyList().tableProperty()) {
+                String key = SparkExpressionBuilder.unquote(tp.key.getText());
+                String val = tp.value != null ? SparkExpressionBuilder.unquote(tp.value.getText()) : "";
+                props.put(key, val);
+            }
+        }
+        return new io.github.joegxx.localsql.ir.statement.UnsetTableProperties(parts(utp.multipartIdentifier()), props, utp.IF() != null);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.AlterDatabase buildAlterDatabaseProps(SetNamespacePropertiesContext snp) {
+        String name = parts(snp.multipartIdentifier()).get(parts(snp.multipartIdentifier()).size() - 1);
+        java.util.Map<String, String> props = new java.util.HashMap<>();
+        if (snp.tablePropertyList() != null) {
+            for (TablePropertyContext tp : snp.tablePropertyList().tableProperty()) {
+                String key = SparkExpressionBuilder.unquote(tp.key.getText());
+                String val = tp.value != null ? SparkExpressionBuilder.unquote(tp.value.getText()) : "";
+                props.put(key, val);
+            }
+        }
+        return new io.github.joegxx.localsql.ir.statement.AlterDatabase(name, props, null);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.AlterDatabase buildAlterDatabaseLocation(SetNamespaceLocationContext snl) {
+        String name = parts(snl.multipartIdentifier()).get(parts(snl.multipartIdentifier()).size() - 1);
+        String loc = null;
+        if (snl.locationSpec() != null && snl.locationSpec().STRING() != null) {
+            loc = SparkExpressionBuilder.unquote(snl.locationSpec().STRING().getText());
+        }
+        return new io.github.joegxx.localsql.ir.statement.AlterDatabase(name, java.util.Map.of(), loc);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.AddColumns buildAddColumns(AddTableColumnsContext atc) {
+        List<io.github.joegxx.localsql.ir.statement.AddColumns.ColDef> cols = new ArrayList<>();
+        for (QualifiedColTypeWithPositionContext q : atc.qualifiedColTypeWithPositionList().qualifiedColTypeWithPosition()) {
+            String colName = SparkExpressionBuilder.unquote(q.multipartIdentifier().getText());
+            // multipartIdentifier may contain db prefix for column - take last part
+            if (colName.contains(".")) colName = colName.substring(colName.lastIndexOf('.') + 1);
+            cols.add(new io.github.joegxx.localsql.ir.statement.AddColumns.ColDef(
+                    colName, SparkDataTypeBuilder.build(q.dataType()), q.NOT() == null,
+                    comment(q.commentSpec()), position(q.colPosition())));
+        }
+        return new io.github.joegxx.localsql.ir.statement.AddColumns(parts(atc.multipartIdentifier()), cols);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.DropColumns buildDropColumns(DropTableColumnsContext dtc) {
+        List<String> cols = new ArrayList<>();
+        if (dtc.multipartIdentifierList() != null) {
+            for (MultipartIdentifierContext mi : dtc.multipartIdentifierList().multipartIdentifier()) {
+                List<String> p = parts(mi);
+                cols.add(p.get(p.size() - 1));
+            }
+        } else if (dtc.columns != null) {
+            for (MultipartIdentifierContext mi : dtc.columns.multipartIdentifier()) {
+                List<String> p = parts(mi);
+                cols.add(p.get(p.size() - 1));
+            }
+        }
+        return new io.github.joegxx.localsql.ir.statement.DropColumns(parts(dtc.multipartIdentifier()), cols);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.RenameColumn buildRenameColumn(RenameTableColumnContext rtc) {
+        String from = parts(rtc.from).get(parts(rtc.from).size() - 1);
+        String to = SparkExpressionBuilder.unquote(rtc.to.getText());
+        return new io.github.joegxx.localsql.ir.statement.RenameColumn(parts(rtc.table), from, to);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.AlterColumn buildAlterColumn(AlterTableAlterColumnContext atac) {
+        String col = parts(atac.column).get(parts(atac.column).size() - 1);
+        AlterColumnActionContext act = atac.alterColumnAction();
+        io.github.joegxx.localsql.ir.type.DataType newType = null;
+        String newComment = null;
+        Boolean setNotNull = null;
+        String position = null;
+        if (act != null) {
+            if (act.dataType() != null) newType = SparkDataTypeBuilder.build(act.dataType());
+            if (act.commentSpec() != null && act.commentSpec().STRING() != null) newComment = SparkExpressionBuilder.unquote(act.commentSpec().STRING().getText());
+            if (act.colPosition() != null) position = position(act.colPosition());
+            if (act.SET() != null && act.NOT() != null) setNotNull = true;
+            else if (act.DROP() != null && act.NOT() != null) setNotNull = false;
+        }
+        return new io.github.joegxx.localsql.ir.statement.AlterColumn(parts(atac.table), col, newType, newComment, setNotNull, position);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.AlterColumn buildHiveChangeColumn(HiveChangeColumnContext hcc) {
+        String oldName = parts(hcc.colName).get(parts(hcc.colName).size() - 1);
+        ColTypeContext ct = hcc.colType();
+        String newName = SparkExpressionBuilder.unquote(ct.colName.getText());
+        io.github.joegxx.localsql.ir.type.DataType newType = SparkDataTypeBuilder.build(ct.dataType());
+        String newComment = comment(ct.commentSpec());
+        Boolean setNotNull = ct.NOT() != null ? false : null;
+        // Hive CHANGE can rename; if names differ, we handle as alter with new name via type change path
+        // For now treat rename separately if names differ and delegate via newName in AlterColumn with type
+        // We encode rename by using newName as column with type change - pipeline will handle RENAME if needed
+        String position = position(hcc.colPosition());
+        if (!newName.equalsIgnoreCase(oldName)) {
+            return new io.github.joegxx.localsql.ir.statement.AlterColumn(parts(hcc.table), oldName, newName, newType, newComment, setNotNull, position);
+        }
+        return new io.github.joegxx.localsql.ir.statement.AlterColumn(parts(hcc.table), oldName, newType, newComment, setNotNull, position);
+    }
+
+    private io.github.joegxx.localsql.ir.statement.ReplaceColumns buildReplaceColumns(HiveReplaceColumnsContext hrc) {
+        List<io.github.joegxx.localsql.ir.statement.AddColumns.ColDef> cols = new ArrayList<>();
+        for (QualifiedColTypeWithPositionContext q : hrc.columns.qualifiedColTypeWithPosition()) {
+            String colName = SparkExpressionBuilder.unquote(q.multipartIdentifier().getText());
+            if (colName.contains(".")) colName = colName.substring(colName.lastIndexOf('.') + 1);
+            cols.add(new io.github.joegxx.localsql.ir.statement.AddColumns.ColDef(
+                    colName, SparkDataTypeBuilder.build(q.dataType()), q.NOT() == null,
+                    comment(q.commentSpec()), position(q.colPosition())));
+        }
+        return new io.github.joegxx.localsql.ir.statement.ReplaceColumns(parts(hrc.multipartIdentifier()), cols);
+    }
+
+    private static String position(ColPositionContext pc) {
+        if (pc == null) return null;
+        if (pc.FIRST() != null) return "FIRST";
+        if (pc.AFTER() != null && pc.errorCapturingIdentifier() != null) {
+            return "AFTER " + SparkExpressionBuilder.unquote(pc.errorCapturingIdentifier().getText());
+        }
+        return null;
     }
 
     private static String comment(CommentSpecContext cs) {

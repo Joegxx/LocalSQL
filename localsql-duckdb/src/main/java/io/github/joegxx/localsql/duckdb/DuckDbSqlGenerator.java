@@ -66,6 +66,37 @@ public final class DuckDbSqlGenerator {
         return sb.toString();
     }
 
+    public String generateRenameTable(io.github.joegxx.localsql.ir.statement.RenameTable rt, boolean isView) {
+        String keyword = isView ? "VIEW " : "TABLE ";
+        return "ALTER " + keyword + bareName(rt.from()) + " RENAME TO " + bareName(rt.to());
+    }
+
+    public String generateAddColumn(List<String> tableName, io.github.joegxx.localsql.ir.statement.AddColumns.ColDef col) {
+        StringBuilder sb = new StringBuilder("ALTER TABLE ");
+        sb.append(bareName(tableName)).append(" ADD COLUMN ").append(quote(col.name()))
+                .append(" ").append(duckType(col.type()));
+        if (!col.nullable()) sb.append(" NOT NULL");
+        // position ignored for DuckDB (always appends); comment ignored as hint
+        return sb.toString();
+    }
+
+    public String generateDropColumn(List<String> tableName, String col) {
+        return "ALTER TABLE " + bareName(tableName) + " DROP COLUMN " + quote(col);
+    }
+
+    public String generateRenameColumn(List<String> tableName, String from, String to) {
+        return "ALTER TABLE " + bareName(tableName) + " RENAME COLUMN " + quote(from) + " TO " + quote(to);
+    }
+
+    public String generateAlterColumnType(List<String> tableName, String col, DataType newType) {
+        return "ALTER TABLE " + bareName(tableName) + " ALTER " + quote(col) + " TYPE " + duckType(newType);
+    }
+
+    public String generateAlterColumnSetNotNull(List<String> tableName, String col, boolean setNotNull) {
+        // DuckDB 1.5 supports ALTER COLUMN ... SET/DROP NOT NULL
+        return "ALTER TABLE " + bareName(tableName) + " ALTER " + quote(col) + (setNotNull ? " SET NOT NULL" : " DROP NOT NULL");
+    }
+
     /** Physical tables all live in DuckDB's main schema: emit only the last part. */
     private String bareName(List<String> parts) {
         return quote(parts.get(parts.size() - 1));

@@ -30,7 +30,14 @@ public final class Catalog {
         public String tableName() { return name.get(name.size() - 1); }
     }
 
-    public record Database(String name, String location, String description) {}
+    public record Database(String name, String location, String description, Map<String, String> properties) {
+        public Database(String name, String location, String description) {
+            this(name, location, description, Map.of());
+        }
+        public Database {
+            if (properties == null) properties = Map.of();
+        }
+    }
 
     private final Map<String, Database> databases = new LinkedHashMap<>();
     private final Map<String, Table> tables = new LinkedHashMap<>();
@@ -41,6 +48,8 @@ public final class Catalog {
     }
 
     public void createDatabase(Database db) { databases.put(db.name().toLowerCase(), db); }
+
+    public Database removeDatabase(String name) { return databases.remove(name.toLowerCase()); }
 
     public List<Database> listDatabases() { return new ArrayList<>(databases.values()); }
 
@@ -85,6 +94,19 @@ public final class Catalog {
     /** Remove a table from the in-memory catalog; returns the removed table or null. */
     public Table removeTable(String database, String tableName) {
         return tables.remove(database.toLowerCase() + "." + tableName.toLowerCase());
+    }
+
+    public void renameTable(String fromDb, String fromTable, String toDb, String toTable) {
+        Table t = removeTable(fromDb, fromTable);
+        if (t == null) return;
+        Table renamed = new Table(t.tableId(), List.of(toDb, toTable), t.tableType(), t.columns(),
+                t.location(), t.format(), t.comment(), t.properties(), t.metadataJson());
+        tables.put(renamed.qualifiedName().toLowerCase(), renamed);
+        if (nextTableId <= t.tableId()) nextTableId = t.tableId() + 1;
+    }
+
+    public void updateTable(Table table) {
+        tables.put(table.qualifiedName().toLowerCase(), table);
     }
 
     public Optional<Table> getTable(String database, String tableName) {

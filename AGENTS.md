@@ -83,7 +83,7 @@ ir -> (nothing)
 
 执行查询时(见 `ThriftServer.executeSparkSql` 与 `LocalSqlThriftService.ExecuteStatement`,两者都经 `SqlPipeline.execute` 收敛):
 1. `SparkSqlParser.parseStatement` -> `SingleStatementContext`
-2. `SparkAstBuilder.buildStatement` -> IR `Statement`(`QueryStatement` / `Insert` / `CreateTable` / `CreateView`)
+2. `SparkAstBuilder.buildStatement` -> IR `Statement`(`QueryStatement` / `Insert` / `CreateTable` / `CreateView` / `DropTable` / `CreateDatabase` / `Alter*` / `RenameTable` ...)
 3. DQL(`QueryStatement`):`SemanticAnalyzer.analyze(rel)` -> `RewriteEngine.rewrite(rel)` -> `DuckDbSqlGenerator.generate` -> `DuckDbExecutor.execute`
 4. DML/DDL 由 `SqlPipeline` 按类型编排(见下节)
 
@@ -97,6 +97,9 @@ ir -> (nothing)
 - `CreateTable` PARTITIONED BY:纯 DDL 时分区字段带类型 -> AST builder 追加到列定义末尾(Spark 分区列在最后),裸引用 -> 校验已存在不改变 schema;`PARTITIONED BY + AS query`(CTAS)与 `CLUSTERED BY/SKEWED BY` 在 DuckDB 无对应概念,接受为无操作提示(直接按查询结果建表)。DuckDB 无分区概念,分区列就是普通列。
 - `CreateView`:analyzer 校验 + rewrite query;生成 `CREATE [OR REPLACE] VIEW v AS <query>`;注册 tableType=`VIEW`。OR REPLACE 时先 `CatalogService.dropTable`(清 store 4 张表)+ `DROP VIEW IF EXISTS` 再建。
 - `DropTable`:校验存在 + 类型匹配(DROP TABLE 不能删 VIEW,反之亦然);`IF EXISTS` 缺失时报错、存在则 no-op;`CatalogService.dropTable` 清 store + `DROP TABLE/VIEW IF EXISTS` 清 DuckDB 物理对象。
+- `CreateDatabase`/`DropDatabase`/`AlterDatabase`:纯 Catalog 操作(数据库仅逻辑命名空间,无独立 DuckDB SCHEMA);`DROP DATABASE` 带 `CASCADE` 时级联删物理表 + 元数据,无 `CASCADE` 且非空则报错;`default` 库不可删。
+- `RenameTable`(`ALTER TABLE/VIEW RENAME TO`):校验跨库不支持;`DuckDbSqlGenerator` 生成 `ALTER TABLE/VIEW ... RENAME TO ...`;`CatalogService.renameTable` 更新 4 张表 + `runtime_table`。
+- `AddColumns`/`DropColumns`/`RenameColumn`/`AlterColumn`/`ReplaceColumns`:校验列存在性;生成对应 DuckDB `ALTER TABLE ... ADD/DROP/RENAME/ALTER COLUMN` 语句,执行后 `DESCRIBE` + `refreshTable` 更新 Catalog;`REPLACE COLUMNS` 按新 schema 增删改列(保留重叠列数据),刷新后回填 comment/nullability。
 
 **语义注意**:`INSERT INTO t VALUES (1,'a')` 的每一行在语法上是 `#rowConstructor`(`struct(...)`),AST builder 的 `visitInlineTable` 必须把它**展开成列**(`StructExpr.fields()` 当行内容),否则每行只算 1 列(DuckDB 报 "n columns but 1 values")。
 
@@ -133,7 +136,7 @@ Generator 永远不用查 Catalog。
 
 ## 已知 MVP 缺口
 
-- DML/DDL 支持:`INSERT INTO/OVERWRITE`、`CREATE TABLE`(含 CTAS / LIKE / PARTITIONED BY)、`CREATE VIEW`、`DROP TABLE/VIEW` 已实现;`CREATE/ALTER/DROP DATABASE`、`ALTER TABLE/VIEW`、`RENAME`、`DELETE/UPDATE/MERGE`、multi-INSERT 未实现
+- DML/DDL 支持:`INSERT INTO/OVERWRITE`、`CREATE TABLE`(含 CTAS / LIKE / PARTITIONED BY)、`CREATE VIEW`、`DROP TABLE/VIEW`、`CREATE/DROP/ALTER DATABASE`、`ALTER TABLE` (ADD/DROP/RENAME COLUMN, ALTER COLUMN TYPE/NOT NULL, REPLACE COLUMNS, RENAME TO, SET/UNSET TBLPROPERTIES) 已实现;`DELETE/UPDATE/MERGE`、multi-INSERT 未实现
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - 命名窗口(`WINDOW w AS ...`)、聚合 `FILTER` 子句、`NATURAL JOIN`(需要同名列解析)抛 `UnsupportedOperationException`
 - 位运算/整数除法/`<=>`/`JOIN USING` 已正确映射(`INT_DIV` -> `//`、`BIT_XOR` -> `xor()`、`EQ_NULL_SAFE` -> `IS NOT DISTINCT FROM`)

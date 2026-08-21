@@ -79,6 +79,76 @@ public final class CatalogService {
         }
     }
 
+    public void createDatabase(String name, String comment, String location) {
+        catalog.createDatabase(new Catalog.Database(name, location, comment));
+    }
+
+    public void createDatabase(String name, String comment, String location, Map<String, String> properties) {
+        catalog.createDatabase(new Catalog.Database(name, location, comment, properties == null ? Map.of() : Map.copyOf(properties)));
+    }
+
+    public void alterDatabase(String name, Map<String, String> properties, String location) {
+        Catalog.Database old = catalog.getDatabase(name).orElseThrow(() -> new IllegalArgumentException("Database does not exist: " + name));
+        Map<String, String> merged = new LinkedHashMap<>(old.properties());
+        if (properties != null) merged.putAll(properties);
+        String newLocation = location != null ? location : old.location();
+        // keep description
+        Catalog.Database updated = new Catalog.Database(old.name(), newLocation, old.description(), Map.copyOf(merged));
+        catalog.createDatabase(updated);
+    }
+
+    public boolean dropDatabase(String name, boolean cascade) throws Exception {
+        Catalog.Database db = catalog.getDatabase(name).orElse(null);
+        if (db == null) return false;
+        if (!"default".equalsIgnoreCase(name)) {
+            List<Catalog.Table> tables = catalog.listTables(name);
+            if (!tables.isEmpty() && !cascade) {
+                throw new IllegalArgumentException("Database " + name + " is not empty. Use CASCADE to drop.");
+            }
+            for (Catalog.Table t : List.copyOf(tables)) {
+                dropTable(t.database(), t.tableName());
+                // physical object already dropped by caller for non-default? but keep idempotent
+            }
+        }
+        catalog.removeDatabase(name);
+        return true;
+    }
+
+    public void renameTable(String fromDb, String fromTable, String toDb, String toTable) throws Exception {
+        Catalog.Table old = catalog.getTable(fromDb, fromTable).orElse(null);
+        if (old == null) throw new IllegalArgumentException("Table does not exist: " + fromDb + "." + fromTable);
+        Catalog.Table existing = catalog.getTable(toDb, toTable).orElse(null);
+        if (existing != null) throw new IllegalArgumentException("Target table already exists: " + toDb + "." + toTable);
+        Catalog.Table renamed = new Catalog.Table(old.tableId(), List.of(toDb, toTable), old.tableType(), old.columns(),
+                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
+        catalog.renameTable(fromDb, fromTable, toDb, toTable);
+        if (store != null) {
+            store.saveTable(renamed);
+            var rt = store.loadRuntimeInfo(old.tableId());
+            if (rt.isPresent()) {
+                store.saveRuntimeInfo(old.tableId(), toTable, rt.get().createSql());
+            }
+        }
+    }
+
+    public void refreshTable(String database, String tableName, List<ColumnDef> newCols) throws Exception {
+        Catalog.Table old = catalog.getTable(database, tableName)
+                .orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + database + "." + tableName));
+        Catalog.Table updated = new Catalog.Table(old.tableId(), old.name(), old.tableType(), toCatalogColumns(newCols),
+                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
+        catalog.updateTable(updated);
+        if (store != null) store.saveTable(updated);
+    }
+
+    private static List<Catalog.Column> toCatalogColumns(List<ColumnDef> defs) {
+        List<Catalog.Column> out = new ArrayList<>();
+        int ord = 0;
+        for (ColumnDef d : defs) {
+            out.add(new Catalog.Column(d.name(), d.type(), d.nullable(), d.comment(), ord++, d.defaultValue(), d.expression()));
+        }
+        return out;
+    }
+
     public record ColumnDef(String name, DataType type, boolean nullable, String comment,
                             String defaultValue, String expression) {
         public ColumnDef(String name, DataType type, boolean nullable, String comment) {

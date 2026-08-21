@@ -55,6 +55,102 @@ public final class SemanticAnalyzer {
             }
             return stmt;
         }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateDatabase cd) {
+            if (catalog.getDatabase(cd.name()).isPresent() && !cd.ifNotExists()) {
+                throw new IllegalArgumentException("Database already exists: " + cd.name());
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropDatabase dd) {
+            if (catalog.getDatabase(dd.name()).isEmpty() && !dd.ifExists()) {
+                throw new IllegalArgumentException("Database does not exist: " + dd.name());
+            }
+            if ("default".equalsIgnoreCase(dd.name())) {
+                throw new IllegalArgumentException("Cannot drop default database");
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterDatabase ad) {
+            if (catalog.getDatabase(ad.name()).isEmpty()) {
+                throw new IllegalArgumentException("Database does not exist: " + ad.name());
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameTable rt) {
+            String fromDb = databaseOf(rt.from());
+            String toDb = databaseOf(rt.to());
+            if (catalog.getDatabase(fromDb).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + fromDb);
+            if (catalog.getDatabase(toDb).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + toDb);
+            catalog.resolveTable(rt.from()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rt.from())));
+            if (catalog.resolveTable(rt.to()).isPresent()) throw new IllegalArgumentException("Target table already exists: " + String.join(".", rt.to()));
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AddColumns ac) {
+            String db = databaseOf(ac.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            Catalog.Table t = catalog.resolveTable(ac.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", ac.tableName())));
+            for (var c : ac.columns()) {
+                if (t.columns().stream().anyMatch(col -> col.name().equalsIgnoreCase(c.name()))) {
+                    throw new IllegalArgumentException("Column already exists: " + c.name());
+                }
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropColumns dc) {
+            String db = databaseOf(dc.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            Catalog.Table t = catalog.resolveTable(dc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", dc.tableName())));
+            for (String col : dc.columns()) {
+                if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(col))) {
+                    throw new IllegalArgumentException("Column does not exist: " + col);
+                }
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameColumn rc) {
+            String db = databaseOf(rc.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            Catalog.Table t = catalog.resolveTable(rc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rc.tableName())));
+            if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(rc.from()))) throw new IllegalArgumentException("Column does not exist: " + rc.from());
+            if (t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(rc.to()))) throw new IllegalArgumentException("Target column already exists: " + rc.to());
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterColumn alc) {
+            String db = databaseOf(alc.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            Catalog.Table t = catalog.resolveTable(alc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", alc.tableName())));
+            if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(alc.column()))) throw new IllegalArgumentException("Column does not exist: " + alc.column());
+            if (alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column())
+                    && t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(alc.newName()))) {
+                throw new IllegalArgumentException("Target column already exists: " + alc.newName());
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) {
+            String db = databaseOf(rpc.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            catalog.resolveTable(rpc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rpc.tableName())));
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropTable dt) {
+            String db = databaseOf(dt.tableName());
+            if (catalog.resolveTable(dt.tableName()).isEmpty() && !dt.ifExists()) {
+                throw new IllegalArgumentException((dt.view() ? "View" : "Table") + " does not exist: " + String.join(".", dt.tableName()));
+            }
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.SetTableProperties stp) {
+            String db = databaseOf(stp.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            catalog.resolveTable(stp.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", stp.tableName())));
+            return stmt;
+        }
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.UnsetTableProperties utp) {
+            String db = databaseOf(utp.tableName());
+            if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
+            catalog.resolveTable(utp.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", utp.tableName())));
+            return stmt;
+        }
         throw new UnsupportedOperationException("Unsupported statement: " + stmt.getClass().getSimpleName());
     }
 

@@ -70,7 +70,7 @@ AI / Developer
 - ✅ **Spark SQL 3.2.0 syntax** — full ANTLR grammar support
 - ✅ **DQL queries** — SELECT, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT
 - ✅ **Advanced SQL** — CTE, UNION, subqueries, window functions, ROLLUP/CUBE/GROUPING SETS
-- ✅ **DML/DDL** — INSERT INTO/OVERWRITE, CREATE TABLE (incl. CTAS / LIKE / PARTITIONED BY), CREATE [OR REPLACE] VIEW, DROP TABLE/VIEW
+- ✅ **DML/DDL** — INSERT INTO/OVERWRITE, CREATE TABLE (incl. CTAS / LIKE / PARTITIONED BY), CREATE [OR REPLACE] VIEW, DROP TABLE/VIEW, CREATE/DROP/ALTER DATABASE, ALTER TABLE (ADD/DROP/RENAME COLUMN, ALTER COLUMN TYPE/NOT NULL, REPLACE COLUMNS, RENAME TO, SET/UNSET TBLPROPERTIES)
 - ✅ **HiveServer2 Thrift** — connect with DBeaver, DataGrip, or any Hive JDBC client
 - ✅ **Common IR** — clean abstraction layer between parsers and execution backends
 - ✅ **Semantic analyzer** — name resolution, type inference, catalog lookup
@@ -291,7 +291,7 @@ Validated through TPC-DS differential consistency testing (135/135 queries):
 
 ### Explicitly Unsupported (Phase 2)
 
-- ALTER TABLE/VIEW, RENAME, CREATE/ALTER/DROP DATABASE, DELETE / UPDATE / MERGE, multi-INSERT
+- DELETE / UPDATE / MERGE, multi-INSERT
 - `NATURAL JOIN`
 - Named windows (`WINDOW w AS ...`)
 - Aggregate `FILTER (WHERE ...)` clause
@@ -374,7 +374,7 @@ LocalSQL's goal:
 
 ## Current Limitations
 
-- DQL only at first; now also INSERT INTO/OVERWRITE and CREATE TABLE/VIEW (advanced DDL like ALTER/DROP still pending)
+- DQL + DML/DDL: INSERT, CREATE TABLE/VIEW/DATABASE, ALTER TABLE/DATABASE, DROP TABLE/VIEW/DATABASE, RENAME
 - No optimizer, statistics, or cost model
 - No transactions, ACID, or authorization
 - No distributed execution

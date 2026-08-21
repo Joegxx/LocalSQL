@@ -204,7 +204,7 @@ ORDER BY cnt DESC;
 - **`CREATE TABLE`**:`CREATE TABLE t (id BIGINT, name STRING, score DOUBLE)`(支持 `NOT NULL`、`IF NOT EXISTS`)
 - **`CREATE TABLE ... AS SELECT`**(CTAS):从查询结果建表,类型自动推导
 - **`CREATE TABLE ... LIKE src`**:复制源表 schema 建空表
-- **`PARTITIONED BY (col TYPE)`**:分区列追加到 schema 末尾(DuckDB 无分区概念,当普通列用);裸列引用需已存在于 schema
+- **`PARTITIONED BY (col TYPE)`**:分区列追加到 schema 末尾(DuckDB 无分区概念,当普通列用);裸列引用需已存在于 schema;`PARTITIONED BY … AS SELECT` 与 `CLUSTERED BY / SKEWED BY` 接受为无操作提示
 - **`INSERT INTO t [(c1, c2)]`** + `VALUES` / `SELECT`:追加数据,返回受影响行数(`count` 列)
 - **`INSERT OVERWRITE TABLE t`**:事务内 `DELETE` + `INSERT`,整表替换
 - **`CREATE VIEW v AS SELECT ...`** / **`CREATE OR REPLACE VIEW`** / `IF NOT EXISTS`;视图可被查询,出现在 `SHOW TABLES`
@@ -220,7 +220,7 @@ ORDER BY cnt DESC;
 | ALTER TABLE/VIEW、RENAME、CREATE/ALTER/DROP DATABASE | 后续版本 |
 | `INSERT` 带 `PARTITION (…)`、`INSERT OVERWRITE DIRECTORY`、multi-INSERT、`DELETE` / `UPDATE` / `MERGE` | |
 | `CREATE TEMPORARY/EXTERNAL TABLE`、`CREATE TEMPORARY VIEW`、`CREATE VIEW v (col, …)` 列别名 | |
-| `SKEWED BY` / `CLUSTERED BY`(bucketing)、分区 transform(如 `years(dt)`)、`PARTITIONED BY` + `AS SELECT` 组合 | |
+| 分区 transform(如 `years(dt)`) | 仍不支持 |
 | `NATURAL JOIN` | 需要同名列解析 |
 | 命名窗口 `WINDOW w AS ...` | 先写 `OVER (...)` 内联形式 |
 | 聚合 `FILTER (WHERE ...)` 子句 | |

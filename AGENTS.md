@@ -94,7 +94,7 @@ ir -> (nothing)
 - `CreateTable`(纯 DDL):`CREATE TABLE tbl (col TYPE [NOT NULL], ...)`;之后 `DESCRIBE tbl` 取物理 schema,经 `Catalog.parseDataType` 反推 IR 类型,`CatalogService.registerTable` 写元数据 + `saveRuntimeInfo` 写 `runtime_table`。
 - `CreateTable` CTAS:`CREATE TABLE tbl AS <query>`(物理 schema 同样 DESCRIBE 反推);列定义 + AS query 组合 = 先建空表再走 Insert 路径。
 - `CreateTable` LIKE:`tbl LIKE src`,从 Catalog 读源表 schema 生成 DDL。
-- `CreateTable` PARTITIONED BY:分区字段带类型 -> AST builder 追加到列定义末尾(Spark 分区列在最后);分区字段裸引用 -> 校验已存在不改变 schema;`PARTITIONED BY + AS query` 显式拒绝。DuckDB 无分区概念,分区列就是普通列。
+- `CreateTable` PARTITIONED BY:纯 DDL 时分区字段带类型 -> AST builder 追加到列定义末尾(Spark 分区列在最后),裸引用 -> 校验已存在不改变 schema;`PARTITIONED BY + AS query`(CTAS)与 `CLUSTERED BY/SKEWED BY` 在 DuckDB 无对应概念,接受为无操作提示(直接按查询结果建表)。DuckDB 无分区概念,分区列就是普通列。
 - `CreateView`:analyzer 校验 + rewrite query;生成 `CREATE [OR REPLACE] VIEW v AS <query>`;注册 tableType=`VIEW`。OR REPLACE 时先 `CatalogService.dropTable`(清 store 4 张表)+ `DROP VIEW IF EXISTS` 再建。
 - `DropTable`:校验存在 + 类型匹配(DROP TABLE 不能删 VIEW,反之亦然);`IF EXISTS` 缺失时报错、存在则 no-op;`CatalogService.dropTable` 清 store + `DROP TABLE/VIEW IF EXISTS` 清 DuckDB 物理对象。
 

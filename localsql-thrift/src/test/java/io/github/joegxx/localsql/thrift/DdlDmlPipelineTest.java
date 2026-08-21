@@ -333,8 +333,18 @@ class DdlDmlPipelineTest {
                 () -> exec("CREATE TEMPORARY TABLE tmp (id INT)"));
         assertThrows(UnsupportedOperationException.class,
                 () -> exec("INSERT INTO users PARTITION (id=1) SELECT 1"));
-        assertThrows(UnsupportedOperationException.class,
-                () -> exec("CREATE TABLE t (id INT) PARTITIONED BY (dt INT) AS SELECT 1 AS id"));
+    }
+
+    @Test
+    void partitionedByAndClusteredByWithCtasAcceptedAsNoop() throws Exception {
+        exec("CREATE TABLE t PARTITIONED BY (dt STRING) AS SELECT 1 AS id, '2026-01-01' AS dt");
+        assertEquals(1L, ((Number) exec("SELECT count(*) AS c FROM t").rows().get(0).get(0)).longValue());
+        exec("DROP TABLE t");
+        exec("CREATE TABLE t (id BIGINT) CLUSTERED BY (id) SORTED BY (id) INTO 4 BUCKETS AS SELECT id FROM users");
+        assertEquals(3L, ((Number) exec("SELECT count(*) AS c FROM t").rows().get(0).get(0)).longValue());
+        exec("DROP TABLE t");
+        exec("CREATE TABLE t (id INT) SKEWED BY (id) ON (1) STORED AS DIRECTORIES AS SELECT 1 AS id");
+        assertEquals(1L, ((Number) exec("SELECT count(*) AS c FROM t").rows().get(0).get(0)).longValue());
     }
 
     @Test

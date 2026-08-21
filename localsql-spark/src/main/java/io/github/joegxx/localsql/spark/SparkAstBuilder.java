@@ -103,11 +103,8 @@ public final class SparkAstBuilder {
             throw new UnsupportedOperationException("CREATE EXTERNAL TABLE is not supported");
         }
         CreateTableClausesContext clauses = ct.createTableClauses();
-        if (clauses != null) {
-            if (!clauses.skewSpec().isEmpty() || !clauses.bucketSpec().isEmpty()) {
-                throw new UnsupportedOperationException("SKEWED BY / CLUSTERED BY (bucketing) are not supported");
-            }
-        }
+        // SKEWED BY / CLUSTERED BY (bucketing) are storage hints with no effect
+        // on DuckDB (no bucketing concept); accept and ignore them.
         boolean ifNotExists = header.IF() != null;
         List<io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef> columns = new ArrayList<>();
         if (ct.colTypeList() != null) {
@@ -119,12 +116,13 @@ public final class SparkAstBuilder {
                         comment(c.commentSpec())));
             }
         }
-        // PARTITIONED BY: fields with a type are appended to the schema (Spark puts
-        // partition columns last); bare column references must exist in the schema.
-        if (clauses != null && !clauses.partitionFieldList().isEmpty()) {
-            if (ct.query() != null) {
-                throw new UnsupportedOperationException("PARTITIONED BY together with AS query is not supported");
-            }
+        // PARTITIONED BY: for a plain DDL the partition columns (with a type)
+        // are appended to the schema (Spark puts partition columns last); bare
+        // references must already exist in the declared schema. For CTAS the
+        // clause is a storage hint on DuckDB (no partitioning concept) and is
+        // accepted as a no-op — the query's own output already provides the
+        // column; we skip the schema mutation entirely.
+        if (clauses != null && !clauses.partitionFieldList().isEmpty() && ct.query() == null) {
             for (PartitionFieldContext pf : clauses.partitionFieldList().get(0).partitionField()) {
                 if (pf instanceof PartitionTransformContext t) {
                     if (t.transform() instanceof IdentityTransformContext id) {

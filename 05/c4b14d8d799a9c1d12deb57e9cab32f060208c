@@ -1,0 +1,38 @@
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_13309cbacc9828 83-89,94
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_b33fc4f71998f0::t_c3a15e338c0bd5 31,33
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DdlDmlPipelineTest.java
+  s_b33fc4f71998f0::t_f8c2ee2570b966 273-274
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_da468735ba81cd 11
+  s_b33fc4f71998f0::t_7888d420d7f519 224
+  s_b33fc4f71998f0::t_7defcb8aebe7c9 48-55
+  s_b33fc4f71998f0::t_34a9ca17394025 68,73
+  s_b33fc4f71998f0::t_828b7c746751b2 96,186,199
+  s_b33fc4f71998f0::t_f8540cd7df43d5 188-189
+  s_b33fc4f71998f0::t_bb2b6d2085593a 202-203,207
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_19e7ce02e7f064 52-55
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_f522a7ecca3fac 590-591
+  s_b33fc4f71998f0::t_2aba5ee1b799b2 346,354
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_f0b38dcbb1dcf0 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "05c4b14d8d799a9c1d12deb57e9cab32f060208c",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "muse-spark-1.2-contributor-free"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

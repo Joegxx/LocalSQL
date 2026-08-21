@@ -1,0 +1,84 @@
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/UnsetTableProperties.java
+  s_b33fc4f71998f0::t_c2460086c63338 1-24
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_c0fb88d8a9447f 208-214,226-274,306-346,356,358-361,363-372,374-387,389-461
+  s_b33fc4f71998f0::t_bad0caa2d21346 347-355,357
+  s_b33fc4f71998f0::t_bcc8d3786321c5 73-74
+  s_b33fc4f71998f0::t_5501e9277ba576 362,373,388
+  s_b33fc4f71998f0::t_cfc66a5687a44b 69-70,72,75-79
+  s_b33fc4f71998f0::t_0d391a80022ca5 275-305
+  s_b33fc4f71998f0::t_b24a1d596e21c6 215-225
+  s_b33fc4f71998f0::t_f9eb45972dc595 71
+README.md
+  s_b33fc4f71998f0::t_3aa8f487e88256 73
+  s_b33fc4f71998f0::t_2fb166427cfb96 294
+  s_b33fc4f71998f0::t_2e8cbec31ed0e7 377
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/CreateDatabase.java
+  s_b33fc4f71998f0::t_2ccac659eedd82 1-30
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/DropDatabase.java
+  s_b33fc4f71998f0::t_f17500410d7588 1-21
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/ReplaceColumns.java
+  s_b33fc4f71998f0::t_61d31b2f01ec51 1-20
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_51c30c2b28aa75 142-153
+  s_b33fc4f71998f0::t_5db08b26e246c0 73-78
+  s_b33fc4f71998f0::t_c86286f3e22fda 58-72,79-122,127-141
+  s_b33fc4f71998f0::t_a02ebb67428687 123-126
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/AlterColumn.java
+  s_b33fc4f71998f0::t_1651426592e416 17,25-29,32,41
+  s_b33fc4f71998f0::t_f89fadd38b7ef9 1-16,18-24,30-31,33-40,42-49
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/AlterDatabase.java
+  s_b33fc4f71998f0::t_c94909a59ab59e 1-23
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DatabaseAlterPipelineTest.java
+  s_b33fc4f71998f0::t_61e8b4eb18ddd8 1-139
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/RenameTable.java
+  s_b33fc4f71998f0::t_f392f8c464a56a 1-20
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/DropColumns.java
+  s_b33fc4f71998f0::t_482ff9a576c784 1-20
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/Catalog.java
+  s_b33fc4f71998f0::t_03a6aecf6507e4 99-111
+  s_b33fc4f71998f0::t_a042c91c02bea4 33-40
+  s_b33fc4f71998f0::t_7fc9ebea56cc31 52-53
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_b33fc4f71998f0::t_2a352db48fc24d 86-99
+  s_b33fc4f71998f0::t_803b8efc4f0456 82-85,100-151
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_b66dc78bef1324 33-34,37,40-45
+  s_b33fc4f71998f0::t_e6a9e0b8ac3671 35-36
+  s_b33fc4f71998f0::t_2c8cff89f34775 203-227,274-337,339-363
+  s_b33fc4f71998f0::t_e1a1f39ef114e7 38-39
+  s_b33fc4f71998f0::t_2c298f34b5bfa7 228-251
+  s_b33fc4f71998f0::t_7b1986c11c900a 252-273
+  s_b33fc4f71998f0::t_e5c8d84934d8e3 338
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/AddColumns.java
+  s_b33fc4f71998f0::t_bd342b0db05ddd 1-23
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/SetTableProperties.java
+  s_b33fc4f71998f0::t_10b9f5c8e34ade 1-21
+AGENTS.md
+  s_b33fc4f71998f0::t_5b6f66f993b6f1 100-102
+  s_b33fc4f71998f0::t_3356defee58ed6 139
+  s_b33fc4f71998f0::t_d16407402eb951 86
+docs/usage.md
+  s_b33fc4f71998f0::t_9736b5ffff430f 222
+  s_b33fc4f71998f0::t_e0bb2fc8e75c03 212-213
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/RenameColumn.java
+  s_b33fc4f71998f0::t_b12387fa25b2bb 1-23
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_b7a767bf48ea05 69-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "ba06e6234ff794a305b4f0fffa582aa681756c4d",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "muse-spark-1.2-contributor-free"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

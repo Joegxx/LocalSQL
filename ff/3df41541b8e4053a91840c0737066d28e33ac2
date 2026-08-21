@@ -1,0 +1,31 @@
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_a009dad38f356f 214-222
+  s_b33fc4f71998f0::t_a1628f8f9ce6de 233-239
+  s_b33fc4f71998f0::t_1959114cbc2928 291-292
+  s_b33fc4f71998f0::t_8e4b9d9a46fd63 302-304
+  s_b33fc4f71998f0::t_ac89c262a40a3e 355-356
+  s_b33fc4f71998f0::t_8bea082d108ef7 341
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_b33fc4f71998f0::t_421c1b8be0bba6 101-103,106-111
+  s_b33fc4f71998f0::t_7e0ed367761bb2 129-145
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_835b8aa9e3faca 448-454,458-459,461,463
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_b33fc4f71998f0::t_1d6434e0960aa0 92,97,105,117,126,132,138-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "ff3df41541b8e4053a91840c0737066d28e33ac2",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "muse-spark-1.2-contributor-free"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

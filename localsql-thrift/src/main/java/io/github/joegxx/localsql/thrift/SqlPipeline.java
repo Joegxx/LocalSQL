@@ -445,13 +445,22 @@ final class SqlPipeline {
     private void refreshFromDescribe(String db, String table) throws SQLException {
         try {
             DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + DuckDbSqlGenerator.quote(table));
+            Catalog.Table old = catalogService.getTable(db, table).orElse(null);
+            java.util.Map<String, String> oldComments = new java.util.HashMap<>();
+            if (old != null) {
+                for (Catalog.Column c : old.columns()) {
+                    if (c.comment() != null) oldComments.put(c.name().toLowerCase(), c.comment());
+                }
+            }
             List<CatalogService.ColumnDef> cols = new ArrayList<>();
             for (List<Object> row : desc.rows()) {
                 boolean nullable = row.size() <= 2 || !"NO".equalsIgnoreCase(String.valueOf(row.get(2)));
+                String colName = String.valueOf(row.get(0));
+                String comment = oldComments.get(colName.toLowerCase());
                 cols.add(new CatalogService.ColumnDef(
-                        String.valueOf(row.get(0)),
+                        colName,
                         Catalog.parseDataType(String.valueOf(row.get(1))),
-                        nullable, null));
+                        nullable, comment));
             }
             catalogService.refreshTable(db, table, cols);
         } catch (Exception e) {

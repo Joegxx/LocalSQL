@@ -89,10 +89,12 @@ public final class SemanticAnalyzer {
             String db = databaseOf(ac.tableName());
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
             Catalog.Table t = catalog.resolveTable(ac.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", ac.tableName())));
+            if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", ac.tableName()));
             for (var c : ac.columns()) {
                 if (t.columns().stream().anyMatch(col -> col.name().equalsIgnoreCase(c.name()))) {
                     throw new IllegalArgumentException("Column already exists: " + c.name());
                 }
+                if (c.position() != null) throw new UnsupportedOperationException("Column position FIRST/AFTER not supported: " + c.name());
             }
             return stmt;
         }
@@ -100,6 +102,7 @@ public final class SemanticAnalyzer {
             String db = databaseOf(dc.tableName());
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
             Catalog.Table t = catalog.resolveTable(dc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", dc.tableName())));
+            if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", dc.tableName()));
             for (String col : dc.columns()) {
                 if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(col))) {
                     throw new IllegalArgumentException("Column does not exist: " + col);
@@ -111,6 +114,7 @@ public final class SemanticAnalyzer {
             String db = databaseOf(rc.tableName());
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
             Catalog.Table t = catalog.resolveTable(rc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rc.tableName())));
+            if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", rc.tableName()));
             if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(rc.from()))) throw new IllegalArgumentException("Column does not exist: " + rc.from());
             if (t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(rc.to()))) throw new IllegalArgumentException("Target column already exists: " + rc.to());
             return stmt;
@@ -119,17 +123,23 @@ public final class SemanticAnalyzer {
             String db = databaseOf(alc.tableName());
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
             Catalog.Table t = catalog.resolveTable(alc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", alc.tableName())));
+            if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", alc.tableName()));
             if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(alc.column()))) throw new IllegalArgumentException("Column does not exist: " + alc.column());
             if (alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column())
                     && t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(alc.newName()))) {
                 throw new IllegalArgumentException("Target column already exists: " + alc.newName());
             }
+            if (alc.position() != null) throw new UnsupportedOperationException("Column position FIRST/AFTER not supported: " + alc.column());
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) {
             String db = databaseOf(rpc.tableName());
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            catalog.resolveTable(rpc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rpc.tableName())));
+            Catalog.Table t = catalog.resolveTable(rpc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rpc.tableName())));
+            if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", rpc.tableName()));
+            for (var c : rpc.columns()) {
+                if (c.position() != null) throw new UnsupportedOperationException("Column position FIRST/AFTER not supported: " + c.name());
+            }
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropTable dt) {

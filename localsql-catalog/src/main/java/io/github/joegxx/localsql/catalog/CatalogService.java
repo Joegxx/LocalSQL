@@ -98,17 +98,17 @@ public final class CatalogService {
     }
 
     public boolean dropDatabase(String name, boolean cascade) throws Exception {
+        if ("default".equalsIgnoreCase(name)) {
+            throw new IllegalArgumentException("Cannot drop default database");
+        }
         Catalog.Database db = catalog.getDatabase(name).orElse(null);
         if (db == null) return false;
-        if (!"default".equalsIgnoreCase(name)) {
-            List<Catalog.Table> tables = catalog.listTables(name);
-            if (!tables.isEmpty() && !cascade) {
-                throw new IllegalArgumentException("Database " + name + " is not empty. Use CASCADE to drop.");
-            }
-            for (Catalog.Table t : List.copyOf(tables)) {
-                dropTable(t.database(), t.tableName());
-                // physical object already dropped by caller for non-default? but keep idempotent
-            }
+        List<Catalog.Table> tables = catalog.listTables(name);
+        if (!tables.isEmpty() && !cascade) {
+            throw new IllegalArgumentException("Database " + name + " is not empty. Use CASCADE to drop.");
+        }
+        for (Catalog.Table t : List.copyOf(tables)) {
+            dropTable(t.database(), t.tableName());
         }
         catalog.removeDatabase(name);
         return true;
@@ -126,7 +126,23 @@ public final class CatalogService {
             store.saveTable(renamed);
             var rt = store.loadRuntimeInfo(old.tableId());
             if (rt.isPresent()) {
-                store.saveRuntimeInfo(old.tableId(), toTable, rt.get().createSql());
+                String oldSql = rt.get().createSql();
+                String patched = oldSql;
+                if (oldSql != null) {
+                    // Patch CREATE TABLE/VIEW prefix so replay recreates the new name.
+                    // Handles both quoted and unquoted forms.
+                    String quotedFrom = "\"" + fromTable + "\"";
+                    String quotedTo = "\"" + toTable + "\"";
+                    if (oldSql.contains(quotedFrom)) {
+                        patched = oldSql.replaceFirst(java.util.regex.Pattern.quote(quotedFrom), java.util.regex.Matcher.quoteReplacement(quotedTo));
+                    } else {
+                        patched = oldSql.replaceFirst("(?i)(CREATE\\s+(?:TABLE|VIEW)\\s+)" + java.util.regex.Pattern.quote(fromTable), "$1" + java.util.regex.Matcher.quoteReplacement(toTable));
+                        if (patched.equals(oldSql)) {
+                            patched = oldSql.replaceFirst("\\b" + java.util.regex.Pattern.quote(fromTable) + "\\b", java.util.regex.Matcher.quoteReplacement(toTable));
+                        }
+                    }
+                }
+                store.saveRuntimeInfo(old.tableId(), toTable, patched);
             }
         }
     }

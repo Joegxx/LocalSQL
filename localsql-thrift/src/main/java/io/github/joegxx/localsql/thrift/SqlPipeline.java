@@ -132,8 +132,9 @@ final class SqlPipeline {
     private DuckDbExecutor.QueryResult executeCreateTable(CreateTable ct) throws SQLException {
         analyzer.analyze(ct);
         String db = databaseOf(ct.tableName());
-        String table = bare(ct.tableName());
-        Catalog.Table existing = catalogService.getTable(db, ct.tableName().get(ct.tableName().size() - 1)).orElse(null);
+        // Unquoted logical name: this feeds catalog metadata, not SQL text.
+        String table = ct.tableName().get(ct.tableName().size() - 1);
+        Catalog.Table existing = catalogService.getTable(db, table).orElse(null);
         if (existing != null) {
             if (ct.ifNotExists()) return empty();
             throw new IllegalArgumentException(
@@ -152,12 +153,14 @@ final class SqlPipeline {
             createSql = generator.generateCreateTable(resolved);
             executor.run(createSql);
             registerPhysical(db, table, "TABLE", createSql);
+            patchColumnComments(db, table, commentMap(cols));
             return empty();
         }
         if (ct.query() == null) {
             createSql = generator.generateCreateTable(ct);
             executor.run(createSql);
             registerPhysical(db, table, "TABLE", createSql);
+            patchColumnComments(db, table, commentMap(ct.columns()));
             return empty();
         }
         rewriter.rewrite(ct.query());
@@ -172,6 +175,7 @@ final class SqlPipeline {
         createSql = generator.generateCreateTable(ct);
         executor.run(createSql);
         registerPhysical(db, table, "TABLE", createSql);
+        patchColumnComments(db, table, commentMap(ct.columns()));
         return executeInsert(new Insert(ct.tableName(), false, null, ct.query()));
     }
 
@@ -313,6 +317,7 @@ final class SqlPipeline {
             executor.run(sql);
         }
         refreshFromDescribe(db, table);
+        patchColumnComments(db, table, colDefComments(ac.columns()));
         return empty();
     }
 
@@ -345,13 +350,23 @@ final class SqlPipeline {
         String db = databaseOf(alc.tableName());
         String table = alc.tableName().get(alc.tableName().size() - 1);
         String targetCol = alc.column();
+        // Comments are logical-only (DuckDB DESCRIBE cannot report them), so the
+        // desired value must survive the refresh; on rename also carry over the
+        // old comment, which refreshFromDescribe would lose (it matches by name).
+        String desiredComment = alc.newComment();
+        boolean renamed = false;
         if (alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column())) {
+            if (desiredComment == null) {
+                desiredComment = catalogService.getTable(db, table).stream()
+                        .flatMap(t -> t.columns().stream())
+                        .filter(c -> c.name().equalsIgnoreCase(alc.column()) && c.comment() != null)
+                        .map(Catalog.Column::comment).findFirst().orElse(null);
+            }
             String sqlRename = generator.generateRenameColumn(alc.tableName(), alc.column(), alc.newName());
             LOG.info("Translated to DuckDB SQL: {}", sqlRename);
             executor.run(sqlRename);
             targetCol = alc.newName();
-            // refresh after rename so subsequent alters see new name
-            refreshFromDescribe(db, table);
+            renamed = true;
         }
         if (alc.newType() != null) {
             String sql = generator.generateAlterColumnType(alc.tableName(), targetCol, alc.newType());
@@ -363,36 +378,11 @@ final class SqlPipeline {
             LOG.info("Translated to DuckDB SQL: {}", sql);
             executor.run(sql);
         }
-        if (alc.newComment() != null) {
-            // DuckDB COMMENT ON COLUMN not critical for local; store in catalog comment
-            // We will update catalog column comment via refresh, but refresh loses comment from DESCRIBE
-            // So manually patch catalog entry
-            Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
-            List<CatalogService.ColumnDef> defs = new ArrayList<>();
-            for (Catalog.Column c : t.columns()) {
-                if (c.name().equalsIgnoreCase(targetCol)) {
-                    defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), alc.newComment(), c.defaultValue(), c.expression()));
-                } else {
-                    defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), c.comment(), c.defaultValue(), c.expression()));
-                }
-            }
-            try { catalogService.refreshTable(db, table, defs); } catch (Exception e) { throw new SQLException(e.getMessage(), e); }
-        }
-        if (alc.newType() != null || alc.setNotNull() != null) {
+        if (renamed || alc.newType() != null || alc.setNotNull() != null) {
             refreshFromDescribe(db, table);
-            // if comment was also changed, our refresh will overwrite it; re-apply
-            if (alc.newComment() != null) {
-                Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
-                List<CatalogService.ColumnDef> defs = new ArrayList<>();
-                for (Catalog.Column c : t.columns()) {
-                    if (c.name().equalsIgnoreCase(targetCol)) {
-                        defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), alc.newComment(), c.defaultValue(), c.expression()));
-                    } else {
-                        defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), c.comment(), c.defaultValue(), c.expression()));
-                    }
-                }
-                try { catalogService.refreshTable(db, table, defs); } catch (Exception e) { throw new SQLException(e.getMessage(), e); }
-            }
+        }
+        if (desiredComment != null) {
+            patchColumnComments(db, table, java.util.Map.of(targetCol.toLowerCase(), desiredComment));
         }
         return empty();
     }
@@ -432,19 +422,56 @@ final class SqlPipeline {
             }
         }
         refreshFromDescribe(db, table);
-        // patch comments/nullability from new definition
-        Catalog.Table refreshed = catalogService.getTable(db, table).orElseThrow();
-        List<CatalogService.ColumnDef> patched = new ArrayList<>();
-        for (Catalog.Column c : refreshed.columns()) {
-            var nc = rpc.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst().orElse(null);
-            if (nc != null) {
-                patched.add(new CatalogService.ColumnDef(c.name(), c.type(), nc.nullable(), nc.comment(), c.defaultValue(), c.expression()));
-            } else {
-                patched.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), c.comment(), c.defaultValue(), c.expression()));
-            }
-        }
-        try { catalogService.refreshTable(db, table, patched); } catch (Exception e) { throw new SQLException(e.getMessage(), e); }
+        // Nullability is physical (SET/DROP NOT NULL above, seen by DESCRIBE).
+        // REPLACE defines a complete new schema: every column's comment comes
+        // solely from the new definition — stale old comments must be cleared
+        // (refreshFromDescribe preserved them), so pass nulls explicitly.
+        java.util.Map<String, String> comments = new java.util.HashMap<>();
+        for (var c : rpc.columns()) comments.put(c.name().toLowerCase(), c.comment());
+        patchColumnComments(db, table, comments);
         return empty();
+    }
+
+    /** Comments by lowercase column name for a CREATE TABLE column list (nulls skipped). */
+    private static java.util.Map<String, String> commentMap(List<CreateTable.ColumnDef> defs) {
+        java.util.Map<String, String> comments = new java.util.HashMap<>();
+        for (CreateTable.ColumnDef d : defs) {
+            if (d.comment() != null) comments.put(d.name().toLowerCase(), d.comment());
+        }
+        return comments;
+    }
+
+    /** Comments by lowercase column name for an ADD/REPLACE COLUMNS definition list. */
+    private static java.util.Map<String, String> colDefComments(List<io.github.joegxx.localsql.ir.statement.AddColumns.ColDef> defs) {
+        java.util.Map<String, String> comments = new java.util.HashMap<>();
+        for (var d : defs) {
+            if (d.comment() != null) comments.put(d.name().toLowerCase(), d.comment());
+        }
+        return comments;
+    }
+
+    /**
+     * Re-apply logical-only column comments on top of the current catalog entry.
+     * Physical sources (DESCRIBE) cannot report comments, so after any
+     * refreshFromDescribe the desired comments must be written back explicitly.
+     * Map entries override (a null value clears the comment); columns absent
+     * from the map keep their current comment.
+     */
+    private void patchColumnComments(String db, String table, java.util.Map<String, String> comments) throws SQLException {
+        if (comments.isEmpty()) return;
+        Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
+        List<CatalogService.ColumnDef> defs = new ArrayList<>();
+        for (Catalog.Column c : t.columns()) {
+            String key = c.name().toLowerCase();
+            String comment = comments.containsKey(key) ? comments.get(key) : c.comment();
+            defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(),
+                    comment, c.defaultValue(), c.expression()));
+        }
+        try {
+            catalogService.refreshTable(db, table, defs);
+        } catch (Exception e) {
+            throw new SQLException("Failed to update comments for " + table + ": " + e.getMessage(), e);
+        }
     }
 
     private void refreshFromDescribe(String db, String table) throws SQLException {

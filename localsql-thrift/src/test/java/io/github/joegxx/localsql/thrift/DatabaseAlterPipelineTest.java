@@ -180,6 +180,47 @@ class DatabaseAlterPipelineTest {
         assertEquals("NO", idRow.get(2));
     }
 
+    @Test
+    void columnCommentsSurviveAllPaths() throws Exception {
+        // CREATE TABLE with COMMENT
+        exec("CREATE TABLE cc (id INT COMMENT 'pk', amt DECIMAL(10,2) COMMENT 'money')");
+        assertEquals("pk", col(catalog, "cc", "id").comment());
+        assertEquals("money", col(catalog, "cc", "amt").comment());
+        // restart round-trip keeps comments
+        CatalogService reloaded = new CatalogService(new DuckDbCatalogStore(executor));
+        assertEquals("pk", col(reloaded, "cc", "id").comment());
+        assertEquals("money", col(reloaded, "cc", "amt").comment());
+        // CREATE TABLE LIKE copies source comments
+        exec("CREATE TABLE cc2 LIKE cc");
+        assertEquals("pk", col(catalog, "cc2", "id").comment());
+        // ADD COLUMNS ... COMMENT lands in the catalog
+        exec("ALTER TABLE cc ADD COLUMNS (name STRING COMMENT 'the-name', age INT)");
+        assertEquals("the-name", col(catalog, "cc", "name").comment());
+        assertNull(col(catalog, "cc", "age").comment());
+        // Hive CHANGE COLUMN rename carries the old comment over
+        exec("ALTER TABLE cc CHANGE COLUMN name full_name STRING");
+        assertEquals("the-name", col(catalog, "cc", "full_name").comment());
+        // CHANGE COLUMN with an explicit new comment replaces it
+        exec("ALTER TABLE cc CHANGE COLUMN full_name nick STRING COMMENT 'nick'");
+        assertEquals("nick", col(catalog, "cc", "nick").comment());
+        // ALTER COLUMN COMMENT on a plain column
+        exec("ALTER TABLE cc ALTER COLUMN age COMMENT 'years'");
+        assertEquals("years", col(catalog, "cc", "age").comment());
+        // REPLACE COLUMNS applies comments from the new definition
+        exec("ALTER TABLE cc REPLACE COLUMNS (id INT COMMENT 'pk2', amt DECIMAL(10,2))");
+        assertEquals("pk2", col(catalog, "cc", "id").comment());
+        assertNull(col(catalog, "cc", "amt").comment());
+    }
+
+    @Test
+    void quotedTableNameStoredUnquoted() throws Exception {
+        exec("CREATE TABLE `My Table` (id INT)");
+        var t = catalog.getTable("default", "My Table").orElseThrow();
+        assertEquals("My Table", t.tableName());
+        exec("INSERT INTO `My Table` VALUES (1)");
+        assertEquals(1, exec("SELECT * FROM `My Table`").rows().size());
+    }
+
     private static Catalog.Column col(CatalogService svc, String table, String column) {
         return svc.getTable("default", table).orElseThrow().columns().stream()
                 .filter(c -> c.name().equalsIgnoreCase(column)).findFirst().orElseThrow();

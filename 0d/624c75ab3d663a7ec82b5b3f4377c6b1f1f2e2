@@ -1,0 +1,24 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DatabaseAlterPipelineTest.java
+  s_b33fc4f71998f0::t_ab6ca20b7ed1e4 241-257
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbCatalogStore.java
+  s_b33fc4f71998f0::t_708c41e7d8b33b 76-86,89-91,97,100-101
+  s_b33fc4f71998f0::t_90bcf828f895d0 192,203,210,218-223
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/Catalog.java
+  s_b33fc4f71998f0::t_011d092f66544f 29-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "0d624c75ab3d663a7ec82b5b3f4377c6b1f1f2e2",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

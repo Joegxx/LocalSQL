@@ -2,8 +2,9 @@
 
 **[中文文档](./README.zh-CN.md)** | English
 
-> **A lightweight SQL Sandbox enabling developers and AI agents to complete 90% of SQL development, debugging, and verification locally — without touching production data platforms.**
+> **1.A lightweight SQL Sandbox enabling developers and AI agents to complete 90% of SQL development, debugging, and verification locally — without touching production data platforms.**
 > **让任何人，尤其是 AI，在不触碰生产数据平台的情况下完成 90% 的 SQL 开发、调试和验证。**
+> **2.Lightweight Local Virtual Spark/Hive Thrift Service.轻量级本地虚拟spark/hive thrift服务**
 
 LocalSQL is an embedded SQL runtime that lets you write and test production SQL locally using Spark SQL 3.2.0 syntax, executed in-process via DuckDB. It exposes a standard HiveServer2 Thrift interface for JDBC clients and database IDEs, requiring no Spark, Hadoop, or Hive deployment.
 

@@ -419,10 +419,15 @@ final class SqlPipeline {
             if (!oldNames.contains(c.name().toLowerCase())) {
                 executor.run(generator.generateAddColumn(rpc.tableName(), c));
             } else {
-                // type changed?
                 Catalog.Column oc = old.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst().orElse(null);
-                if (oc != null && !oc.type().typeName().equalsIgnoreCase(c.type().typeName())) {
+                // Full type equality (record equals): DECIMAL(10,2) vs DECIMAL(12,3)
+                // or TINYINT vs INT must trigger a physical ALTER even though the
+                // type *names* are related.
+                if (oc != null && !oc.type().equals(c.type())) {
                     executor.run(generator.generateAlterColumnType(rpc.tableName(), c.name(), c.type()));
+                }
+                if (oc != null && oc.nullable() != c.nullable()) {
+                    executor.run(generator.generateAlterColumnSetNotNull(rpc.tableName(), c.name(), !c.nullable()));
                 }
             }
         }

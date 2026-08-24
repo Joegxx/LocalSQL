@@ -1,5 +1,6 @@
 package io.github.joegxx.localsql.thrift;
 
+import io.github.joegxx.localsql.catalog.Catalog;
 import io.github.joegxx.localsql.catalog.CatalogService;
 import io.github.joegxx.localsql.catalog.CatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbCatalogStore;
@@ -135,5 +136,52 @@ class DatabaseAlterPipelineTest {
         exec("ALTER TABLE t UNSET TBLPROPERTIES ('k')");
         exec("ALTER TABLE t UNSET TBLPROPERTIES IF EXISTS ('missing')");
         assertThrows(Exception.class, () -> exec("ALTER TABLE t UNSET TBLPROPERTIES ('missing')"));
+    }
+
+    @Test
+    void decimalAndIntegralMetadataFidelity() throws Exception {
+        exec("CREATE TABLE d (id INT, amt DECIMAL(10,2), tiny TINYINT, small SMALLINT)");
+        var amt = col(catalog, "d", "amt");
+        assertEquals(new io.github.joegxx.localsql.ir.type.DecimalType(10, 2), amt.type());
+        assertEquals(io.github.joegxx.localsql.ir.type.IntegralType.TINYINT, col(catalog, "d", "tiny").type());
+        assertEquals(io.github.joegxx.localsql.ir.type.IntegralType.SMALLINT, col(catalog, "d", "small").type());
+        // Thrift-visible DESCRIBE keeps precision
+        assertTrue(exec("DESCRIBE d").rows().stream()
+                .anyMatch(r -> r.get(0).equals("amt") && r.get(1).equals("decimal(10,2)")));
+        // CREATE TABLE LIKE copies the physical type, not a degraded one
+        exec("CREATE TABLE d2 LIKE d");
+        assertTrue(executor.execute("DESCRIBE d2").rows().stream()
+                .anyMatch(r -> r.get(0).equals("amt") && r.get(1).toString().equalsIgnoreCase("DECIMAL(10,2)")));
+        assertEquals(new io.github.joegxx.localsql.ir.type.DecimalType(10, 2), col(catalog, "d2", "amt").type());
+        // restart simulation: reload catalog from the same store
+        CatalogService reloaded = new CatalogService(new DuckDbCatalogStore(executor));
+        assertEquals(new io.github.joegxx.localsql.ir.type.DecimalType(10, 2), col(reloaded, "d", "amt").type());
+        assertEquals(io.github.joegxx.localsql.ir.type.IntegralType.TINYINT, col(reloaded, "d", "tiny").type());
+        assertEquals(io.github.joegxx.localsql.ir.type.IntegralType.SMALLINT, col(reloaded, "d", "small").type());
+    }
+
+    @Test
+    void replaceColumnsPrecisionChangeApplied() throws Exception {
+        exec("CREATE TABLE r (id INT, amt DECIMAL(10,2))");
+        exec("INSERT INTO r VALUES (1, 1.5)");
+        exec("ALTER TABLE r REPLACE COLUMNS (id INT, amt DECIMAL(12,3))");
+        assertTrue(executor.execute("DESCRIBE r").rows().stream()
+                .anyMatch(r -> r.get(0).equals("amt") && r.get(1).toString().equalsIgnoreCase("DECIMAL(12,3)")));
+        assertEquals(new io.github.joegxx.localsql.ir.type.DecimalType(12, 3), col(catalog, "r", "amt").type());
+    }
+
+    @Test
+    void replaceColumnsNullabilityAppliedPhysically() throws Exception {
+        exec("CREATE TABLE r (id INT, amt DECIMAL(10,2))");
+        exec("INSERT INTO r VALUES (1, 1.5)");
+        exec("ALTER TABLE r REPLACE COLUMNS (id INT NOT NULL, amt DECIMAL(10,2))");
+        var idRow = executor.execute("DESCRIBE r").rows().stream()
+                .filter(r -> r.get(0).equals("id")).findFirst().orElseThrow();
+        assertEquals("NO", idRow.get(2));
+    }
+
+    private static Catalog.Column col(CatalogService svc, String table, String column) {
+        return svc.getTable("default", table).orElseThrow().columns().stream()
+                .filter(c -> c.name().equalsIgnoreCase(column)).findFirst().orElseThrow();
     }
 }

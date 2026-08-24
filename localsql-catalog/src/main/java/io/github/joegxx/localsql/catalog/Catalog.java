@@ -118,28 +118,61 @@ public final class Catalog {
         return new Column(colName, UnknownType.INSTANCE, true, null);
     }
 
+    /**
+     * Parse a physical/storage type string back into an IR DataType. Accepts
+     * both Spark type names and DuckDB DESCRIBE output (DECIMAL(10,2), INTEGER,
+     * VARCHAR, INT[] ...). Must stay symmetric with {@link #toStorageType}.
+     */
     public static DataType parseDataType(String typeName) {
         if (typeName == null) return new StringType();
         String t = typeName.trim().toUpperCase();
+        if (t.endsWith("[]")) {
+            return new io.github.joegxx.localsql.ir.type.ArrayType(
+                    parseDataType(t.substring(0, t.length() - 2)), true);
+        }
+        java.util.regex.Matcher dm = DECIMAL_TYPE.matcher(t);
+        if (dm.matches()) {
+            int precision = dm.group(1) != null ? Integer.parseInt(dm.group(1)) : 10;
+            int scale = dm.group(2) != null ? Integer.parseInt(dm.group(2)) : 0;
+            return new io.github.joegxx.localsql.ir.type.DecimalType(precision, scale);
+        }
         return switch (t) {
-            case "BOOLEAN" -> new io.github.joegxx.localsql.ir.type.BooleanType();
+            case "BOOLEAN", "BOOL" -> new io.github.joegxx.localsql.ir.type.BooleanType();
             case "TINYINT" -> io.github.joegxx.localsql.ir.type.IntegralType.TINYINT;
             case "SMALLINT" -> io.github.joegxx.localsql.ir.type.IntegralType.SMALLINT;
             case "INT", "INTEGER" -> io.github.joegxx.localsql.ir.type.IntegralType.INT;
             case "BIGINT", "LONG" -> io.github.joegxx.localsql.ir.type.IntegralType.BIGINT;
-            case "FLOAT" -> io.github.joegxx.localsql.ir.type.FractionalType.FLOAT;
+            case "FLOAT", "REAL" -> io.github.joegxx.localsql.ir.type.FractionalType.FLOAT;
             case "DOUBLE" -> io.github.joegxx.localsql.ir.type.FractionalType.DOUBLE;
-            case "STRING", "VARCHAR" -> new StringType();
+            case "STRING", "VARCHAR", "TEXT" -> new StringType();
+            case "BINARY", "BLOB" -> new io.github.joegxx.localsql.ir.type.BinaryType();
             case "DATE" -> new io.github.joegxx.localsql.ir.type.DateType();
             case "TIMESTAMP" -> new io.github.joegxx.localsql.ir.type.TimestampType();
             default -> new StringType();
         };
     }
 
+    private static final java.util.regex.Pattern DECIMAL_TYPE =
+            java.util.regex.Pattern.compile("(?:DECIMAL|NUMERIC)(?:\\((\\d+)(?:,(\\d+))?\\))?");
+
+    /**
+     * Serialize an IR DataType into a storage type string that
+     * {@link #parseDataType} can read back losslessly. Type-name based
+     * switching is not enough here: DECIMAL carries precision/scale and
+     * TINYINT/SMALLINT/INT share nothing observable in typeName alone.
+     */
     public static String toStorageType(DataType type) {
         if (type == null) return "STRING";
+        if (type instanceof io.github.joegxx.localsql.ir.type.DecimalType d) {
+            return "DECIMAL(" + d.precision() + "," + d.scale() + ")";
+        }
+        if (type instanceof io.github.joegxx.localsql.ir.type.ArrayType a) {
+            return toStorageType(a.elementType()) + "[]";
+        }
         return switch (type.typeName()) {
             case "BOOLEAN" -> "BOOLEAN";
+            case "TINYINT" -> "TINYINT";
+            case "SMALLINT" -> "SMALLINT";
             case "INT" -> "INT";
             case "BIGINT" -> "BIGINT";
             case "FLOAT" -> "FLOAT";

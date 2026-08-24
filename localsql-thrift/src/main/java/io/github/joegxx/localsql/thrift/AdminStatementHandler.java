@@ -125,13 +125,22 @@ final class AdminStatementHandler {
             for (Catalog.Column c : found.get().columns()) {
                 List<Object> row = new ArrayList<>(3);
                 row.add(c.name());
-                row.add(c.type() == null ? "string" : c.type().typeName().toLowerCase(Locale.ROOT));
+                row.add(displayType(c.type()));
                 row.add(c.comment() == null ? "" : c.comment());
                 rows.add(row);
             }
         }
         return new Outcome(new DuckDbExecutor.QueryResult(
                 List.of("col_name", "data_type", "comment"), rows), null);
+    }
+
+    /** Spark-style type display; decimal keeps its precision/scale. */
+    private static String displayType(io.github.joegxx.localsql.ir.type.DataType t) {
+        if (t == null) return "string";
+        if (t instanceof io.github.joegxx.localsql.ir.type.DecimalType d) {
+            return "decimal(" + d.precision() + "," + d.scale() + ")";
+        }
+        return t.typeName().toLowerCase(Locale.ROOT);
     }
 
     /** JDBC-style pattern match: '%' any sequence, '_' single char. */

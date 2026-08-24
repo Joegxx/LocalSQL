@@ -5,9 +5,13 @@ import io.github.joegxx.localsql.catalog.CatalogService;
 import io.github.joegxx.localsql.catalog.CatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbCatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
+import org.apache.hive.service.rpc.thrift.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -253,6 +257,86 @@ class DatabaseAlterPipelineTest {
         var props = reloaded2.getTable("default", "t").orElseThrow().properties();
         assertFalse(props.containsKey("k2"));
         assertEquals("v1", props.get("k1"));
+    }
+
+    @Test
+    void sessionDatabaseAndEscapedSchemaPattern() throws Exception {
+        LocalSqlThriftService svc = new LocalSqlThriftService(catalog, new SqlPipeline(catalog, executor));
+        var open = svc.OpenSession(
+                new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
+        TSessionHandle session = open.getSessionHandle();
+
+        exec(svc, session, "CREATE DATABASE ods_demo");
+        exec(svc, session, "USE ods_demo");
+        // unqualified CREATE after USE registers in the session database
+        exec(svc, session, "CREATE TABLE cdr (id INT COMMENT 'x', amt DECIMAL(10,2))");
+        assertTrue(catalog.getTable("ods_demo", "cdr").isPresent());
+        assertFalse(catalog.getTable("default", "cdr").isPresent());
+        // unqualified INSERT / SELECT / DESCRIBE resolve against the session db
+        exec(svc, session, "INSERT INTO cdr VALUES (1, 1.5)");
+        assertEquals("1", fetchRows(svc, session, "SELECT id FROM cdr").get(0).get(0));
+        assertTrue(fetchRows(svc, session, "DESCRIBE cdr").stream().anyMatch(r -> r.get(0).equals("amt")));
+        // qualified access keeps working
+        assertEquals("1", fetchRows(svc, session, "SELECT id FROM ods_demo.cdr").get(0).get(0));
+
+        // IDEA escapes the underscore in schema patterns (CLI_SEARCH_PATTERN_ESCAPE)
+        TGetTablesReq tr = new TGetTablesReq(session);
+        tr.setSchemaName("ods\\_demo");
+        List<String> tables = fetchColumn(svc, svc.GetTables(tr).getOperationHandle(), 2);
+        assertTrue(tables.contains("cdr"), "escaped-underscore schema pattern must list the table: " + tables);
+
+        TGetColumnsReq cr = new TGetColumnsReq(session);
+        cr.setSchemaName("ods\\_demo");
+        cr.setTableName("cdr");
+        List<String> columns = fetchColumn(svc, svc.GetColumns(cr).getOperationHandle(), 3);
+        assertTrue(columns.contains("amt"), "GetColumns must list columns: " + columns);
+
+        // plain-name schema filter still works
+        TGetTablesReq tr2 = new TGetTablesReq(session);
+        tr2.setSchemaName("ods_demo");
+        assertTrue(fetchColumn(svc, svc.GetTables(tr2).getOperationHandle(), 2).contains("cdr"));
+        // other databases are not matched by the escaped pattern
+        TGetTablesReq tr3 = new TGetTablesReq(session);
+        tr3.setSchemaName("other\\_db");
+        assertFalse(fetchColumn(svc, svc.GetTables(tr3).getOperationHandle(), 2).contains("cdr"));
+
+        // USE catalog.database form (IDEA sends this after USE spark_catalog)
+        exec(svc, session, "USE spark_catalog.default");
+        exec(svc, session, "CREATE TABLE in_default (id INT)");
+        assertTrue(catalog.getTable("default", "in_default").isPresent());
+    }
+
+    private static void exec(LocalSqlThriftService svc, TSessionHandle session, String sql) {
+        var resp = svc.ExecuteStatement(new TExecuteStatementReq(session, sql));
+        assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode(),
+                () -> sql + " failed: " + resp.getStatus().getErrorMessage());
+    }
+
+    private static List<List<String>> fetchRows(LocalSqlThriftService svc, TSessionHandle session, String sql) {
+        var resp = svc.ExecuteStatement(new TExecuteStatementReq(session, sql));
+        assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode(),
+                () -> sql + " failed: " + resp.getStatus().getErrorMessage());
+        var res = svc.FetchResults(
+                new TFetchResultsReq(resp.getOperationHandle(), TFetchOrientation.FETCH_FIRST, 100_000));
+        List<List<String>> rows = new ArrayList<>();
+        var cols = res.getResults().getColumns();
+        if (cols == null || cols.isEmpty()) return rows;
+        int n = cols.get(0).getStringVal().getValuesSize();
+        for (int r = 0; r < n; r++) {
+            List<String> row = new ArrayList<>();
+            for (var c : cols) row.add(c.getStringVal().getValues().get(r));
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private static List<String> fetchColumn(LocalSqlThriftService svc, TOperationHandle op, int col) {
+        var res = svc.FetchResults(new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 100_000));
+        List<String> out = new ArrayList<>();
+        var cols = res.getResults().getColumns();
+        if (cols == null || cols.isEmpty()) return out;
+        for (String v : cols.get(col).getStringVal().getValues()) out.add(v);
+        return out;
     }
 
     private static Catalog.Column col(CatalogService svc, String table, String column) {

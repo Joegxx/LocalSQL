@@ -30,7 +30,7 @@ final class AdminStatementHandler {
     private static final Pattern DESCRIBE =
             Pattern.compile("(?i)^(DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern USE =
-            Pattern.compile("(?i)^USE\\s+([A-Za-z_][\\w]*)\\s*$");
+            Pattern.compile("(?i)^USE\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern CURRENT_DATABASE =
             Pattern.compile("(?i)^SELECT\\s+current_database\\s*\\(\\s*\\)\\s*(AS\\s+[A-Za-z_][\\w]*)?\\s*$");
     private static final Pattern CURRENT_SCHEMA =
@@ -77,12 +77,15 @@ final class AdminStatementHandler {
 
         m = USE.matcher(s);
         if (m.matches()) {
-            String db = m.group(1).toLowerCase(Locale.ROOT);
-            // IDEs issue 'USE spark_catalog' (the catalog name, not a database).
-            // Treat the catalog name as a no-op switch to the default database.
-            if (db.equals("spark_catalog")) {
-                return Optional.of(new Outcome(
-                        new DuckDbExecutor.QueryResult(List.of("result"), new ArrayList<>()), "default"));
+            String target = m.group(1);
+            // 'USE spark_catalog' (the catalog name alone) is a no-op switch to
+            // default; 'USE catalog.db' / 'USE db' switch to the database part.
+            String db;
+            if (target.equals("spark_catalog")) {
+                db = "default";
+            } else {
+                int lastDot = target.lastIndexOf('.');
+                db = target.substring(lastDot + 1).toLowerCase(Locale.ROOT);
             }
             if (catalog.catalog().getDatabase(db).isEmpty()) {
                 throw new IllegalArgumentException("Database does not exist: " + db);
@@ -143,13 +146,9 @@ final class AdminStatementHandler {
         return t.typeName().toLowerCase(Locale.ROOT);
     }
 
-    /** JDBC-style pattern match: '%' any sequence, '_' single char. */
+    /** JDBC-style pattern match: '%' any sequence, '_' single char, '\' escapes. */
     private static boolean matches(String value, String pattern) {
-        String regex = Pattern.quote(pattern)
-                .replace("*", "\\E.*\\Q")
-                .replace("%", "\\E.*\\Q")
-                .replace("_", "\\E.\\Q");
-        return value.matches("(?i)" + regex);
+        return SqlPatterns.matches(value, pattern, true);
     }
 
     private static String strip(String sql) {

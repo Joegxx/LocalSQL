@@ -17,7 +17,12 @@ public final class SemanticAnalyzer {
     public SemanticAnalyzer(Catalog catalog) { this.catalog = catalog; }
 
     public Relation analyze(Relation rel) {
-        AnalyzerVisitor v = new AnalyzerVisitor(catalog);
+        return analyze(rel, "default");
+    }
+
+    /** @param defaultDatabase session database used to resolve unqualified names. */
+    public Relation analyze(Relation rel, String defaultDatabase) {
+        AnalyzerVisitor v = new AnalyzerVisitor(catalog, defaultDatabase);
         v.visitRelation(rel, null);
         return rel;
     }
@@ -25,31 +30,37 @@ public final class SemanticAnalyzer {
     /** Analyze a top-level statement: resolves query children and validates DML/DDL targets. */
     public io.github.joegxx.localsql.ir.statement.Statement analyze(
             io.github.joegxx.localsql.ir.statement.Statement stmt) {
+        return analyze(stmt, "default");
+    }
+
+    /** @param defaultDatabase session database used to resolve unqualified names. */
+    public io.github.joegxx.localsql.ir.statement.Statement analyze(
+            io.github.joegxx.localsql.ir.statement.Statement stmt, String defaultDatabase) {
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.QueryStatement q) {
-            analyze(q.query());
+            analyze(q.query(), defaultDatabase);
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.Insert i) {
-            analyze(i.query());
-            validateInsert(i);
+            analyze(i.query(), defaultDatabase);
+            validateInsert(i, defaultDatabase);
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateTable ct) {
-            if (ct.query() != null) analyze(ct.query());
+            if (ct.query() != null) analyze(ct.query(), defaultDatabase);
             if (ct.likeSource() != null
-                    && catalog.resolveTable(ct.likeSource()).isEmpty()) {
+                    && resolve(ct.likeSource(), defaultDatabase).isEmpty()) {
                 throw new IllegalArgumentException(
                         "Source table does not exist: " + String.join(".", ct.likeSource()));
             }
-            String db = databaseOf(ct.tableName());
+            String db = databaseOf(ct.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) {
                 throw new IllegalArgumentException("Database does not exist: " + db);
             }
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateView cv) {
-            analyze(cv.query());
-            String db = databaseOf(cv.tableName());
+            analyze(cv.query(), defaultDatabase);
+            String db = databaseOf(cv.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) {
                 throw new IllegalArgumentException("Database does not exist: " + db);
             }
@@ -77,18 +88,18 @@ public final class SemanticAnalyzer {
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameTable rt) {
-            String fromDb = databaseOf(rt.from());
-            String toDb = databaseOf(rt.to());
+            String fromDb = databaseOf(rt.from(), defaultDatabase);
+            String toDb = databaseOf(rt.to(), defaultDatabase);
             if (catalog.getDatabase(fromDb).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + fromDb);
             if (catalog.getDatabase(toDb).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + toDb);
-            catalog.resolveTable(rt.from()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rt.from())));
-            if (catalog.resolveTable(rt.to()).isPresent()) throw new IllegalArgumentException("Target table already exists: " + String.join(".", rt.to()));
+            resolve(rt.from(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rt.from())));
+            if (resolve(rt.to(), defaultDatabase).isPresent()) throw new IllegalArgumentException("Target table already exists: " + String.join(".", rt.to()));
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.AddColumns ac) {
-            String db = databaseOf(ac.tableName());
+            String db = databaseOf(ac.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            Catalog.Table t = catalog.resolveTable(ac.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", ac.tableName())));
+            Catalog.Table t = resolve(ac.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", ac.tableName())));
             if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", ac.tableName()));
             for (var c : ac.columns()) {
                 if (t.columns().stream().anyMatch(col -> col.name().equalsIgnoreCase(c.name()))) {
@@ -99,9 +110,9 @@ public final class SemanticAnalyzer {
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropColumns dc) {
-            String db = databaseOf(dc.tableName());
+            String db = databaseOf(dc.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            Catalog.Table t = catalog.resolveTable(dc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", dc.tableName())));
+            Catalog.Table t = resolve(dc.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", dc.tableName())));
             if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", dc.tableName()));
             for (String col : dc.columns()) {
                 if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(col))) {
@@ -111,18 +122,18 @@ public final class SemanticAnalyzer {
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameColumn rc) {
-            String db = databaseOf(rc.tableName());
+            String db = databaseOf(rc.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            Catalog.Table t = catalog.resolveTable(rc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rc.tableName())));
+            Catalog.Table t = resolve(rc.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rc.tableName())));
             if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", rc.tableName()));
             if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(rc.from()))) throw new IllegalArgumentException("Column does not exist: " + rc.from());
             if (t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(rc.to()))) throw new IllegalArgumentException("Target column already exists: " + rc.to());
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterColumn alc) {
-            String db = databaseOf(alc.tableName());
+            String db = databaseOf(alc.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            Catalog.Table t = catalog.resolveTable(alc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", alc.tableName())));
+            Catalog.Table t = resolve(alc.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", alc.tableName())));
             if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", alc.tableName()));
             if (t.columns().stream().noneMatch(c -> c.name().equalsIgnoreCase(alc.column()))) throw new IllegalArgumentException("Column does not exist: " + alc.column());
             if (alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column())
@@ -133,9 +144,9 @@ public final class SemanticAnalyzer {
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) {
-            String db = databaseOf(rpc.tableName());
+            String db = databaseOf(rpc.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            Catalog.Table t = catalog.resolveTable(rpc.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rpc.tableName())));
+            Catalog.Table t = resolve(rpc.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", rpc.tableName())));
             if ("VIEW".equalsIgnoreCase(t.tableType())) throw new IllegalArgumentException("Cannot alter columns of a view: " + String.join(".", rpc.tableName()));
             for (var c : rpc.columns()) {
                 if (c.position() != null) throw new UnsupportedOperationException("Column position FIRST/AFTER not supported: " + c.name());
@@ -143,29 +154,28 @@ public final class SemanticAnalyzer {
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropTable dt) {
-            String db = databaseOf(dt.tableName());
-            if (catalog.resolveTable(dt.tableName()).isEmpty() && !dt.ifExists()) {
+            if (resolve(dt.tableName(), defaultDatabase).isEmpty() && !dt.ifExists()) {
                 throw new IllegalArgumentException((dt.view() ? "View" : "Table") + " does not exist: " + String.join(".", dt.tableName()));
             }
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.SetTableProperties stp) {
-            String db = databaseOf(stp.tableName());
+            String db = databaseOf(stp.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            catalog.resolveTable(stp.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", stp.tableName())));
+            resolve(stp.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", stp.tableName())));
             return stmt;
         }
         if (stmt instanceof io.github.joegxx.localsql.ir.statement.UnsetTableProperties utp) {
-            String db = databaseOf(utp.tableName());
+            String db = databaseOf(utp.tableName(), defaultDatabase);
             if (catalog.getDatabase(db).isEmpty()) throw new IllegalArgumentException("Database does not exist: " + db);
-            catalog.resolveTable(utp.tableName()).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", utp.tableName())));
+            resolve(utp.tableName(), defaultDatabase).orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + String.join(".", utp.tableName())));
             return stmt;
         }
         throw new UnsupportedOperationException("Unsupported statement: " + stmt.getClass().getSimpleName());
     }
 
-    private void validateInsert(io.github.joegxx.localsql.ir.statement.Insert i) {
-        Catalog.Table target = catalog.resolveTable(i.tableName())
+    private void validateInsert(io.github.joegxx.localsql.ir.statement.Insert i, String defaultDatabase) {
+        Catalog.Table target = resolve(i.tableName(), defaultDatabase)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Table does not exist: " + String.join(".", i.tableName())));
         if (!"TABLE".equalsIgnoreCase(target.tableType())) {
@@ -184,18 +194,32 @@ public final class SemanticAnalyzer {
         }
     }
 
-    private static String databaseOf(List<String> parts) {
-        return parts.size() >= 2 ? parts.get(parts.size() - 2) : "default";
+    /** Resolve identifier parts against the session database for unqualified names. */
+    private java.util.Optional<Catalog.Table> resolve(List<String> parts, String defaultDatabase) {
+        if (parts == null || parts.isEmpty()) return java.util.Optional.empty();
+        if (parts.size() == 1) return catalog.getTable(defaultDatabase, parts.get(0));
+        return catalog.resolveTable(parts);
+    }
+
+    private static String databaseOf(List<String> parts, String defaultDatabase) {
+        return parts.size() == 1 ? defaultDatabase : parts.get(parts.size() - 2);
     }
 
     private static final class AnalyzerVisitor extends IrVisitor<Void, Void> {
         private final Catalog catalog;
+        private final String defaultDatabase;
 
-        AnalyzerVisitor(Catalog catalog) { this.catalog = catalog; }
+        AnalyzerVisitor(Catalog catalog, String defaultDatabase) {
+            this.catalog = catalog;
+            this.defaultDatabase = defaultDatabase;
+        }
 
         @Override
         public Void visitTableScan(TableScan r, Void ctx) {
-            catalog.resolveTable(r.tableName()).ifPresent(table -> {
+            java.util.Optional<Catalog.Table> found = r.tableName().size() == 1
+                    ? catalog.getTable(defaultDatabase, r.tableName().get(0))
+                    : catalog.resolveTable(r.tableName());
+            found.ifPresent(table -> {
                 List<AttributeReference> out = new ArrayList<>();
                 List<String> qualifier = r.alias() != null
                         ? List.of(r.alias())

@@ -39,6 +39,13 @@ final class SqlPipeline {
     private final SemanticAnalyzer analyzer;
     private final RewriteEngine rewriter = new RewriteEngine();
 
+    /**
+     * Session database for resolving unqualified table names (USE db; CREATE
+     * TABLE t must register db.t). Set at the start of execute() — safe because
+     * execute is synchronized and all statement handlers run on that call stack.
+     */
+    private String sessionDatabase = "default";
+
     SqlPipeline(CatalogService catalogService, DuckDbExecutor executor) {
         this.catalogService = catalogService;
         this.executor = executor;
@@ -53,10 +60,17 @@ final class SqlPipeline {
      * runtime trades concurrency for correctness here.
      */
     synchronized DuckDbExecutor.QueryResult execute(String sql) throws SQLException {
+        return execute(sql, "default");
+    }
+
+    /** @param currentDatabase session database for unqualified table names. */
+    synchronized DuckDbExecutor.QueryResult execute(String sql, String currentDatabase) throws SQLException {
+        this.sessionDatabase = currentDatabase == null || currentDatabase.isEmpty()
+                ? "default" : currentDatabase;
         Statement stmt = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
         if (stmt instanceof QueryStatement q) {
             Relation rel = q.query();
-            analyzer.analyze(rel);
+            analyzer.analyze(rel, sessionDatabase);
             rewriter.rewrite(rel);
             String duckSql = generator.generate(rel);
             LOG.info("Translated to DuckDB SQL: {}", duckSql);
@@ -140,7 +154,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeInsert(Insert i) throws SQLException {
-        analyzer.analyze(i);
+        analyzer.analyze(i, sessionDatabase);
         rewriter.rewrite(i.query());
         String table = bare(i.tableName());
         boolean tx = i.overwrite();
@@ -161,7 +175,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeCreateTable(CreateTable ct) throws SQLException {
-        analyzer.analyze(ct);
+        analyzer.analyze(ct, sessionDatabase);
         String db = databaseOf(ct.tableName());
         // Unquoted logical name: this feeds catalog metadata, not SQL text.
         String table = ct.tableName().get(ct.tableName().size() - 1);
@@ -170,6 +184,15 @@ final class SqlPipeline {
             if (ct.ifNotExists()) return empty();
             throw new IllegalArgumentException(
                     "Table already exists: " + String.join(".", ct.tableName()));
+        }
+        // All physical tables live in DuckDB's single main schema: a bare name
+        // cannot be shared by two logical tables even across databases.
+        for (Catalog.Table other : catalogService.catalog().listTables(null)) {
+            if (other.tableName().equalsIgnoreCase(table)) {
+                throw new IllegalArgumentException(
+                        "A table named " + table + " already exists in database "
+                                + other.database() + " (tables from all databases share one physical namespace)");
+            }
         }
         String createSql;
         if (ct.likeSource() != null) {
@@ -221,7 +244,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeCreateView(CreateView cv) throws SQLException {
-        analyzer.analyze(cv);
+        analyzer.analyze(cv, sessionDatabase);
         String db = databaseOf(cv.tableName());
         String name = cv.tableName().get(cv.tableName().size() - 1);
         Catalog.Table existing = catalogService.getTable(db, name).orElse(null);
@@ -256,7 +279,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeCreateDatabase(io.github.joegxx.localsql.ir.statement.CreateDatabase cd) throws SQLException {
-        analyzer.analyze(cd);
+        analyzer.analyze(cd, sessionDatabase);
         String name = cd.name();
         if (catalogService.catalog().getDatabase(name).isPresent()) {
             if (cd.ifNotExists()) return empty();
@@ -267,7 +290,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeAlterDatabase(io.github.joegxx.localsql.ir.statement.AlterDatabase ad) throws SQLException {
-        analyzer.analyze(ad);
+        analyzer.analyze(ad, sessionDatabase);
         try {
             catalogService.alterDatabase(ad.name(), ad.properties(), ad.location());
         } catch (Exception e) {
@@ -277,7 +300,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeDropDatabase(io.github.joegxx.localsql.ir.statement.DropDatabase dd) throws SQLException {
-        analyzer.analyze(dd);
+        analyzer.analyze(dd, sessionDatabase);
         String name = dd.name();
         var existing = catalogService.catalog().getDatabase(name);
         if (existing.isEmpty()) {
@@ -303,7 +326,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeRenameTable(io.github.joegxx.localsql.ir.statement.RenameTable rt) throws SQLException {
-        analyzer.analyze(rt);
+        analyzer.analyze(rt, sessionDatabase);
         String fromDb = databaseOf(rt.from());
         String fromTable = rt.from().get(rt.from().size() - 1);
         String toDb = databaseOf(rt.to());
@@ -327,7 +350,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeSetTableProperties(io.github.joegxx.localsql.ir.statement.SetTableProperties stp) throws SQLException {
-        analyzer.analyze(stp);
+        analyzer.analyze(stp, sessionDatabase);
         String db = databaseOf(stp.tableName());
         String table = stp.tableName().get(stp.tableName().size() - 1);
         Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
@@ -340,7 +363,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeUnsetTableProperties(io.github.joegxx.localsql.ir.statement.UnsetTableProperties utp) throws SQLException {
-        analyzer.analyze(utp);
+        analyzer.analyze(utp, sessionDatabase);
         String db = databaseOf(utp.tableName());
         String table = utp.tableName().get(utp.tableName().size() - 1);
         Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
@@ -358,7 +381,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeAddColumns(io.github.joegxx.localsql.ir.statement.AddColumns ac) throws SQLException {
-        analyzer.analyze(ac);
+        analyzer.analyze(ac, sessionDatabase);
         String db = databaseOf(ac.tableName());
         String table = ac.tableName().get(ac.tableName().size() - 1);
         inTransaction(() -> {
@@ -374,7 +397,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeDropColumns(io.github.joegxx.localsql.ir.statement.DropColumns dc) throws SQLException {
-        analyzer.analyze(dc);
+        analyzer.analyze(dc, sessionDatabase);
         String db = databaseOf(dc.tableName());
         String table = dc.tableName().get(dc.tableName().size() - 1);
         inTransaction(() -> {
@@ -389,7 +412,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeRenameColumn(io.github.joegxx.localsql.ir.statement.RenameColumn rc) throws SQLException {
-        analyzer.analyze(rc);
+        analyzer.analyze(rc, sessionDatabase);
         String db = databaseOf(rc.tableName());
         String table = rc.tableName().get(rc.tableName().size() - 1);
         String sql = generator.generateRenameColumn(rc.tableName(), rc.from(), rc.to());
@@ -402,7 +425,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeAlterColumn(io.github.joegxx.localsql.ir.statement.AlterColumn alc) throws SQLException {
-        analyzer.analyze(alc);
+        analyzer.analyze(alc, sessionDatabase);
         String db = databaseOf(alc.tableName());
         String table = alc.tableName().get(alc.tableName().size() - 1);
         String targetCol = alc.column();
@@ -449,7 +472,7 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeReplaceColumns(io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) throws SQLException {
-        analyzer.analyze(rpc);
+        analyzer.analyze(rpc, sessionDatabase);
         String db = databaseOf(rpc.tableName());
         String table = rpc.tableName().get(rpc.tableName().size() - 1);
         Catalog.Table old = catalogService.getTable(db, table).orElseThrow();
@@ -591,7 +614,8 @@ final class SqlPipeline {
         return DuckDbSqlGenerator.quote(parts.get(parts.size() - 1));
     }
 
-    private static String databaseOf(List<String> parts) {
-        return parts.size() >= 2 ? parts.get(parts.size() - 2) : "default";
+    /** Unqualified single-part names resolve against the session database. */
+    private String databaseOf(List<String> parts) {
+        return parts.size() == 1 ? sessionDatabase : parts.get(parts.size() - 2);
     }
 }

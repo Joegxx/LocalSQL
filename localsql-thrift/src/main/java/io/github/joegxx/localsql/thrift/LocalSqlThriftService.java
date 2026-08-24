@@ -111,7 +111,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                 LOG.info("Admin statement handled: {} row(s)", result.rows().size());
                 operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
             } else {
-                DuckDbExecutor.QueryResult result = pipeline.execute(sql);
+                DuckDbExecutor.QueryResult result = pipeline.execute(sql, currentDb);
                 operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
             }
         } catch (Exception e) {
@@ -188,15 +188,18 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                 req.getCatalogName(), req.getSchemaName(), req.getTableName());
         String schema = req.getSchemaName();
         String tablePattern = req.getTableName();
+        // The schema may be a JDBC pattern ('ods\_fuaisv', '%') — prefix
+        // filtering on it would return nothing, so only prefilter when it is
+        // a plain name and fall back to pattern matching otherwise.
         List<List<Object>> rows = new ArrayList<>();
-        for (Catalog.Table t : catalogService.catalog().listTables(
-                schema == null || schema.isEmpty() ? null : schema.toLowerCase())) {
+        for (Catalog.Table t : catalogService.catalog().listTables(filterDatabase(schema))) {
             String dbName = t.database();
             if (schema != null && !schema.isEmpty() && !matches(dbName, schema)) continue;
             if (tablePattern != null && !tablePattern.isEmpty()
-                    && !matches(t.name().get(t.name().size() - 1), tablePattern)) continue;
-            rows.add(nullableRow("spark_catalog", dbName, t.name().get(1), "TABLE",
-                    null, null, null, null, null, null));
+                    && !matches(t.tableName(), tablePattern)) continue;
+            rows.add(nullableRow("spark_catalog", dbName, t.tableName(),
+                    "VIEW".equalsIgnoreCase(t.tableType()) ? "VIEW" : "TABLE",
+                    t.comment(), null, null, null, null, null));
         }
         TOperationHandle h = newHandle(TOperationType.GET_TABLES, true);
         operations.put(guid(h), new OperationState(h,
@@ -227,17 +230,16 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         String columnPattern = req.getColumnName();
         List<List<Object>> rows = new ArrayList<>();
         int pos = 1;
-        for (Catalog.Table t : catalogService.catalog().listTables(
-                schema == null || schema.isEmpty() ? null : schema.toLowerCase())) {
+        for (Catalog.Table t : catalogService.catalog().listTables(filterDatabase(schema))) {
             String dbName = t.database();
             if (schema != null && !schema.isEmpty() && !matches(dbName, schema)) continue;
             if (tablePattern != null && !tablePattern.isEmpty()
-                    && !matches(t.name().get(t.name().size() - 1), tablePattern)) continue;
+                    && !matches(t.tableName(), tablePattern)) continue;
             for (Catalog.Column c : t.columns()) {
                 if (columnPattern != null && !columnPattern.isEmpty() && !matches(c.name(), columnPattern)) continue;
-                rows.add(nullableRow("spark_catalog", dbName, t.name().get(1), c.name(),
-                        toSqlType(c.type()), "STRING", Integer.MAX_VALUE, null, null, null,
-                        java.sql.DatabaseMetaData.columnNullable, null, null, null, null,
+                rows.add(nullableRow("spark_catalog", dbName, t.tableName(), c.name(),
+                        toSqlType(c.type()), typeName(c.type()), Integer.MAX_VALUE, null, null, null,
+                        java.sql.DatabaseMetaData.columnNullable, c.comment(), null, null, null, null,
                         (long) pos, "YES", null, null, null, null, 0));
                 pos++;
             }
@@ -254,6 +256,23 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         TGetColumnsResp r = new TGetColumnsResp(ok());
         r.setOperationHandle(h);
         return r;
+    }
+
+    /** Prefilter database only when the schema is a plain name, not a pattern. */
+    private static String filterDatabase(String schema) {
+        if (schema == null || schema.isEmpty()) return null;
+        for (int i = 0; i < schema.length(); i++) {
+            char c = schema.charAt(i);
+            if (c == '%' || c == '_' || c == '\\') return null;
+        }
+        return schema.toLowerCase();
+    }
+
+    private static String typeName(io.github.joegxx.localsql.ir.type.DataType t) {
+        if (t instanceof io.github.joegxx.localsql.ir.type.DecimalType d) {
+            return "DECIMAL(" + d.precision() + "," + d.scale() + ")";
+        }
+        return t == null ? "STRING" : t.typeName();
     }
 
     @Override
@@ -410,8 +429,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     }
 
     private boolean matches(String value, String pattern) {
-        if (pattern == null || pattern.isEmpty()) return true;
-        return value.matches(pattern.replace("%", ".*").replace("_", "."));
+        return SqlPatterns.matches(value, pattern);
     }
 
     private static List<Object> nullableRow(Object... values) {

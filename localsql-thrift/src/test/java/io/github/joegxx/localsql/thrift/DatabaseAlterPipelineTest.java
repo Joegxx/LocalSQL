@@ -238,6 +238,23 @@ class DatabaseAlterPipelineTest {
         assertEquals(1L, ((Number) exec("SELECT count(*) FROM t").rows().get(0).get(0)).longValue());
     }
 
+    @Test
+    void tablePropertiesSurviveRestart() throws Exception {
+        exec("CREATE TABLE t (id INT)");
+        exec("ALTER TABLE t SET TBLPROPERTIES ('k1'='v1', 'k2'='a=b', 'k3'='multi line')");
+        CatalogService reloaded = new CatalogService(new DuckDbCatalogStore(executor));
+        var t = reloaded.getTable("default", "t").orElseThrow();
+        assertEquals("v1", t.properties().get("k1"));
+        assertEquals("a=b", t.properties().get("k2"));
+        assertEquals("multi line", t.properties().get("k3"));
+        // UNSET removes the row, not just the in-memory entry
+        exec("ALTER TABLE t UNSET TBLPROPERTIES ('k2')");
+        CatalogService reloaded2 = new CatalogService(new DuckDbCatalogStore(executor));
+        var props = reloaded2.getTable("default", "t").orElseThrow().properties();
+        assertFalse(props.containsKey("k2"));
+        assertEquals("v1", props.get("k1"));
+    }
+
     private static Catalog.Column col(CatalogService svc, String table, String column) {
         return svc.getTable("default", table).orElseThrow().columns().stream()
                 .filter(c -> c.name().equalsIgnoreCase(column)).findFirst().orElseThrow();

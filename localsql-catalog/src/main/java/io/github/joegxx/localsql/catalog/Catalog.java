@@ -26,7 +26,14 @@ public final class Catalog {
             this(0, name, "TABLE", columns, location, format, null, new LinkedHashMap<>(), null);
         }
         public String qualifiedName() { return String.join(".", name); }
-        public String database() { return name.size() > 1 ? name.get(0) : "default"; }
+        /** [t]->default; [db,t]/[catalog,db,t]->db; [catalog,db,schema,t]->db. */
+        public String database() {
+            return switch (name.size()) {
+                case 0, 1 -> "default";
+                case 2, 3 -> name.get(name.size() - 2);
+                default -> name.get(1);
+            };
+        }
         public String tableName() { return name.get(name.size() - 1); }
     }
 

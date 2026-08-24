@@ -73,26 +73,32 @@ public final class DuckDbCatalogStore implements CatalogStore {
     @Override
     public long saveTable(Catalog.Table table) throws Exception {
         long tableId = table.tableId() > 0 ? table.tableId() : nextTableId();
-        String catalogName = table.name().size() > 2 ? table.name().get(0) : "local";
-        String databaseName = table.name().size() > 1 ? table.name().get(0) : "default";
-        String schemaName = table.name().size() > 2 ? table.name().get(1) : databaseName;
+        List<String> n = table.name();
+        // [t] / [db,t] / [catalog,db,t] / [catalog,db,schema,t]
+        String catalogName;
+        String databaseName;
+        String schemaName;
+        switch (n.size()) {
+            case 1 -> { catalogName = "local"; databaseName = "default"; schemaName = databaseName; }
+            case 2 -> { catalogName = "local"; databaseName = n.get(0); schemaName = databaseName; }
+            case 3 -> { catalogName = n.get(0); databaseName = n.get(1); schemaName = databaseName; }
+            default -> { catalogName = n.get(0); databaseName = n.get(1); schemaName = n.get(2); }
+        }
         String tableName = table.tableName();
         String tableType = table.tableType() == null ? "TABLE" : table.tableType();
-        String comment = sqlEscape(table.comment());
-        String properties = serializeProperties(table.properties());
-        String metadataJson = sqlEscape(table.metadataJson());
-
+        // Properties live exclusively in catalog_property rows; the legacy
+        // catalog_table.properties text column is no longer written (reading
+        // it back also cannot represent '=' or newlines inside values).
         executeUpdate("DELETE FROM catalog_table WHERE table_id = " + tableId);
         executeUpdate("DELETE FROM catalog_column WHERE table_id = " + tableId);
         executeUpdate("DELETE FROM catalog_property WHERE table_id = " + tableId);
 
         executeUpdate(String.format(
-                "INSERT INTO catalog_table VALUES (%d, '%s', '%s', '%s', '%s', '%s', %s, '%s', %s)",
+                "INSERT INTO catalog_table VALUES (%d, '%s', '%s', '%s', '%s', '%s', %s, NULL, %s)",
                 tableId, sqlEscape(catalogName), sqlEscape(databaseName), sqlEscape(schemaName),
                 sqlEscape(tableName), sqlEscape(tableType),
-                comment == null ? "NULL" : "'" + comment + "'",
-                sqlEscape(properties),
-                metadataJson == null ? "NULL" : "'" + metadataJson + "'"));
+                table.comment() == null ? "NULL" : "'" + sqlEscape(table.comment()) + "'",
+                table.metadataJson() == null ? "NULL" : "'" + sqlEscape(table.metadataJson()) + "'"));
 
         for (Catalog.Column c : table.columns()) {
             executeUpdate(String.format(
@@ -183,7 +189,7 @@ public final class DuckDbCatalogStore implements CatalogStore {
     private List<Catalog.Table> loadTablesByIds(String whereClause) throws Exception {
         DuckDbExecutor.QueryResult rs = executor.execute(
                 "SELECT t.table_id, t.catalog_name, t.database_name, t.schema_name, t.table_name, "
-                        + "t.table_type, t.comment, t.properties, t.metadata_json FROM catalog_table t "
+                        + "t.table_type, t.comment, t.metadata_json FROM catalog_table t "
                         + whereClause + " ORDER BY t.table_id");
         List<Catalog.Table> out = new ArrayList<>();
         for (List<Object> row : rs.rows()) {
@@ -194,18 +200,27 @@ public final class DuckDbCatalogStore implements CatalogStore {
             String tableName = asString(row.get(4));
             String tableType = asString(row.get(5));
             String comment = asString(row.get(6));
-            String propertiesJson = asString(row.get(7));
-            String metadataJson = asString(row.get(8));
+            String metadataJson = asString(row.get(7));
 
             List<String> name = schemaName != null && !schemaName.equals(databaseName)
                     ? List.of(catalogName, databaseName, schemaName, tableName)
                     : List.of(databaseName, tableName);
 
             List<Catalog.Column> cols = loadColumns(id);
-            java.util.Map<String, String> props = deserializeProperties(propertiesJson);
+            java.util.Map<String, String> props = loadProperties(id);
 
             out.add(new Catalog.Table(id, name, tableType == null ? "TABLE" : tableType,
                     cols, null, "duckdb", comment, props, metadataJson));
+        }
+        return out;
+    }
+
+    private java.util.Map<String, String> loadProperties(long tableId) throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT property_key, property_value FROM catalog_property WHERE table_id = " + tableId);
+        java.util.Map<String, String> out = new LinkedHashMap<>();
+        for (List<Object> row : rs.rows()) {
+            out.put(asString(row.get(0)), asString(row.get(1)));
         }
         return out;
     }
@@ -246,27 +261,5 @@ public final class DuckDbCatalogStore implements CatalogStore {
 
     private static String asString(Object o) {
         return o == null ? null : o.toString();
-    }
-
-    private static String serializeProperties(java.util.Map<String, String> props) {
-        if (props == null || props.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        for (var e : props.entrySet()) {
-            if (!first) sb.append("\n");
-            sb.append(e.getKey()).append("=").append(e.getValue());
-            first = false;
-        }
-        return sb.toString();
-    }
-
-    private static java.util.Map<String, String> deserializeProperties(String json) {
-        java.util.Map<String, String> out = new LinkedHashMap<>();
-        if (json == null || json.isBlank()) return out;
-        for (String line : json.split("\n")) {
-            int eq = line.indexOf('=');
-            if (eq > 0) out.put(line.substring(0, eq), line.substring(eq + 1));
-        }
-        return out;
     }
 }

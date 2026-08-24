@@ -1,0 +1,31 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DatabaseAlterPipelineTest.java
+  s_b33fc4f71998f0::t_8a5f786f79098d 183-216,218-219,222-223
+  s_b33fc4f71998f0::t_265e183ef66725 217,220-221
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_986d8566067f96 362
+  s_b33fc4f71998f0::t_f2e630fe4181dc 135-137,156,163,178
+  s_b33fc4f71998f0::t_f5b5b7a029a294 435-445
+  s_b33fc4f71998f0::t_4f83abc9cbe6dd 457-458,465-466,468
+  s_b33fc4f71998f0::t_8252c8c70a8d24 425-431
+  s_b33fc4f71998f0::t_84f5e8fd4ba2f7 446-456,459-464,467,469-476
+  s_b33fc4f71998f0::t_16d4c5294d5cc6 353-357,359-361,363-364,369,381,383-385
+  s_b33fc4f71998f0::t_b81f48a5583e2d 320
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_88a9532a72f73d 380-382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.40-trip",
+  "base_commit_sha": "b24369ce4e501b652cf820c8d37bf6be5841b0ad",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

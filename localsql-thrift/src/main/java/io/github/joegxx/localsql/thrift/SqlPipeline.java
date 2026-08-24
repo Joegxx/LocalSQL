@@ -81,6 +81,34 @@ final class SqlPipeline {
                 "Unsupported statement: " + stmt.getClass().getSimpleName());
     }
 
+    @FunctionalInterface
+    private interface SqlWork {
+        void run() throws Exception;
+    }
+
+    /**
+     * Run physical DuckDB statements together with catalog-store writes inside
+     * one DuckDB transaction: a mid-sequence failure rolls back both the
+     * physical objects and the persisted metadata, so they cannot drift apart
+     * (previously a failed multi-column ALTER or a store failure after a
+     * physical RENAME left the two layers inconsistent). In-memory catalog
+     * mutations are not rolled back — they heal on the next store reload; the
+     * pipeline is synchronized, so no other statement observes the intermediate
+     * state.
+     */
+    private void inTransaction(SqlWork work) throws SQLException {
+        executor.run("BEGIN");
+        try {
+            work.run();
+            executor.run("COMMIT");
+        } catch (Exception e) {
+            try { executor.run("ROLLBACK"); } catch (Exception ignored) {}
+            if (e instanceof SQLException se) throw se;
+            if (e instanceof RuntimeException re) throw re;
+            throw new SQLException(e.getMessage(), e);
+        }
+    }
+
     private DuckDbExecutor.QueryResult executeDrop(DropTable dr)
             throws SQLException {
         String db = databaseOf(dr.tableName());
@@ -100,11 +128,14 @@ final class SqlPipeline {
                     "DROP TABLE target is a view (use DROP VIEW): " + String.join(".", dr.tableName()));
         }
         try {
-            catalogService.dropTable(db, name);
-        } catch (Exception e) {
+            inTransaction(() -> {
+                catalogService.dropTable(db, name);
+                executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ")
+                        + DuckDbSqlGenerator.quote(name));
+            });
+        } catch (SQLException e) {
             throw new SQLException("Failed to drop catalog entry for " + name + ": " + e.getMessage(), e);
         }
-        executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ") + DuckDbSqlGenerator.quote(name));
         return empty();
     }
 
@@ -151,32 +182,42 @@ final class SqlPipeline {
             }
             CreateTable resolved = new CreateTable(ct.tableName(), false, cols, null, null);
             createSql = generator.generateCreateTable(resolved);
-            executor.run(createSql);
-            registerPhysical(db, table, "TABLE", createSql);
-            patchColumnComments(db, table, commentMap(cols));
+            inTransaction(() -> {
+                executor.run(createSql);
+                registerPhysical(db, table, "TABLE", createSql);
+                patchColumnComments(db, table, commentMap(cols));
+            });
             return empty();
         }
         if (ct.query() == null) {
             createSql = generator.generateCreateTable(ct);
-            executor.run(createSql);
-            registerPhysical(db, table, "TABLE", createSql);
-            patchColumnComments(db, table, commentMap(ct.columns()));
+            inTransaction(() -> {
+                executor.run(createSql);
+                registerPhysical(db, table, "TABLE", createSql);
+                patchColumnComments(db, table, commentMap(ct.columns()));
+            });
             return empty();
         }
         rewriter.rewrite(ct.query());
         if (ct.columns().isEmpty()) {
             createSql = generator.generateCreateTableAs(ct);
-            executor.run(createSql);
-            registerPhysical(db, table, "TABLE", createSql);
+            inTransaction(() -> {
+                executor.run(createSql);
+                registerPhysical(db, table, "TABLE", createSql);
+            });
             return empty();
         }
         // Explicit column list + AS query: create the (empty) table with the
         // declared schema, then populate it through the INSERT path.
         createSql = generator.generateCreateTable(ct);
-        executor.run(createSql);
-        registerPhysical(db, table, "TABLE", createSql);
-        patchColumnComments(db, table, commentMap(ct.columns()));
-        return executeInsert(new Insert(ct.tableName(), false, null, ct.query()));
+        DuckDbExecutor.QueryResult[] inserted = new DuckDbExecutor.QueryResult[1];
+        inTransaction(() -> {
+            executor.run(createSql);
+            registerPhysical(db, table, "TABLE", createSql);
+            patchColumnComments(db, table, commentMap(ct.columns()));
+            inserted[0] = executeInsert(new Insert(ct.tableName(), false, null, ct.query()));
+        });
+        return inserted[0];
     }
 
     private DuckDbExecutor.QueryResult executeCreateView(CreateView cv) throws SQLException {
@@ -193,19 +234,24 @@ final class SqlPipeline {
                 if (cv.ifNotExists()) return empty();
                 throw new IllegalArgumentException("View already exists: " + name);
             }
-            try {
-                catalogService.dropTable(db, name);
-            } catch (Exception e) {
-                throw new SQLException("Failed to drop view " + name + ": " + e.getMessage(), e);
-            }
-            executor.run("DROP VIEW IF EXISTS " + DuckDbSqlGenerator.quote(name));
         }
         // view does not exist: IF NOT EXISTS only matters in the branch above;
         // always create it here
         rewriter.rewrite(cv.query());
         String createSql = generator.generateCreateView(cv);
-        executor.run(createSql);
-        registerPhysical(db, name, "VIEW", createSql);
+        final boolean replacing = existing != null;
+        inTransaction(() -> {
+            if (replacing) {
+                try {
+                    catalogService.dropTable(db, name);
+                } catch (Exception e) {
+                    throw new SQLException("Failed to drop view " + name + ": " + e.getMessage(), e);
+                }
+                executor.run("DROP VIEW IF EXISTS " + DuckDbSqlGenerator.quote(name));
+            }
+            executor.run(createSql);
+            registerPhysical(db, name, "VIEW", createSql);
+        });
         return empty();
     }
 
@@ -242,13 +288,15 @@ final class SqlPipeline {
         if (!tables.isEmpty() && !dd.cascade()) {
             throw new IllegalArgumentException("Database " + name + " is not empty. Use CASCADE to drop.");
         }
-        for (Catalog.Table t : tables) {
-            String drop = "VIEW".equalsIgnoreCase(t.tableType()) ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ";
-            try { executor.run(drop + DuckDbSqlGenerator.quote(t.tableName())); } catch (Exception ignored) {}
-        }
         try {
-            catalogService.dropDatabase(name, dd.cascade());
-        } catch (Exception e) {
+            inTransaction(() -> {
+                for (Catalog.Table t : tables) {
+                    String drop = "VIEW".equalsIgnoreCase(t.tableType()) ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ";
+                    try { executor.run(drop + DuckDbSqlGenerator.quote(t.tableName())); } catch (Exception ignored) {}
+                }
+                catalogService.dropDatabase(name, dd.cascade());
+            });
+        } catch (SQLException e) {
             throw new SQLException("Failed to drop database " + name + ": " + e.getMessage(), e);
         }
         return empty();
@@ -267,10 +315,12 @@ final class SqlPipeline {
         }
         String sql = generator.generateRenameTable(rt, isView);
         LOG.info("Translated to DuckDB SQL: {}", sql);
-        executor.run(sql);
         try {
-            catalogService.renameTable(fromDb, fromTable, toDb, toTable);
-        } catch (Exception e) {
+            inTransaction(() -> {
+                executor.run(sql);
+                catalogService.renameTable(fromDb, fromTable, toDb, toTable);
+            });
+        } catch (SQLException e) {
             throw new SQLException("Failed to rename catalog entry: " + e.getMessage(), e);
         }
         return empty();
@@ -311,13 +361,15 @@ final class SqlPipeline {
         analyzer.analyze(ac);
         String db = databaseOf(ac.tableName());
         String table = ac.tableName().get(ac.tableName().size() - 1);
-        for (var col : ac.columns()) {
-            String sql = generator.generateAddColumn(ac.tableName(), col);
-            LOG.info("Translated to DuckDB SQL: {}", sql);
-            executor.run(sql);
-        }
-        refreshFromDescribe(db, table);
-        patchColumnComments(db, table, colDefComments(ac.columns()));
+        inTransaction(() -> {
+            for (var col : ac.columns()) {
+                String sql = generator.generateAddColumn(ac.tableName(), col);
+                LOG.info("Translated to DuckDB SQL: {}", sql);
+                executor.run(sql);
+            }
+            refreshFromDescribe(db, table);
+            patchColumnComments(db, table, colDefComments(ac.columns()));
+        });
         return empty();
     }
 
@@ -325,12 +377,14 @@ final class SqlPipeline {
         analyzer.analyze(dc);
         String db = databaseOf(dc.tableName());
         String table = dc.tableName().get(dc.tableName().size() - 1);
-        for (String col : dc.columns()) {
-            String sql = generator.generateDropColumn(dc.tableName(), col);
-            LOG.info("Translated to DuckDB SQL: {}", sql);
-            executor.run(sql);
-        }
-        refreshFromDescribe(db, table);
+        inTransaction(() -> {
+            for (String col : dc.columns()) {
+                String sql = generator.generateDropColumn(dc.tableName(), col);
+                LOG.info("Translated to DuckDB SQL: {}", sql);
+                executor.run(sql);
+            }
+            refreshFromDescribe(db, table);
+        });
         return empty();
     }
 
@@ -340,8 +394,10 @@ final class SqlPipeline {
         String table = rc.tableName().get(rc.tableName().size() - 1);
         String sql = generator.generateRenameColumn(rc.tableName(), rc.from(), rc.to());
         LOG.info("Translated to DuckDB SQL: {}", sql);
-        executor.run(sql);
-        refreshFromDescribe(db, table);
+        inTransaction(() -> {
+            executor.run(sql);
+            refreshFromDescribe(db, table);
+        });
         return empty();
     }
 
@@ -354,36 +410,41 @@ final class SqlPipeline {
         // desired value must survive the refresh; on rename also carry over the
         // old comment, which refreshFromDescribe would lose (it matches by name).
         String desiredComment = alc.newComment();
-        boolean renamed = false;
-        if (alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column())) {
+        final boolean renamed = alc.newName() != null && !alc.newName().equalsIgnoreCase(alc.column());
+        if (renamed) {
             if (desiredComment == null) {
                 desiredComment = catalogService.getTable(db, table).stream()
                         .flatMap(t -> t.columns().stream())
                         .filter(c -> c.name().equalsIgnoreCase(alc.column()) && c.comment() != null)
                         .map(Catalog.Column::comment).findFirst().orElse(null);
             }
-            String sqlRename = generator.generateRenameColumn(alc.tableName(), alc.column(), alc.newName());
-            LOG.info("Translated to DuckDB SQL: {}", sqlRename);
-            executor.run(sqlRename);
             targetCol = alc.newName();
-            renamed = true;
         }
-        if (alc.newType() != null) {
-            String sql = generator.generateAlterColumnType(alc.tableName(), targetCol, alc.newType());
-            LOG.info("Translated to DuckDB SQL: {}", sql);
-            executor.run(sql);
-        }
-        if (alc.setNotNull() != null) {
-            String sql = generator.generateAlterColumnSetNotNull(alc.tableName(), targetCol, alc.setNotNull());
-            LOG.info("Translated to DuckDB SQL: {}", sql);
-            executor.run(sql);
-        }
-        if (renamed || alc.newType() != null || alc.setNotNull() != null) {
-            refreshFromDescribe(db, table);
-        }
-        if (desiredComment != null) {
-            patchColumnComments(db, table, java.util.Map.of(targetCol.toLowerCase(), desiredComment));
-        }
+        final String col = targetCol;
+        final String comment = desiredComment;
+        inTransaction(() -> {
+            if (renamed) {
+                String sqlRename = generator.generateRenameColumn(alc.tableName(), alc.column(), alc.newName());
+                LOG.info("Translated to DuckDB SQL: {}", sqlRename);
+                executor.run(sqlRename);
+            }
+            if (alc.newType() != null) {
+                String sql = generator.generateAlterColumnType(alc.tableName(), col, alc.newType());
+                LOG.info("Translated to DuckDB SQL: {}", sql);
+                executor.run(sql);
+            }
+            if (alc.setNotNull() != null) {
+                String sql = generator.generateAlterColumnSetNotNull(alc.tableName(), col, alc.setNotNull());
+                LOG.info("Translated to DuckDB SQL: {}", sql);
+                executor.run(sql);
+            }
+            if (renamed || alc.newType() != null || alc.setNotNull() != null) {
+                refreshFromDescribe(db, table);
+            }
+            if (comment != null) {
+                patchColumnComments(db, table, java.util.Map.of(col.toLowerCase(), comment));
+            }
+        });
         return empty();
     }
 
@@ -394,41 +455,41 @@ final class SqlPipeline {
         Catalog.Table old = catalogService.getTable(db, table).orElseThrow();
         // For overlapping columns, try to keep data: ADD missing, DROP extra, ALTER type for changed
         java.util.Set<String> newNames = new java.util.HashSet<>();
-        java.util.Map<String, io.github.joegxx.localsql.ir.type.DataType> newTypes = new java.util.HashMap<>();
-        for (var c : rpc.columns()) { newNames.add(c.name().toLowerCase()); newTypes.put(c.name().toLowerCase(), c.type()); }
-        // Drop columns not in new schema
-        for (Catalog.Column c : List.copyOf(old.columns())) {
-            if (!newNames.contains(c.name().toLowerCase())) {
-                executor.run(generator.generateDropColumn(rpc.tableName(), c.name()));
-            }
-        }
-        // Add columns not in old schema
+        for (var c : rpc.columns()) newNames.add(c.name().toLowerCase());
         java.util.Set<String> oldNames = new java.util.HashSet<>();
         for (Catalog.Column c : old.columns()) oldNames.add(c.name().toLowerCase());
-        for (var c : rpc.columns()) {
-            if (!oldNames.contains(c.name().toLowerCase())) {
-                executor.run(generator.generateAddColumn(rpc.tableName(), c));
-            } else {
-                Catalog.Column oc = old.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst().orElse(null);
-                // Full type equality (record equals): DECIMAL(10,2) vs DECIMAL(12,3)
-                // or TINYINT vs INT must trigger a physical ALTER even though the
-                // type *names* are related.
-                if (oc != null && !oc.type().equals(c.type())) {
-                    executor.run(generator.generateAlterColumnType(rpc.tableName(), c.name(), c.type()));
-                }
-                if (oc != null && oc.nullable() != c.nullable()) {
-                    executor.run(generator.generateAlterColumnSetNotNull(rpc.tableName(), c.name(), !c.nullable()));
-                }
-            }
-        }
-        refreshFromDescribe(db, table);
-        // Nullability is physical (SET/DROP NOT NULL above, seen by DESCRIBE).
+        // Nullability is physical (SET/DROP NOT NULL, seen by DESCRIBE).
         // REPLACE defines a complete new schema: every column's comment comes
         // solely from the new definition — stale old comments must be cleared
         // (refreshFromDescribe preserved them), so pass nulls explicitly.
         java.util.Map<String, String> comments = new java.util.HashMap<>();
         for (var c : rpc.columns()) comments.put(c.name().toLowerCase(), c.comment());
-        patchColumnComments(db, table, comments);
+        inTransaction(() -> {
+            // Drop columns not in new schema
+            for (Catalog.Column c : List.copyOf(old.columns())) {
+                if (!newNames.contains(c.name().toLowerCase())) {
+                    executor.run(generator.generateDropColumn(rpc.tableName(), c.name()));
+                }
+            }
+            // Add columns not in old schema; alter overlapping columns whose
+            // type (full record equality: DECIMAL(10,2) vs DECIMAL(12,3),
+            // TINYINT vs INT) or nullability changed.
+            for (var c : rpc.columns()) {
+                if (!oldNames.contains(c.name().toLowerCase())) {
+                    executor.run(generator.generateAddColumn(rpc.tableName(), c));
+                } else {
+                    Catalog.Column oc = old.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst().orElse(null);
+                    if (oc != null && !oc.type().equals(c.type())) {
+                        executor.run(generator.generateAlterColumnType(rpc.tableName(), c.name(), c.type()));
+                    }
+                    if (oc != null && oc.nullable() != c.nullable()) {
+                        executor.run(generator.generateAlterColumnSetNotNull(rpc.tableName(), c.name(), !c.nullable()));
+                    }
+                }
+            }
+            refreshFromDescribe(db, table);
+            patchColumnComments(db, table, comments);
+        });
         return empty();
     }
 

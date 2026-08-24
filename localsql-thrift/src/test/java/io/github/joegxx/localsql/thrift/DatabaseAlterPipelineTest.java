@@ -221,6 +221,23 @@ class DatabaseAlterPipelineTest {
         assertEquals(1, exec("SELECT * FROM `My Table`").rows().size());
     }
 
+    @Test
+    void failedMultiStepAlterRollsBackAtomically() throws Exception {
+        exec("CREATE TABLE t (id INT)");
+        exec("INSERT INTO t VALUES (100000)");
+        // 'extra' would be added first; the DECIMAL(3,0) conversion of 100000
+        // then fails — without a transaction 'extra' would survive as a
+        // half-applied ALTER.
+        assertThrows(Exception.class, () ->
+                exec("ALTER TABLE t REPLACE COLUMNS (extra INT, id DECIMAL(3,0))"));
+        var phys = executor.execute("DESCRIBE t").rows();
+        assertEquals(1, phys.size());
+        assertEquals("id", phys.get(0).get(0));
+        assertEquals(1, catalog.getTable("default", "t").orElseThrow().columns().size());
+        // the connection is usable for the next statement after the rollback
+        assertEquals(1L, ((Number) exec("SELECT count(*) FROM t").rows().get(0).get(0)).longValue());
+    }
+
     private static Catalog.Column col(CatalogService svc, String table, String column) {
         return svc.getTable("default", table).orElseThrow().columns().stream()
                 .filter(c -> c.name().equalsIgnoreCase(column)).findFirst().orElseThrow();

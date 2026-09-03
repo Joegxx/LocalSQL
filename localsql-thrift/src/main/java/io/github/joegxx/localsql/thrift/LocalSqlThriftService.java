@@ -359,7 +359,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         if (op == null) {
             return new TFetchResultsResp(error("Invalid operation handle"));
         }
-        if (req.getFetchType() == 1) {
+        if (req.getFetchType() == 1
+                && op.handle.getOperationType() == TOperationType.EXECUTE_STATEMENT) {
             TRowSet rs = new TRowSet(0, new ArrayList<>());
             rs.setColumns(new ArrayList<>());
             TFetchResultsResp resp = new TFetchResultsResp(ok());

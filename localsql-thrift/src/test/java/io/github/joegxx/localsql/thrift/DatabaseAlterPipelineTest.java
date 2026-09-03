@@ -331,6 +331,12 @@ class DatabaseAlterPipelineTest {
         TGetTablesReq tr = new TGetTablesReq(s1);
         tr.setSchemaName("ods_demo");
         assertTrue(fetchColumn(svc, svc.GetTables(tr).getOperationHandle(), 2).contains("demo_t"));
+
+        // Spark 3.1.2 uses fetchType=1 while reading some metadata result sets.
+        TGetSchemasReq schemas = new TGetSchemasReq(s1);
+        schemas.setSchemaName("ods_demo");
+        assertTrue(fetchColumn(svc, svc.GetSchemas(schemas).getOperationHandle(), 0, (short) 1)
+                .contains("ods_demo"));
     }
 
     private static void exec(LocalSqlThriftService svc, TSessionHandle session, String sql) {
@@ -358,7 +364,14 @@ class DatabaseAlterPipelineTest {
     }
 
     private static List<String> fetchColumn(LocalSqlThriftService svc, TOperationHandle op, int col) {
-        var res = svc.FetchResults(new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 100_000));
+        return fetchColumn(svc, op, col, (short) 0);
+    }
+
+    private static List<String> fetchColumn(LocalSqlThriftService svc, TOperationHandle op,
+                                             int col, short fetchType) {
+        TFetchResultsReq request = new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 100_000);
+        request.setFetchType(fetchType);
+        var res = svc.FetchResults(request);
         List<String> out = new ArrayList<>();
         var cols = res.getResults().getColumns();
         if (cols == null || cols.isEmpty()) return out;

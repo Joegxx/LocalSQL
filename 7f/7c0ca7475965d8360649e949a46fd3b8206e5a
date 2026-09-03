@@ -1,0 +1,25 @@
+README.zh-CN.md
+  s_b535c23fcef60a::t_1df2d5043a8796 171
+  s_b535c23fcef60a::t_03086f74a603a9 248,251
+  s_b535c23fcef60a::t_81a5875b76872e 152,157
+  s_b535c23fcef60a::t_e38547d82eafb7 389
+  s_b535c23fcef60a::t_d49a847293c4e7 302,326,333
+  s_b535c23fcef60a::t_7eb0ee567424ad 413,416,418,421
+  s_b535c23fcef60a::t_42782c0668438e 202,204,208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "7f7c0ca7475965d8360649e949a46fd3b8206e5a",
+  "prompts": {},
+  "sessions": {
+    "s_b535c23fcef60a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f98b832b5ffeK5CuRcGCi7ocaU",
+        "model": "claude-deepseek-v4-flash-vision-exp[1M]"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

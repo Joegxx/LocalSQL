@@ -1,0 +1,21 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/AdminStatementHandler.java
+  s_b33fc4f71998f0::t_a193c7ecd26e11 31,84-86,151-155,169-170,177-188
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DatabaseAlterPipelineTest.java
+  s_b33fc4f71998f0::t_82f329611fcee3 279-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "975796b90bb498dbd6e91ec665774a5907bb2ccb",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

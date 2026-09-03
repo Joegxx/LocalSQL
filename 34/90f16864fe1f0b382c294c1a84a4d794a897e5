@@ -1,0 +1,21 @@
+localsql-catalog/src/main/java/io/github/joegxx/localsql/catalog/CatalogService.java
+  s_b33fc4f71998f0::t_ae848bca461985 34-41
+localsql-app/src/test/java/io/github/joegxx/localsql/app/DdlImporterTest.java
+  s_b33fc4f71998f0::t_1aaca1f9d8fc7f 50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "3490f16864fe1f0b382c294c1a84a4d794a897e5",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

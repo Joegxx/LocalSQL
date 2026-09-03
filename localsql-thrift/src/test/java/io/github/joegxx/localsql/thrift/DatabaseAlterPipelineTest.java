@@ -317,6 +317,8 @@ class DatabaseAlterPipelineTest {
                 new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
         TSessionHandle s1 = open.getSessionHandle();
         assertEquals("ods_demo", fetchRows(svc, s1, "SELECT current_database()").get(0).get(0));
+        exec(svc, s1, "USE ``");
+        assertEquals("ods_demo", fetchRows(svc, s1, "SELECT current_database()").get(0).get(0));
         // unqualified DDL resolves against the server-level default too
         exec(svc, s1, "CREATE TABLE demo_t (id INT)");
         assertTrue(catalog.getTable("ods_demo", "demo_t").isPresent());
@@ -337,6 +339,11 @@ class DatabaseAlterPipelineTest {
         schemas.setSchemaName("ods_demo");
         assertTrue(fetchColumn(svc, svc.GetSchemas(schemas).getOperationHandle(), 0, (short) 1)
                 .contains("ods_demo"));
+
+        exec(svc, s1, "USE `default`");
+        assertEquals("default", fetchRows(svc, s1, "SELECT current_database()").get(0).get(0));
+        exec(svc, s1, "USE DATABASE `ods_demo`");
+        assertEquals("ods_demo", fetchRows(svc, s1, "SELECT current_database()").get(0).get(0));
     }
 
     private static void exec(LocalSqlThriftService svc, TSessionHandle session, String sql) {

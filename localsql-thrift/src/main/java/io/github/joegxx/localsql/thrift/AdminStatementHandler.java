@@ -30,7 +30,9 @@ final class AdminStatementHandler {
     private static final Pattern DESCRIBE =
             Pattern.compile("(?i)^(DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern USE =
-            Pattern.compile("(?i)^USE\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
+            Pattern.compile("(?i)^USE\\s+(?:(?:DATABASE)\\s+)?((?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\")(?:\\.(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"))*)\\s*$");
+    private static final Pattern EMPTY_USE =
+            Pattern.compile("(?i)^USE\\s+(?:``|\"\"|'')\\s*$");
     private static final Pattern CURRENT_DATABASE =
             Pattern.compile("(?i)^SELECT\\s+current_database\\s*\\(\\s*\\)\\s*(AS\\s+[A-Za-z_][\\w]*)?\\s*$");
     private static final Pattern CURRENT_SCHEMA =
@@ -42,6 +44,13 @@ final class AdminStatementHandler {
     static Optional<Outcome> tryHandle(CatalogService catalog, String sql, String currentDatabase) {
         String s = strip(sql);
         if (s.isEmpty()) return Optional.empty();
+
+        // Spark 3.1.x JDBC probes metadata with an empty quoted database.
+        // Treat it as a no-op so the probe can continue to GetSchemas.
+        if (EMPTY_USE.matcher(s).matches()) {
+            return Optional.of(new Outcome(
+                    new DuckDbExecutor.QueryResult(List.of("result"), new ArrayList<>()), null));
+        }
 
         Matcher m = SHOW_DATABASES.matcher(s);
         if (m.matches()) {
@@ -77,11 +86,11 @@ final class AdminStatementHandler {
 
         m = USE.matcher(s);
         if (m.matches()) {
-            String target = m.group(1);
+            String target = unquoteQualified(m.group(1));
             // 'USE spark_catalog' (the catalog name alone) is a no-op switch to
             // default; 'USE catalog.db' / 'USE db' switch to the database part.
             String db;
-            if (target.equals("spark_catalog")) {
+            if (target.equalsIgnoreCase("spark_catalog")) {
                 db = "default";
             } else {
                 int lastDot = target.lastIndexOf('.');
@@ -109,6 +118,31 @@ final class AdminStatementHandler {
         java.util.regex.Matcher am = java.util.regex.Pattern.compile(
                 "(?i)\\bAS\\s+([A-Za-z_][\\w]*)").matcher(sql);
         return am.find() ? am.group(1) : "current_database()";
+    }
+
+    private static String unquoteQualified(String target) {
+        StringBuilder out = new StringBuilder(target.length());
+        boolean quoted = false;
+        char quote = 0;
+        for (int i = 0; i < target.length(); i++) {
+            char c = target.charAt(i);
+            if (!quoted && (c == '`' || c == '"')) {
+                quoted = true;
+                quote = c;
+            } else if (quoted && c == quote) {
+                if (i + 1 < target.length() && target.charAt(i + 1) == quote) {
+                    out.append(c);
+                    i++;
+                } else {
+                    quoted = false;
+                }
+            } else if (!quoted && c == '.') {
+                out.append(c);
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {

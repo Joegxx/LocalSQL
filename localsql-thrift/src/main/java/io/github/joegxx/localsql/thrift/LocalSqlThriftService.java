@@ -103,9 +103,9 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     public TGetInfoResp GetInfo(TGetInfoReq req) {
         TGetInfoValue val = new TGetInfoValue();
         switch (req.getInfoType()) {
-            case CLI_DBMS_NAME -> val.setStringValue("Spark SQL");
-            case CLI_DBMS_VER -> val.setStringValue("3.2.0");
-            case CLI_SERVER_NAME -> val.setStringValue("LocalSQL");
+            case CLI_DBMS_NAME -> val.setStringValue("Apache Hive");
+            case CLI_DBMS_VER -> val.setStringValue("2.3.9");
+            case CLI_SERVER_NAME -> val.setStringValue("Hive");
             case CLI_MAX_COLUMN_NAME_LEN -> val.setSmallIntValue((short) 128);
             case CLI_MAX_SCHEMA_NAME_LEN -> val.setSmallIntValue((short) 128);
             case CLI_MAX_TABLE_NAME_LEN -> val.setSmallIntValue((short) 128);

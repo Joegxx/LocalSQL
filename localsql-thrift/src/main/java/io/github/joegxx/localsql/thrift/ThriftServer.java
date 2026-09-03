@@ -29,16 +29,27 @@ public final class ThriftServer {
 
     private final CatalogService catalogService;
     private final SqlPipeline pipeline;
+    private final String defaultDatabase;
     private TServer server;
     private LocalSqlThriftService service;
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor) {
+        this(catalogService, executor, "default");
+    }
+
+    public ThriftServer(CatalogService catalogService, DuckDbExecutor executor, String defaultDatabase) {
         this.catalogService = catalogService;
         this.pipeline = new SqlPipeline(catalogService, executor);
+        this.defaultDatabase = defaultDatabase == null || defaultDatabase.isBlank()
+                ? "default" : defaultDatabase;
+    }
+
+    public String defaultDatabase() {
+        return defaultDatabase;
     }
 
     public void start(int port) {
-        service = new LocalSqlThriftService(catalogService, pipeline);
+        service = new LocalSqlThriftService(catalogService, pipeline, defaultDatabase);
         TCLIService.Processor<LocalSqlThriftService> processor = new TCLIService.Processor<>(service);
         Thread serverThread = new Thread(() -> {
             try {
@@ -72,7 +83,7 @@ public final class ThriftServer {
 
     public DuckDbExecutor.QueryResult executeSparkSql(String sql) throws SQLException {
         LOG.info("Executing Spark SQL: {}", sql);
-        var admin = AdminStatementHandler.tryHandle(catalogService, sql, "default");
+        var admin = AdminStatementHandler.tryHandle(catalogService, sql, defaultDatabase);
         if (admin.isPresent()) return admin.get().result();
         return pipeline.execute(sql);
     }

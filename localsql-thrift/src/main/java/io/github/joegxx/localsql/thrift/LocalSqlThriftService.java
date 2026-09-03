@@ -24,19 +24,29 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     private final CatalogService catalogService;
     private final SqlPipeline pipeline;
+    private final String defaultDatabase;
 
     private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
     private final Map<String, OperationState> operations = new ConcurrentHashMap<>();
 
     LocalSqlThriftService(CatalogService catalogService, SqlPipeline pipeline) {
+        this(catalogService, pipeline, "default");
+    }
+
+    LocalSqlThriftService(CatalogService catalogService, SqlPipeline pipeline, String defaultDatabase) {
         this.catalogService = catalogService;
         this.pipeline = pipeline;
+        this.defaultDatabase = defaultDatabase == null || defaultDatabase.isBlank()
+                ? "default" : defaultDatabase;
     }
 
     private static final class SessionState {
         final TSessionHandle handle;
-        volatile String currentDatabase = "default";
-        SessionState(TSessionHandle handle) { this.handle = handle; }
+        volatile String currentDatabase;
+        SessionState(TSessionHandle handle, String initialDatabase) {
+            this.handle = handle;
+            this.currentDatabase = initialDatabase;
+        }
     }
 
     private static final class OperationState {
@@ -64,9 +74,23 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                 : TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11;
         TOpenSessionResp resp = new TOpenSessionResp(ok(), negotiated);
         resp.setServerProtocolVersion(negotiated);
-        resp.setSessionHandle(newSessionHandle());
+        resp.setSessionHandle(newSessionHandle(sessionDatabase(req)));
         resp.setConfiguration(new java.util.HashMap<>());
         return resp;
+    }
+
+    /**
+     * Initial session database: the connection-level "use:database" entry
+     * (sent by HiveServer2 JDBC drivers from the URL's schema parameter)
+     * wins, then the server-level default.
+     */
+    private String sessionDatabase(TOpenSessionReq req) {
+        Map<String, String> conf = req.getConfiguration();
+        if (conf != null) {
+            String fromUrl = conf.get("use:database");
+            if (fromUrl != null && !fromUrl.isBlank()) return fromUrl;
+        }
+        return defaultDatabase;
     }
 
     @Override
@@ -438,10 +462,10 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         return list;
     }
 
-    private TSessionHandle newSessionHandle() {
+    private TSessionHandle newSessionHandle(String initialDatabase) {
         THandleIdentifier id = newHandleId();
         TSessionHandle h = new TSessionHandle(id);
-        sessions.put(key(id.getGuid()), new SessionState(h));
+        sessions.put(key(id.getGuid()), new SessionState(h, initialDatabase));
         return h;
     }
 

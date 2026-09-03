@@ -4,26 +4,61 @@ import io.github.joegxx.localsql.catalog.CatalogService;
 import io.github.joegxx.localsql.catalog.CatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbCatalogStore;
 import io.github.joegxx.localsql.duckdb.DuckDbExecutor;
+import io.github.joegxx.localsql.ir.type.FractionalType;
 import io.github.joegxx.localsql.ir.type.IntegralType;
 import io.github.joegxx.localsql.ir.type.StringType;
-import io.github.joegxx.localsql.ir.type.FractionalType;
 import io.github.joegxx.localsql.thrift.ThriftServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * CLI:
+ *   runtime.jar [port]                                 in-memory demo (sample data)
+ *   runtime.jar --load <file.duckdb> [port] [--schema <db>]
+ *                                                      serve a persistent DuckDB file
+ *   runtime.jar --import-ddl <dir> --out <file.duckdb> [--schema <db>]
+ *               [--manifest <csv>] [--failures <txt>]  one-shot DDL import, then exit
+ */
 public final class Main {
 
     private static final Logger LOG = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) throws Exception {
-        int port = 10000;
-        if (args.length > 0) {
-            try { port = Integer.parseInt(args[0]); } catch (NumberFormatException ignored) {}
-        }
+        String load = flag(args, "--load");
+        String importDdl = flag(args, "--import-ddl");
+        String out = flag(args, "--out", importDdl != null ? "localsql.duckdb" : null);
+        String schema = flag(args, "--schema", "default");
+        String manifest = flag(args, "--manifest");
+        String failures = flag(args, "--failures", "import-failures.txt");
+        int port = port(args, 10000);
+
         LOG.info("LocalSQL Embedded Spark SQL Runtime starting...");
+
+        if (importDdl != null) {
+            try (DuckDbExecutor executor = new DuckDbExecutor(out)) {
+                CatalogService catalog = new CatalogService(new DuckDbCatalogStore(executor));
+                ThriftServer server = new ThriftServer(catalog, executor);
+                DdlImporter.importAll(server, executor, Paths.get(importDdl), schema,
+                        manifest == null ? null : Paths.get(manifest), Paths.get(failures));
+            }
+            return;
+        }
+
+        if (load != null) {
+            try (DuckDbExecutor executor = new DuckDbExecutor(load)) {
+                CatalogService catalog = new CatalogService(new DuckDbCatalogStore(executor));
+                ThriftServer server = new ThriftServer(catalog, executor, schema);
+                server.start(port);
+                LOG.info("Loaded {} from {} (default schema: {})",
+                        tableCount(executor), load, server.defaultDatabase());
+                holdUntilShutdown(server);
+            }
+            return;
+        }
 
         try (DuckDbExecutor executor = new DuckDbExecutor()) {
             CatalogStore store = new DuckDbCatalogStore(executor);
@@ -32,7 +67,7 @@ public final class Main {
             registerUsers(catalog, executor);
             registerOrders(catalog, executor);
 
-            ThriftServer server = new ThriftServer(catalog, executor);
+            ThriftServer server = new ThriftServer(catalog, executor, schema);
             server.start(port);
 
             String demo = "SELECT u.name, count(*) AS cnt FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.name ORDER BY cnt DESC";
@@ -41,12 +76,43 @@ public final class Main {
             LOG.info("Result columns: {}", result.columns());
             for (var row : result.rows()) LOG.info("  {}", row);
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                LOG.info("Shutting down...");
-                server.stop();
-            }));
-            Thread.currentThread().join();
+            holdUntilShutdown(server);
         }
+    }
+
+    private static void holdUntilShutdown(ThriftServer server) throws InterruptedException {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOG.info("Shutting down...");
+            server.stop();
+        }));
+        Thread.currentThread().join();
+    }
+
+    private static long tableCount(DuckDbExecutor executor) {
+        try {
+            return ((Number) executor.execute("SELECT count(*) FROM catalog_table")
+                    .rows().get(0).get(0)).longValue();
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String flag(String[] args, String name) {
+        return flag(args, name, null);
+    }
+
+    private static String flag(String[] args, String name, String fallback) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if (name.equals(args[i])) return args[i + 1];
+        }
+        return fallback;
+    }
+
+    private static int port(String[] args, int fallback) {
+        for (String a : args) {
+            try { return Integer.parseInt(a); } catch (NumberFormatException ignored) {}
+        }
+        return fallback;
     }
 
     private static void registerUsers(CatalogService catalog, DuckDbExecutor executor) throws Exception {

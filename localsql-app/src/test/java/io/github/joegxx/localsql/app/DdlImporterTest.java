@@ -47,6 +47,10 @@ class DdlImporterTest {
             assertTrue(catalog.getTable("db_alpha", "people").isPresent());
             assertTrue(catalog.getTable("mydb", "items").isPresent());
 
+            CatalogService reloaded = new CatalogService(new DuckDbCatalogStore(executor));
+            assertTrue(reloaded.catalog().getDatabase("db_alpha").isPresent());
+            assertTrue(reloaded.catalog().getDatabase("mydb").isPresent());
+
             var people = catalog.getTable("db_alpha", "people").orElseThrow();
             assertEquals(3, people.columns().size());
             var scoreType = catalog.catalog().column(people, "score").type();

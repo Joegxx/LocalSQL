@@ -31,7 +31,14 @@ public final class CatalogService {
 
     private void loadFromStore() throws Exception {
         if (store == null) return;
-        for (Catalog.Table t : store.loadTables(null)) {
+        List<Catalog.Table> tables = store.loadTables(null);
+        for (Catalog.Table t : tables) {
+            String database = t.database();
+            if (catalog.getDatabase(database).isEmpty()) {
+                catalog.createDatabase(new Catalog.Database(database, null, database + " database"));
+            }
+        }
+        for (Catalog.Table t : tables) {
             catalog.createTable(t);
         }
     }

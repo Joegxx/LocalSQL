@@ -306,6 +306,33 @@ class DatabaseAlterPipelineTest {
         assertTrue(catalog.getTable("default", "in_default").isPresent());
     }
 
+    @Test
+    void sessionDefaultsToServerDatabaseAndConnectionOverride() throws Exception {
+        catalog.createDatabase("ods_demo", "demo", null);
+        LocalSqlThriftService svc = new LocalSqlThriftService(
+                catalog, new SqlPipeline(catalog, executor), "ods_demo");
+
+        // server-level default: session starts in ods_demo without any USE
+        var open = svc.OpenSession(
+                new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
+        TSessionHandle s1 = open.getSessionHandle();
+        assertEquals("ods_demo", fetchRows(svc, s1, "SELECT current_database()").get(0).get(0));
+        // unqualified DDL resolves against the server-level default too
+        exec(svc, s1, "CREATE TABLE demo_t (id INT)");
+        assertTrue(catalog.getTable("ods_demo", "demo_t").isPresent());
+
+        // connection-level "use:database" (JDBC URL schema) wins over the server default
+        TOpenSessionReq req = new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11);
+        req.setConfiguration(java.util.Map.of("use:database", "default"));
+        TSessionHandle s2 = svc.OpenSession(req).getSessionHandle();
+        assertEquals("default", fetchRows(svc, s2, "SELECT current_database()").get(0).get(0));
+
+        // GetTables with the server-level schema lists its tables (IDEA tree flow)
+        TGetTablesReq tr = new TGetTablesReq(s1);
+        tr.setSchemaName("ods_demo");
+        assertTrue(fetchColumn(svc, svc.GetTables(tr).getOperationHandle(), 2).contains("demo_t"));
+    }
+
     private static void exec(LocalSqlThriftService svc, TSessionHandle session, String sql) {
         var resp = svc.ExecuteStatement(new TExecuteStatementReq(session, sql));
         assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode(),

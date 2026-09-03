@@ -51,6 +51,11 @@ public final class Main {
         if (load != null) {
             try (DuckDbExecutor executor = new DuckDbExecutor(load)) {
                 CatalogService catalog = new CatalogService(new DuckDbCatalogStore(executor));
+                if (!"default".equals(schema) && catalog.catalog().getDatabase(schema).isEmpty()) {
+                    LOG.warn("--schema '{}' is not a database in {} (databases: {}); " +
+                            "unqualified names will fail until USE switches the session",
+                            schema, load, catalog.catalog().listDatabases());
+                }
                 ThriftServer server = new ThriftServer(catalog, executor, schema);
                 server.start(port);
                 LOG.info("Loaded {} from {} (default schema: {})",

@@ -276,6 +276,11 @@ class DatabaseAlterPipelineTest {
         exec(svc, session, "INSERT INTO cdr VALUES (1, 1.5)");
         assertEquals("1", fetchRows(svc, session, "SELECT id FROM cdr").get(0).get(0));
         assertTrue(fetchRows(svc, session, "DESCRIBE cdr").stream().anyMatch(r -> r.get(0).equals("amt")));
+        assertTrue(fetchRows(svc, session, "DESC cdr").stream().anyMatch(r -> r.get(0).equals("id")));
+        assertTrue(fetchRows(svc, session, "DESCRIBE FORMATTED cdr").stream()
+                .anyMatch(r -> r.get(0).equals("# Detailed Table Information")));
+        assertTrue(fetchRows(svc, session, "DESCRIBEFORMATTED cdr").stream()
+                .anyMatch(r -> r.get(0).equals("Database") && r.get(1).equals("ods_demo")));
         // qualified access keeps working
         assertEquals("1", fetchRows(svc, session, "SELECT id FROM ods_demo.cdr").get(0).get(0));
 

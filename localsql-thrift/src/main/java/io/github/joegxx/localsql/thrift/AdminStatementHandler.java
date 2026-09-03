@@ -28,7 +28,7 @@ final class AdminStatementHandler {
     private static final Pattern SHOW_COLUMNS =
             Pattern.compile("(?i)^SHOW\\s+COLUMNS\\s+(IN|FROM)\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern DESCRIBE =
-            Pattern.compile("(?i)^(DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
+            Pattern.compile("(?i)^(DESCRIBEFORMATTED|DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+((?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\")(?:\\.(?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\"))*)\\s*$");
     private static final Pattern USE =
             Pattern.compile("(?i)^USE\\s+(?:(?:DATABASE)\\s+)?((?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\")(?:\\.(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"))*)\\s*$");
     private static final Pattern EMPTY_USE =
@@ -81,7 +81,9 @@ final class AdminStatementHandler {
 
         m = DESCRIBE.matcher(s);
         if (m.matches()) {
-            return Optional.of(describe(catalog, m.group(5), currentDatabase));
+            boolean formatted = "DESCRIBEFORMATTED".equalsIgnoreCase(m.group(1))
+                    || m.group(3) != null;
+            return Optional.of(describe(catalog, m.group(5), currentDatabase, formatted));
         }
 
         m = USE.matcher(s);
@@ -146,6 +148,11 @@ final class AdminStatementHandler {
     }
 
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {
+        return describe(catalog, qualified, currentDatabase, false);
+    }
+
+    private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase,
+                                    boolean formatted) {
         String[] parts = qualified.split("\\.");
         String db;
         String table;
@@ -159,12 +166,26 @@ final class AdminStatementHandler {
         var found = catalog.catalog().getTable(db, table);
         List<List<Object>> rows = new ArrayList<>();
         if (found.isPresent()) {
-            for (Catalog.Column c : found.get().columns()) {
+            Catalog.Table tableInfo = found.get();
+            for (Catalog.Column c : tableInfo.columns()) {
                 List<Object> row = new ArrayList<>(3);
                 row.add(c.name());
                 row.add(displayType(c.type()));
                 row.add(c.comment() == null ? "" : c.comment());
                 rows.add(row);
+            }
+            if (formatted) {
+                rows.add(List.of("", "", ""));
+                rows.add(List.of("# Detailed Table Information", "", ""));
+                rows.add(List.of("Database", db, ""));
+                rows.add(List.of("Table", tableInfo.tableName(), ""));
+                rows.add(List.of("Type", tableInfo.tableType(), ""));
+                rows.add(List.of("Provider", tableInfo.format() == null ? "duckdb" : tableInfo.format(), ""));
+                rows.add(List.of("Location", tableInfo.location() == null ? "" : tableInfo.location(), ""));
+                if (tableInfo.comment() != null) rows.add(List.of("Comment", tableInfo.comment(), ""));
+                if (!tableInfo.properties().isEmpty()) {
+                    rows.add(List.of("Properties", tableInfo.properties().toString(), ""));
+                }
             }
         }
         return new Outcome(new DuckDbExecutor.QueryResult(

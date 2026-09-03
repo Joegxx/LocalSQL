@@ -1,0 +1,36 @@
+localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java
+  s_b33fc4f71998f0::t_acc562b802575d 7,14,18-25,31-38,41-62,70,79-113,115
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_b33fc4f71998f0::t_f5c72fc993dbb3 77,82-93
+  s_b33fc4f71998f0::t_eed3623ec6921c 39-40,45-49
+  s_b33fc4f71998f0::t_45b0711fef42f4 27,33-36
+  s_b33fc4f71998f0::t_dcf559701ea79d 465,468
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_dfce4a9d7f1c52 32,37-40,43-48,52
+  s_b33fc4f71998f0::t_d80fccff7c2c49 86
+localsql-app/src/test/java/io/github/joegxx/localsql/app/DdlImporterTest.java
+  s_b33fc4f71998f0::t_674b9d1fc67a70 1-5,7-51,64-65,68-74,76-87,93-98
+  s_b33fc4f71998f0::t_982cd6562696bf 57-58
+  s_b33fc4f71998f0::t_d9e19cddcf1357 6,52-56,59-63,66-67,88-92
+  s_b33fc4f71998f0::t_02609d034f1eb8 75
+localsql-app/pom.xml
+  s_b33fc4f71998f0::t_2f21ce05bf019f 50-54
+localsql-app/src/main/java/io/github/joegxx/localsql/app/DdlImporter.java
+  s_b33fc4f71998f0::t_975530ca04d018 1-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "289e2b556cf2dc38e57ccfdbf686ca7fae7d983a",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

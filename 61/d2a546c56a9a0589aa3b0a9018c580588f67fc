@@ -1,0 +1,22 @@
+localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java
+  s_b33fc4f71998f0::t_80972d3290750f 54-58
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DatabaseAlterPipelineTest.java
+  s_b33fc4f71998f0::t_7f8b6759c46c6c 311
+  s_b33fc4f71998f0::t_4b0883e27d088f 309-310,312-335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "61d2a546c56a9a0589aa3b0a9018c580588f67fc",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

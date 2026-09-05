@@ -1,0 +1,38 @@
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_25b78c5c7b710b 1-178
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfRegistry.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-36
+localsql-udf-api/src/test/java/io/github/joegxx/localsql/udf/api/UdfRegistryTest.java
+  s_b33fc4f71998f0::t_b6fc5cbdd7d5e2 1-39
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfKind.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-7
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfBatch.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-15
+pom.xml
+  s_b33fc4f71998f0::t_afd4867ff9b071 17
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfGateway.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-8
+localsql-udf-api/pom.xml
+  s_b33fc4f71998f0::t_b6fc5cbdd7d5e2 18-22
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-17,23-24
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfDefinition.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-30
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/FunctionSignature.java
+  s_b33fc4f71998f0::t_afd4867ff9b071 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "adb2f4200ffd3afc9a51ea3bb53bb2e55063b671",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -15,6 +15,7 @@
         <module>localsql-parser</module>
         <module>localsql-ir</module>
         <module>localsql-udf-api</module>
+        <module>localsql-udf-runtime</module>
         <module>localsql-spark</module>
         <module>localsql-analyzer</module>
         <module>localsql-rewrite</module>
@@ -79,6 +80,11 @@
             <dependency>
                 <groupId>io.github.joegxx.localsql</groupId>
                 <artifactId>localsql-ir</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.joegxx.localsql</groupId>
+                <artifactId>localsql-udf-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -205,22 +205,52 @@ DIRECT, MAPPED, REWRITTEN, GATEWAY, PARTIAL, UNSUPPORTED
   window set (row_number..nth_value) plus max_by/min_by(->arg_max/arg_min)
 - **PARTIAL, not auto-applied**: date_format(Java vs strftime pattern
   languages differ; the old strftime mapping was removed — it now fails
-  loudly instead of producing wrong output), date_trunc(unit names),
-  percentile/percentile_approx(->quantile semantics differ)
+  loudly instead of producing wrong output), percentile/percentile_approx
+  (->quantile semantics differ). date_trunc moved to batch 2 with literal
+  unit translation.
 - **List results are order-insensitive** for set functions: Spark does not
   guarantee element order for array_distinct/union/intersect/except, and
   DuckDB's list_* may differ from Spark's order.
 
-#### Known not-yet-supported (fail explicitly)
+#### Batch 2 (implemented, verified by SparkFunctionMappingTest — 179 total cases)
 
-date_format, date_trunc, months_between, next_day, to_json/from_json,
-schema_of_json, json_tuple, str_to_map, substring_index, find_in_set,
-crc32/hash/xxhash64 (different algorithms), bin, initcap, format_number,
-arrays_overlap/arrays_zip/array_sort(comparator)/array_repeat,
-map construction (map/named_struct emission), stack/posexplode_outer/
-explode_outer(OUTER semantics), higher-order lambdas (transform/filter/
-aggregate/zip_with), reflect/java_method (disabled by design),
-input_file_name/spark_partition_id (no execution context), session_window.
+- **DuckDB-native names, now mapped directly**: trig/hyperbolic family
+  (acos..atanh, cos/sin/tan + h variants, degrees/radians), lcase/ucase,
+  char_length/character_length/octet_length(BLOB cast), left/right,
+  translate, round, factorial, bin, printf, encode/decode (utf-8 only),
+  now/random, date_part, make_date, map_concat/map_entries/
+  map_from_entries/map_from_arrays(->map(list,list)), to_json, typeof,
+  uuid, char(->chr), sha(->sha1), mean(->avg), std(->stddev_samp)
+- **Restructured**: map(k1,v1,...) variadic (->map(list_value, list_value)),
+  string/int/bigint/... cast functions, isnull/isnotnull, positive/negative,
+  e(->exp(1)), expm1, log1p, hypot, nanvl, elt, space, find_in_set,
+  substring_index(literal count, plain delimiter split), format_number
+  (literal scale, printf %,.Nf), slice(->list_slice end arithmetic),
+  array_remove(->list_filter IS DISTINCT FROM), current_catalog,
+  current_timezone(->current_setting), date_from_unix_date/unix_date/
+  unix_seconds/unix_millis/unix_micros, to_unix_timestamp(1-arg),
+  count_if(->count(CASE)), collect_set(->list(DISTINCT)), try_divide
+  (->NULLIF), months_between (Spark's year/month/day+time fraction
+  formula), next_day (literal day names), date_trunc (literal unit
+  translation: YEAR/YYYY/YY, MON/MM/MONTH, DD/DAY, week, quarter, hour,
+  minute, second)
+- **Known not-yet-supported (fail explicitly)**: date_format (Java vs
+  strftime pattern languages differ — fails loudly instead of silently
+  mis-formatting), initcap, bround/rint, conv, getbit/bit_get,
+  bit_and/bit_or/bit_xor (aggregates), kurtosis/skewness, crc32/hash/
+  xxhash64 (different algorithms), percentile family (quantile semantics),
+  sequence, sort_array, array_repeat, arrays_zip, arrays_overlap (NULL
+  nuance differs), json_object_keys, to_csv/from_csv/schema_of_csv,
+  months_between second-arg precision beyond the documented formula,
+  inline/inline_outer/explode_outer/posexplode_outer (OUTER semantics),
+  higher-order lambdas (aggregate/filter/exists/forall/transform/
+  transform_keys/transform_values/zip_with/map_filter/map_zip_with —
+  require the Lambda IR), window/session_window, grouping/grouping_id,
+  extract (grammar), overlay, sentences, parse_url, xpath family,
+  to_timestamp_ltz/ntz, make_interval family, session_window,
+  input_file_name/spark_partition_id/monotonically_increasing_id,
+  raise_error/assert_true, current_user, java_method/reflect (disabled
+  by design), version (DuckDB version string would mislead)
 
 Implement in this order:
 

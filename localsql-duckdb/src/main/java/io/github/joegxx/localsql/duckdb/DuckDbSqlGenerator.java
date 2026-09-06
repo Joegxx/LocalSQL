@@ -529,9 +529,43 @@ public final class DuckDbSqlGenerator {
             Map.entry("pow", "pow"),
             Map.entry("power", "pow"),
             Map.entry("sign", "sign"),
+            Map.entry("signum", "sign"),
             Map.entry("isnan", "isnan"),
             Map.entry("isinf", "isinf"),
             Map.entry("pi", "pi"),
+            Map.entry("acos", "acos"),
+            Map.entry("acosh", "acosh"),
+            Map.entry("asin", "asin"),
+            Map.entry("asinh", "asinh"),
+            Map.entry("atan", "atan"),
+            Map.entry("atan2", "atan2"),
+            Map.entry("atanh", "atanh"),
+            Map.entry("cos", "cos"),
+            Map.entry("cosh", "cosh"),
+            Map.entry("cot", "cot"),
+            Map.entry("sin", "sin"),
+            Map.entry("sinh", "sinh"),
+            Map.entry("tan", "tan"),
+            Map.entry("tanh", "tanh"),
+            Map.entry("degrees", "degrees"),
+            Map.entry("radians", "radians"),
+            Map.entry("round", "round"),
+            Map.entry("factorial", "factorial"),
+            Map.entry("bin", "bin"),
+            // strings (DuckDB-native names)
+            Map.entry("lcase", "lcase"),
+            Map.entry("ucase", "ucase"),
+            Map.entry("char_length", "char_length"),
+            Map.entry("character_length", "character_length"),
+            Map.entry("octet_length", "octet_length"),
+            Map.entry("left", "left"),
+            Map.entry("right", "right"),
+            Map.entry("translate", "translate"),
+            Map.entry("printf", "printf"),
+            Map.entry("char", "chr"),
+            Map.entry("sha", "sha1"),
+            Map.entry("mean", "avg"),
+            Map.entry("std", "stddev_samp"),
             // encoding / hash
             Map.entry("hex", "hex"),
             Map.entry("unhex", "unhex"),
@@ -539,6 +573,21 @@ public final class DuckDbSqlGenerator {
             Map.entry("unbase64", "from_base64"),
             Map.entry("md5", "md5"),
             Map.entry("sha1", "sha1"),
+            // encoding (charset support: utf-8 only, like Spark's default)
+            Map.entry("encode", "encode"),
+            Map.entry("decode", "decode"),
+            // dates / misc (DuckDB-native names)
+            Map.entry("now", "now"),
+            Map.entry("random", "random"),
+            Map.entry("date_part", "date_part"),
+            Map.entry("make_date", "make_date"),
+            Map.entry("map_concat", "map_concat"),
+            Map.entry("map_entries", "map_entries"),
+            Map.entry("map_from_entries", "map_from_entries"),
+            Map.entry("map_from_arrays", "map"),
+            Map.entry("to_json", "to_json"),
+            Map.entry("typeof", "typeof"),
+            Map.entry("uuid", "uuid"),
             // dates
             Map.entry("current_date", "current_date"),
             Map.entry("current_timestamp", "current_timestamp"),
@@ -876,6 +925,341 @@ public final class DuckDbSqlGenerator {
                 sb.append(")");
                 return true;
             }
+            case "map" -> {
+                if (args.isEmpty() || args.size() % 2 != 0) return false;
+                sb.append("map(list_value(");
+                for (int i = 0; i < args.size(); i += 2) {
+                    if (i > 0) sb.append(", ");
+                    emitExpr(args.get(i), sb);
+                }
+                sb.append("), list_value(");
+                for (int i = 1; i < args.size(); i += 2) {
+                    if (i > 1) sb.append(", ");
+                    emitExpr(args.get(i), sb);
+                }
+                sb.append("))");
+                return true;
+            }
+            case "string", "tinyint", "smallint", "int", "bigint", "float", "double",
+                 "boolean", "date", "timestamp", "binary", "decimal" -> {
+                if (args.isEmpty() || args.size() > 3) return false;
+                String sqlType = switch (name) {
+                    case "string" -> "VARCHAR";
+                    case "date" -> "DATE";
+                    case "timestamp" -> "TIMESTAMP";
+                    case "binary" -> "BLOB";
+                    default -> name.toUpperCase();
+                };
+                sb.append("CAST(");
+                emitExpr(args.get(0), sb);
+                if (name.equals("decimal") && args.size() >= 2) {
+                    Object p = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
+                    if (p == null) throw new UnsupportedOperationException("decimal(x, p[, s]) requires literal precision");
+                    Object s = args.size() == 3 && args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l2
+                            && l2.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l2.value() : 0;
+                    sqlType = "DECIMAL(" + p + "," + s + ")";
+                } else if (name.equals("decimal")) {
+                    sqlType = "DECIMAL(10,0)";
+                }
+                sb.append(" AS ").append(sqlType).append(")");
+                return true;
+            }
+            case "isnull" -> {
+                if (args.size() != 1) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" IS NULL)");
+                return true;
+            }
+            case "isnotnull" -> {
+                if (args.size() != 1) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" IS NOT NULL)");
+                return true;
+            }
+            case "positive" -> {
+                if (args.size() != 1) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "negative" -> {
+                if (args.size() != 1) return false;
+                sb.append("(-(");
+                emitExpr(args.get(0), sb);
+                sb.append("))");
+                return true;
+            }
+            case "octet_length" -> {
+                // DuckDB's octet_length only binds for BLOB; strings need an explicit cast
+                if (args.size() != 1) return false;
+                sb.append("octet_length(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS BLOB))");
+                return true;
+            }
+            case "e" -> {
+                sb.append("exp(1)");
+                return true;
+            }
+            case "expm1" -> {
+                if (args.size() != 1) return false;
+                sb.append("(exp(");
+                emitExpr(args.get(0), sb);
+                sb.append(") - 1)");
+                return true;
+            }
+            case "log1p" -> {
+                if (args.size() != 1) return false;
+                sb.append("ln((");
+                emitExpr(args.get(0), sb);
+                sb.append(") + 1)");
+                return true;
+            }
+            case "hypot" -> {
+                if (args.size() != 2) return false;
+                sb.append("sqrt((");
+                emitExpr(args.get(0), sb);
+                sb.append(" * ");
+                emitExpr(args.get(0), sb);
+                sb.append(") + (");
+                emitExpr(args.get(1), sb);
+                sb.append(" * ");
+                emitExpr(args.get(1), sb);
+                sb.append("))");
+                return true;
+            }
+            case "nanvl" -> {
+                if (args.size() != 2) return false;
+                sb.append("(CASE WHEN isnan(");
+                emitExpr(args.get(0), sb);
+                sb.append(") THEN ");
+                emitExpr(args.get(1), sb);
+                sb.append(" ELSE ");
+                emitExpr(args.get(0), sb);
+                sb.append(" END)");
+                return true;
+            }
+            case "elt" -> {
+                if (args.size() < 2) return false;
+                sb.append("list_element(list_value(");
+                for (int i = 1; i < args.size(); i++) {
+                    if (i > 1) sb.append(", ");
+                    emitExpr(args.get(i), sb);
+                }
+                sb.append("), ");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "space" -> {
+                if (args.size() != 1) return false;
+                sb.append("repeat(' ', ");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "find_in_set" -> {
+                if (args.size() != 2) return false;
+                sb.append("coalesce(list_position(string_split(CAST(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS VARCHAR), ','), CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS VARCHAR)), 0)");
+                return true;
+            }
+            case "substring_index" -> {
+                if (args.size() != 3) return false;
+                Object count = args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
+                if (count == null) {
+                    throw new UnsupportedOperationException("substring_index requires a literal count");
+                }
+                long c = ((Number) count).longValue();
+                sb.append("CASE WHEN ");
+                emitExpr(args.get(2), sb);
+                sb.append(" = 0 THEN '' ELSE array_to_string(list_slice(string_split(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS VARCHAR), CAST(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS VARCHAR)), ");
+                sb.append(c > 0 ? "1, " + c : c + ", -1");
+                sb.append("), CAST(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS VARCHAR)) END");
+                return true;
+            }
+            case "format_number" -> {
+                if (args.size() != 2) return false;
+                Object d = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
+                if (d == null) {
+                    throw new UnsupportedOperationException("format_number requires a literal scale");
+                }
+                sb.append("printf('%,.").append(((Number) d).intValue()).append("f', ");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "slice" -> {
+                if (args.size() != 3) return false;
+                sb.append("list_slice(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(", ((");
+                emitExpr(args.get(1), sb);
+                sb.append(") + (");
+                emitExpr(args.get(2), sb);
+                sb.append(")) - 1)");
+                return true;
+            }
+            case "array_remove" -> {
+                if (args.size() != 2) return false;
+                sb.append("list_filter(");
+                emitExpr(args.get(0), sb);
+                sb.append(", x -> x IS DISTINCT FROM ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
+            case "current_catalog" -> {
+                sb.append("'spark_catalog'");
+                return true;
+            }
+            case "current_timezone" -> {
+                sb.append("current_setting('TimeZone')");
+                return true;
+            }
+            case "date_from_unix_date" -> {
+                if (args.size() != 1) return false;
+                sb.append("(DATE '1970-01-01' + CAST((");
+                emitExpr(args.get(0), sb);
+                sb.append(") AS INTEGER))");
+                return true;
+            }
+            case "unix_date" -> {
+                if (args.size() != 1) return false;
+                sb.append("date_diff('day', DATE '1970-01-01', CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS DATE))");
+                return true;
+            }
+            case "unix_seconds", "unix_millis", "unix_micros" -> {
+                if (args.size() != 1) return false;
+                String fn = switch (name) {
+                    case "unix_seconds" -> "epoch";
+                    case "unix_millis" -> "epoch_ms";
+                    default -> "epoch_us";
+                };
+                sb.append("CAST(").append(fn).append("(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS TIMESTAMP)) AS BIGINT)");
+                return true;
+            }
+            case "to_unix_timestamp" -> {
+                if (args.size() != 1) return false;
+                sb.append("CAST(epoch(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS TIMESTAMP)) AS BIGINT)");
+                return true;
+            }
+            case "count_if" -> {
+                if (args.size() != 1) return false;
+                sb.append("count(CASE WHEN ");
+                emitExpr(args.get(0), sb);
+                sb.append(" THEN 1 END)");
+                return true;
+            }
+            case "collect_set" -> {
+                if (args.size() != 1) return false;
+                sb.append("list(DISTINCT ");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "try_divide" -> {
+                if (args.size() != 2) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" / NULLIF(");
+                emitExpr(args.get(1), sb);
+                sb.append(", 0))");
+                return true;
+            }
+            case "months_between" -> {
+                if (args.size() != 2) return false;
+                // Spark: (y1*12+m1) - (y2*12+m2) + ((day1 + timefrac1) - (day2 + timefrac2)) / 31
+                String template = "((EXTRACT(year FROM \u0001) * 12 + EXTRACT(month FROM \u0001))"
+                        + " - (EXTRACT(year FROM \u0002) * 12 + EXTRACT(month FROM \u0002))"
+                        + " + ((EXTRACT(day FROM \u0001) + (EXTRACT(hour FROM \u0001) * 3600"
+                        + " + EXTRACT(minute FROM \u0001) * 60 + EXTRACT(second FROM \u0001)) / 86400.0)"
+                        + " - (EXTRACT(day FROM \u0002) + (EXTRACT(hour FROM \u0002) * 3600"
+                        + " + EXTRACT(minute FROM \u0002) * 60 + EXTRACT(second FROM \u0002)) / 86400.0)) / 31.0)";
+                for (char c : template.toCharArray()) {
+                    if (c == '\u0001') {
+                        sb.append("CAST(");
+                        emitExpr(args.get(0), sb);
+                        sb.append(" AS TIMESTAMP)");
+                    } else if (c == '\u0002') {
+                        sb.append("CAST(");
+                        emitExpr(args.get(1), sb);
+                        sb.append(" AS TIMESTAMP)");
+                    } else {
+                        sb.append(c);
+                    }
+                }
+                return true;
+            }
+            case "next_day" -> {
+                if (args.size() != 2) return false;
+                Object dayName = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
+                if (dayName == null) {
+                    throw new UnsupportedOperationException("next_day requires a literal day name");
+                }
+                int target = dayIndex(String.valueOf(dayName));
+                if (target < 0) {
+                    throw new UnsupportedOperationException("next_day: unknown day name " + dayName);
+                }
+                sb.append("(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS DATE) + CAST(CASE WHEN ((").append(target).append(" - (weekday(");
+                emitExpr(args.get(0), sb);
+                sb.append(") - 1)) % 7 + 7) % 7 = 0 THEN 7 ELSE (((").append(target).append(" - (weekday(");
+                emitExpr(args.get(0), sb);
+                sb.append(") - 1)) % 7 + 7) % 7) END AS INTEGER))");
+                return true;
+            }
+            case "date_trunc" -> {
+                if (args.size() != 2) return false;
+                Object unit = args.get(0) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
+                if (unit == null) {
+                    throw new UnsupportedOperationException("date_trunc requires a literal unit");
+                }
+                String translated = switch (String.valueOf(unit).toLowerCase()) {
+                    case "year", "yyyy", "yy" -> "year";
+                    case "quarter" -> "quarter";
+                    case "mon", "month", "mm" -> "month";
+                    case "week" -> "week";
+                    case "day", "dd" -> "day";
+                    case "hour" -> "hour";
+                    case "minute" -> "minute";
+                    case "second" -> "second";
+                    default -> null;
+                };
+                if (translated == null) {
+                    throw new UnsupportedOperationException("date_trunc unit not supported: " + unit);
+                }
+                sb.append("date_trunc('").append(translated).append("', ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
             default -> {
                 return false;
             }
@@ -912,6 +1296,20 @@ public final class DuckDbSqlGenerator {
         }
         sb.append(")");
         if (f.windowSpec() != null) emitWindowSpec(f.windowSpec(), sb);
+    }
+
+    /** Spark next_day accepts full names and abbreviations; 0=Monday..6=Sunday. */
+    private static int dayIndex(String name) {
+        return switch (name.toLowerCase()) {
+            case "mon", "monday" -> 0;
+            case "tue", "tues", "tuesday" -> 1;
+            case "wed", "wednesday" -> 2;
+            case "thu", "thurs", "thursday" -> 3;
+            case "fri", "friday" -> 4;
+            case "sat", "saturday" -> 5;
+            case "sun", "sunday" -> 6;
+            default -> -1;
+        };
     }
 
     private void emitWindowSpec(WindowSpec w, StringBuilder sb) {

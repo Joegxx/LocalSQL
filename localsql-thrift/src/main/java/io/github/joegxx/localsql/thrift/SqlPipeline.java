@@ -35,7 +35,7 @@ final class SqlPipeline {
 
     private final CatalogService catalogService;
     private final DuckDbExecutor executor;
-    private final DuckDbSqlGenerator generator = new DuckDbSqlGenerator();
+    private final DuckDbSqlGenerator generator;
     private final SparkSqlParser parser = new SparkSqlParser();
     private final SparkAstBuilder astBuilder = new SparkAstBuilder();
     private final SemanticAnalyzer analyzer;
@@ -54,16 +54,22 @@ final class SqlPipeline {
     private String sessionDatabase = "default";
 
     SqlPipeline(CatalogService catalogService, DuckDbExecutor executor) {
-        this(catalogService, executor, null);
+        this(catalogService, executor, null, null);
     }
 
     SqlPipeline(CatalogService catalogService, DuckDbExecutor executor, UdfSupport udfSupport) {
+        this(catalogService, executor, udfSupport, null);
+    }
+
+    SqlPipeline(CatalogService catalogService, DuckDbExecutor executor, UdfSupport udfSupport,
+                DuckDbSqlGenerator generator) {
         this.catalogService = catalogService;
         this.executor = executor;
         this.analyzer = new SemanticAnalyzer(catalogService.catalog());
         this.udfSupport = udfSupport;
         this.udfSplitter = udfSupport == null ? null : new UdfProjectionSplitter(udfSupport.registry());
         this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
+        this.generator = generator == null ? new DuckDbSqlGenerator() : generator;
     }
 
     /**

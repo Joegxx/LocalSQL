@@ -224,7 +224,11 @@ final class SparkExpressionBuilder {
             return new StructExpr(fields);
         }
         if (ctx instanceof LambdaContext c) {
-            throw new UnsupportedOperationException("Lambda not supported in MVP");
+            List<String> vars = new ArrayList<>();
+            for (org.apache.spark.sql.catalyst.parser.SqlBaseParser.IdentifierContext id : c.identifier()) {
+                vars.add(unquote(id.getText()));
+            }
+            return new io.github.joegxx.localsql.ir.expression.Lambda(vars, visit(c.expression()));
         }
         throw new IllegalStateException("Unsupported primary expression: " + ctx.getClass().getSimpleName());
     }

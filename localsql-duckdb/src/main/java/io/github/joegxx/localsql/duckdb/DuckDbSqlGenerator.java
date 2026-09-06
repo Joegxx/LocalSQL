@@ -372,6 +372,7 @@ public final class DuckDbSqlGenerator {
             sb.append("INTERVAL '").append(iv.value()).append("' ").append(iv.unit().toUpperCase());
         }
         else if (e instanceof Identifier id) sb.append(quote(id.name()));
+        else if (e instanceof Lambda lam) emitLambda(lam, sb);
         else if (e instanceof AttributeReference a) {
             if (a.qualifier().isEmpty()) sb.append(quote(a.name()));
             else sb.append(String.join(".", a.qualifier().stream().map(DuckDbSqlGenerator::quote).toList())).append(".").append(quote(a.name()));
@@ -642,6 +643,10 @@ public final class DuckDbSqlGenerator {
             Map.entry("every", "bool_and"),
             Map.entry("some", "bool_or"),
             Map.entry("any", "bool_or"),
+            // higher-order functions (lambda-capable in DuckDB)
+            Map.entry("transform", "list_transform"),
+            Map.entry("filter", "list_filter"),
+            Map.entry("reduce", "list_reduce"),
             // window
             Map.entry("row_number", "row_number"),
             Map.entry("rank", "rank"),
@@ -658,11 +663,71 @@ public final class DuckDbSqlGenerator {
             Map.entry("min_by", "arg_min")
     );
 
+    /** Custom rename overlay (from --function-map); overrides built-ins. */
+    private final Map<String, String> customRenames;
+    /** Custom templates with {N} positional argument substitution. */
+    private final Map<String, String> customTemplates;
+
+    public DuckDbSqlGenerator() {
+        this(Map.of(), Map.of());
+    }
+
+    public DuckDbSqlGenerator(Map<String, String> customRenames, Map<String, String> customTemplates) {
+        this.customRenames = Map.copyOf(customRenames == null ? Map.of() : customRenames);
+        this.customTemplates = Map.copyOf(customTemplates == null ? Map.of() : customTemplates);
+    }
+
     /**
      * Mappings that need argument restructuring (arg order swaps, arithmetic
      * instead of functions, CASE rewrites, literal dispatch). Returns false
      * when the shape does not apply and generic emission should proceed.
      */
+    /** Renders a user-provided template: {N} is replaced by the Nth argument. */
+    private boolean emitCustomTemplate(String name, FunctionCall f, StringBuilder sb) {
+        String template = customTemplates.get(name);
+        if (template == null) return false;
+        int i = 0;
+        while (i < template.length()) {
+            char c = template.charAt(i);
+            if (c == '{') {
+                int close = template.indexOf('}', i);
+                if (close > i) {
+                    int argIndex;
+                    try {
+                        argIndex = Integer.parseInt(template.substring(i + 1, close).trim());
+                    } catch (NumberFormatException e) {
+                        argIndex = -1;
+                    }
+                    if (argIndex >= 0 && argIndex < f.arguments().size()) {
+                        emitExpr(f.arguments().get(argIndex), sb);
+                        i = close + 1;
+                        continue;
+                    }
+                    throw new IllegalArgumentException("Function template '" + name + "' references argument {"
+                            + template.substring(i + 1, close) + "} but was called with "
+                            + f.arguments().size() + " arguments");
+                }
+            }
+            sb.append(c);
+            i++;
+        }
+        return true;
+    }
+
+    private boolean emitCustomRename(String name, FunctionCall f, StringBuilder sb) {
+        String target = customRenames.get(name);
+        if (target == null) return false;
+        sb.append(target).append("(");
+        if (f.distinct()) sb.append("DISTINCT ");
+        for (int i = 0; i < f.arguments().size(); i++) {
+            if (i > 0) sb.append(", ");
+            emitExpr(f.arguments().get(i), sb);
+        }
+        sb.append(")");
+        if (f.windowSpec() != null) emitWindowSpec(f.windowSpec(), sb);
+        return true;
+    }
+
     private boolean emitMappedFunction(String name, FunctionCall f, StringBuilder sb) {
         List<io.github.joegxx.localsql.ir.expression.Expression> args = f.arguments();
         switch (name) {
@@ -1260,14 +1325,67 @@ public final class DuckDbSqlGenerator {
                 sb.append(")");
                 return true;
             }
+            case "exists" -> {
+                if (args.size() != 2) return false;
+                sb.append("(len(list_filter(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(")) > 0)");
+                return true;
+            }
+            case "forall" -> {
+                if (args.size() != 2) return false;
+                sb.append("(len(list_filter(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(")) = len(");
+                emitExpr(args.get(0), sb);
+                sb.append("))");
+                return true;
+            }
+            case "aggregate" -> {
+                // aggregate(arr, zero, merge): prepend zero so DuckDB's reduce
+                // uses it as the accumulator seed. A finish lambda cannot be
+                // applied (DuckDB does not support invoking lambdas).
+                if (args.size() != 3) {
+                    throw new UnsupportedOperationException(
+                            "aggregate with a finish lambda is not supported yet; use aggregate(arr, zero, merge)");
+                }
+                sb.append("list_reduce(list_concat(list_value(");
+                emitExpr(args.get(1), sb);
+                sb.append("), ");
+                emitExpr(args.get(0), sb);
+                sb.append("), ");
+                emitExpr(args.get(2), sb);
+                sb.append(")");
+                return true;
+            }
             default -> {
                 return false;
             }
         }
     }
 
+    private void emitLambda(Lambda lam, StringBuilder sb) {
+        if (lam.variables().size() == 1) {
+            sb.append(quote(lam.variables().get(0))).append(" -> ");
+        } else {
+            sb.append("(");
+            for (int i = 0; i < lam.variables().size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(quote(lam.variables().get(i)));
+            }
+            sb.append(") -> ");
+        }
+        emitExpr(lam.body(), sb);
+    }
+
     private void emitFunctionCall(FunctionCall f, StringBuilder sb) {
         String name = f.name().toLowerCase();
+        if (emitCustomTemplate(name, f, sb)) return;
+        if (emitCustomRename(name, f, sb)) return;
         if (name.equals("between") && f.arguments().size() == 3) {
             sb.append("(");
             emitExpr(f.arguments().get(0), sb);

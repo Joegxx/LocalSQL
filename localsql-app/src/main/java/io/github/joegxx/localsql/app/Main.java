@@ -44,6 +44,7 @@ public final class Main {
         String manifest = flag(args, "--manifest");
         String failures = flag(args, "--failures", "import-failures.txt");
         String udfConfigPath = flag(args, "--udf-config");
+        String functionMapPath = flag(args, "--function-map");
         int port = port(args, 10000);
 
         LOG.info("LocalSQL Embedded Spark SQL Runtime starting...");
@@ -56,6 +57,15 @@ public final class Main {
                     config.timeoutMillis());
             LOG.info("Loaded {} UDF definitions from {} (timeout {}ms)",
                     config.registry().definitions().size(), udfConfigPath, config.timeoutMillis());
+        }
+
+        io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator generator = null;
+        if (functionMapPath != null) {
+            var fm = FunctionMapLoader.load(Paths.get(functionMapPath));
+            generator = new io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator(fm.renames(), fm.templates());
+            LOG.info("Loaded {} function mappings ({} renames, {} templates) from {}",
+                    fm.renames().size() + fm.templates().size(), fm.renames().size(),
+                    fm.templates().size(), functionMapPath);
         }
 
         if (importDdl != null) {
@@ -76,7 +86,7 @@ public final class Main {
                             "unqualified names will fail until USE switches the session",
                             schema, load, catalog.catalog().listDatabases());
                 }
-                ThriftServer server = new ThriftServer(catalog, executor, schema, support);
+                ThriftServer server = new ThriftServer(catalog, executor, schema, support, generator);
                 server.start(port);
                 LOG.info("Loaded {} from {} (default schema: {})",
                         tableCount(executor), load, server.defaultDatabase());
@@ -92,7 +102,7 @@ public final class Main {
             registerUsers(catalog, executor);
             registerOrders(catalog, executor);
 
-            ThriftServer server = new ThriftServer(catalog, executor, schema, support);
+            ThriftServer server = new ThriftServer(catalog, executor, schema, support, generator);
             server.start(port);
 
             String demo = "SELECT u.name, count(*) AS cnt FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.name ORDER BY cnt DESC";

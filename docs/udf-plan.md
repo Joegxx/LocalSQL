@@ -148,6 +148,44 @@ reflected `evaluate` with java-boxed > hadoop-writable > Object overload
 matching; NULL args yield a NULL row like Hive), TABLE calls go through the
 LATERAL VIEW path.
 
+### Function mappings (implemented)
+
+Built-in Spark-to-DuckDB mappings can be extended or overridden without code
+changes:
+
+```bash
+java -jar runtime.jar --load sandbox.duckdb --udf-config udfs.yaml \
+     --function-map functions.yaml
+```
+
+```yaml
+functions:
+  # rename: my_fn(a, b) -> target(a, b)
+  my_size: array_length
+  # template: {N} is replaced by the Nth argument, in any order/with literals
+  next_friday: "date_add({0}, 7)"
+  normalize_phone: "regexp_replace({0}, '[^0-9]', '', 'g')"
+```
+
+`FunctionMapLoader` (app) classifies values containing `{N}` as templates,
+everything else as renames; custom entries override built-ins. The generator
+is constructed with the overlay via `ThriftServer(catalog, executor, db,
+udfSupport, generator)`.
+
+### Higher-order functions (implemented, Lambda IR)
+
+- `Lambda` IR node + parser support (`x -> e`, `(x, y) -> e`) + DuckDB lambda
+  emission.
+- transform -> list_transform, filter -> list_filter (direct)
+- exists -> (len(list_filter) > 0), forall -> (len(list_filter) = len) —
+  PARTIAL: Spark null/empty nuances differ slightly
+- aggregate(arr, zero, merge) -> list_reduce(list_concat(list_value(zero),
+  arr), (acc, x) -> merge). A finish lambda is rejected explicitly (DuckDB
+  cannot invoke lambdas)
+- zip_with, map_filter, transform_keys/values, map_zip_with, sort_array
+  (comparator) remain unsupported (need lambda variable substitution into
+  struct fields / DuckDB map lambdas)
+
 ### Phase 1: contracts and registry
 
 - Add `localsql-udf-api`.

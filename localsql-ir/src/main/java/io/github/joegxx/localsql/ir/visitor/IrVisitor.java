@@ -40,6 +40,7 @@ public class IrVisitor<R, C> {
         if (expr instanceof Star e) return visitStar(e, ctx);
         if (expr instanceof Subquery e) return visitSubquery(e, ctx);
         if (expr instanceof ScalarSubquery e) return visitScalarSubquery(e, ctx);
+        if (expr instanceof Lambda e) return visitLambda(e, ctx);
         return visitNode(expr, ctx);
     }
 
@@ -117,6 +118,11 @@ public class IrVisitor<R, C> {
 
     public R visitSubquery(Subquery e, C ctx) { return visitRelation(e.query(), ctx); }
     public R visitScalarSubquery(ScalarSubquery e, C ctx) { return visitRelation(e.query(), ctx); }
+
+    public R visitLambda(Lambda e, C ctx) {
+        R r = defaultResult(e, ctx);
+        return aggregateResult(r, visit(e.body(), ctx));
+    }
 
     public R visitRelation(Relation rel, C ctx) {
         if (rel == null) return null;

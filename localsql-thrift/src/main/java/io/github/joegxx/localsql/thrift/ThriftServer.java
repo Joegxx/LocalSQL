@@ -34,17 +34,22 @@ public final class ThriftServer {
     private LocalSqlThriftService service;
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor) {
-        this(catalogService, executor, "default", null);
+        this(catalogService, executor, "default", null, null);
     }
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor, String defaultDatabase) {
-        this(catalogService, executor, defaultDatabase, null);
+        this(catalogService, executor, defaultDatabase, null, null);
     }
 
     public ThriftServer(CatalogService catalogService, DuckDbExecutor executor, String defaultDatabase,
                         UdfSupport udfSupport) {
+        this(catalogService, executor, defaultDatabase, udfSupport, null);
+    }
+
+    public ThriftServer(CatalogService catalogService, DuckDbExecutor executor, String defaultDatabase,
+                        UdfSupport udfSupport, io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator generator) {
         this.catalogService = catalogService;
-        this.pipeline = new SqlPipeline(catalogService, executor, udfSupport);
+        this.pipeline = new SqlPipeline(catalogService, executor, udfSupport, generator);
         this.defaultDatabase = defaultDatabase == null || defaultDatabase.isBlank()
                 ? "default" : defaultDatabase;
     }

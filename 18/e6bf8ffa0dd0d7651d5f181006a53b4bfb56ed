@@ -1,0 +1,49 @@
+pom.xml
+  s_b33fc4f71998f0::t_24558e34d24a56 157-177
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfGateway.java
+  s_b33fc4f71998f0::t_8c064090f705c8 6-11
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/UdtfPipelineTest.java
+  s_b33fc4f71998f0::t_49e748943203f5 43
+  s_b33fc4f71998f0::t_b453ccccbb606c 1-42,44-105
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_42d5c7eea9f5a7 430-437
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_b125c565568495 18
+  s_b33fc4f71998f0::t_a967e0c8a6658d 45-47
+  s_b33fc4f71998f0::t_87823cdc63edc4 89-92
+  s_b33fc4f71998f0::t_22bff37bc9d90a 66
+  s_b33fc4f71998f0::t_548c20b43ec13e 156
+  s_b33fc4f71998f0::t_6fcc84406d14ff 189,195-213,215,217-224
+  s_b33fc4f71998f0::t_6492a6a359c036 126-155,157-188,190-194,214,216,225-226
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TestSplitUdtf.java
+  s_b33fc4f71998f0::t_d2512353a82e8e 37
+  s_b33fc4f71998f0::t_889d8ca7bb631e 1-3,5-30,33-36,38-41
+  s_b33fc4f71998f0::t_5f8a63f983fea0 4,31-32
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/UdtfGenerateSplitter.java
+  s_b33fc4f71998f0::t_34868596e485d3 7
+  s_b33fc4f71998f0::t_6dc009aa161fc5 170-171,176
+  s_b33fc4f71998f0::t_69c5a604d41895 1-6,8-169,172-175,177-212
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdtfResult.java
+  s_b33fc4f71998f0::t_abbacf5b18cd19 1-22
+localsql-udf-runtime/src/main/java/io/github/joegxx/localsql/udf/runtime/HiveGenericUdtfGateway.java
+  s_b33fc4f71998f0::t_5fb756d19ddb25 70-71
+  s_b33fc4f71998f0::t_f6c2eee5a2a092 167
+  s_b33fc4f71998f0::t_67234d7ded9986 1-40,49-69,72-166,168-175
+  s_b33fc4f71998f0::t_687962aa00fdaa 41-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "18e6bf8ffa0dd0d7651d5f181006a53b4bfb56ed",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

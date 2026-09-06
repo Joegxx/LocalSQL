@@ -427,6 +427,14 @@ public final class SparkAstBuilder {
 
         Relation input = from == null ? null : visitFrom(from);
 
+        // The grammar attaches LATERAL VIEW to the fromClause
+        // (FROM relation (, relation)* lateralView*), which is the standard
+        // Spark position; the select-level lateralView* rarely binds.
+        if (from != null && from.lateralView() != null) {
+            for (LateralViewContext lv : from.lateralView()) {
+                input = visitLateralView(lv, input);
+            }
+        }
         if (reg.lateralView() != null && !reg.lateralView().isEmpty()) {
             for (LateralViewContext lv : reg.lateralView()) {
                 input = visitLateralView(lv, input);

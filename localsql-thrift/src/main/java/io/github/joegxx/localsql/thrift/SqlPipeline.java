@@ -15,6 +15,7 @@ import io.github.joegxx.localsql.ir.statement.Statement;
 import io.github.joegxx.localsql.parser.SparkSqlParser;
 import io.github.joegxx.localsql.rewrite.RewriteEngine;
 import io.github.joegxx.localsql.rewrite.UdfProjectionSplitter;
+import io.github.joegxx.localsql.rewrite.UdtfGenerateSplitter;
 import io.github.joegxx.localsql.spark.SparkAstBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,9 @@ final class SqlPipeline {
     private final RewriteEngine rewriter = new RewriteEngine();
     private final UdfSupport udfSupport;
     private final UdfProjectionSplitter udfSplitter;
+    private final UdtfGenerateSplitter udtfSplitter;
+    private final java.util.concurrent.atomic.AtomicLong udtfTempTableCounter =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * Session database for resolving unqualified table names (USE db; CREATE
@@ -59,6 +63,7 @@ final class SqlPipeline {
         this.analyzer = new SemanticAnalyzer(catalogService.catalog());
         this.udfSupport = udfSupport;
         this.udfSplitter = udfSupport == null ? null : new UdfProjectionSplitter(udfSupport.registry());
+        this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
     }
 
     /**
@@ -81,6 +86,10 @@ final class SqlPipeline {
             Relation rel = q.query();
             analyzer.analyze(rel, sessionDatabase);
             rewriter.rewrite(rel);
+            if (udtfSplitter != null) {
+                UdtfGenerateSplitter.UdtfPlan udtfPlan = udtfSplitter.trySplit(rel);
+                if (udtfPlan != null) return executeWithUdtf(udtfPlan);
+            }
             if (udfSplitter != null) {
                 UdfProjectionSplitter.SplitPlan plan = udfSplitter.trySplit(rel);
                 if (plan != null) return executeWithUdfSplit(plan);
@@ -111,6 +120,108 @@ final class SqlPipeline {
     @FunctionalInterface
     private interface SqlWork {
         void run() throws Exception;
+    }
+
+    /**
+     * Executes a UDTF (LATERAL VIEW) plan: stage 1 materializes source
+     * columns plus UDTF argument expressions, the gateway expands rows,
+     * everything lands in a DuckDB temp table and the original query is
+     * rebuilt around a scan of it, so outer filters/ORDER BY/LIMIT keep
+     * their normal semantics.
+     */
+    private DuckDbExecutor.QueryResult executeWithUdtf(UdtfGenerateSplitter.UdtfPlan plan) throws SQLException {
+        String stage1Sql = generator.generate(plan.stage1());
+        LOG.info("UDTF stage-1 SQL: {}", stage1Sql);
+        DuckDbExecutor.QueryResult stage1 = executor.execute(stage1Sql);
+        try {
+            io.github.joegxx.localsql.udf.api.UdfBatch input = sliceRows(stage1, plan.argIndexes());
+            io.github.joegxx.localsql.udf.api.UdtfResult out =
+                    udfSupport.gateway().executeUdtf(plan.definition(), input, udfSupport.timeoutMillis());
+            LOG.info("UDTF executed: {} input rows -> {} expanded rows",
+                    input.rowCount(), out.rows().size());
+
+            List<String> udtfNames = plan.outputNames().isEmpty() ? out.columnNames() : plan.outputNames();
+            if (udtfNames.size() != out.columnNames().size()) {
+                throw new SQLException("UDTF " + plan.definition().id() + " produced " + out.columnNames().size()
+                        + " columns but LATERAL VIEW declared " + udtfNames.size());
+            }
+            List<String> tempCols = new ArrayList<>(plan.sourceNames());
+            for (String n : udtfNames) {
+                if (!tempCols.add(n)) {
+                    throw new SQLException("Duplicate column name in LATERAL VIEW result: " + n);
+                }
+            }
+            String tempName = "__udtf_tmp_" + udtfTempTableCounter.incrementAndGet();
+            createUdtfTempTable(tempName, tempCols, stage1, stage1Sql, out);
+            insertUdtfRows(tempName, plan.sourceNames().size(), stage1, out);
+
+            Relation rebuilt = udtfSplitter.rebuild(
+                    udtfSplitter.expandedScan(tempName, tempCols), plan);
+            String finalSql = generator.generate(rebuilt);
+            LOG.info("UDTF final SQL: {}", finalSql);
+            return executor.execute(finalSql);
+        } catch (SQLException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SQLException("UDTF execution failed: " + e.getMessage(), e);
+        }
+    }
+
+    private void createUdtfTempTable(String tempName, List<String> columns,
+                                     DuckDbExecutor.QueryResult stage1, String stage1Sql,
+                                     io.github.joegxx.localsql.udf.api.UdtfResult out) throws SQLException {
+        List<String> types = new ArrayList<>();
+        DuckDbExecutor.QueryResult described = executor.execute("DESCRIBE " + stage1Sql);
+        int sourceCount = columns.size() - out.columnNames().size();
+        for (int i = 0; i < sourceCount; i++) {
+            types.add(i < described.rows().size() ? String.valueOf(described.rows().get(i).get(1)) : "VARCHAR");
+        }
+        types.addAll(out.columnTypes());
+        StringBuilder ddl = new StringBuilder("CREATE OR REPLACE TEMP TABLE ").append(DuckDbSqlGenerator.quote(tempName)).append(" (");
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) ddl.append(", ");
+            ddl.append(DuckDbSqlGenerator.quote(columns.get(i))).append(' ').append(types.get(i));
+        }
+        ddl.append(")");
+        executor.run(ddl.toString());
+    }
+
+    private void insertUdtfRows(String tempName, int sourceCount,
+                                DuckDbExecutor.QueryResult stage1,
+                                io.github.joegxx.localsql.udf.api.UdtfResult out) throws SQLException {
+        final int chunk = 400;
+        List<List<Object>> expanded = new ArrayList<>(out.rows().size());
+        for (int j = 0; j < out.rows().size(); j++) {
+            List<Object> row = new ArrayList<>(sourceCount + out.columnNames().size());
+            List<Object> src = stage1.rows().get(out.sourceRows().get(j));
+            for (int c = 0; c < sourceCount; c++) row.add(c < src.size() ? src.get(c) : null);
+            row.addAll(out.rows().get(j));
+            expanded.add(row);
+        }
+        for (int from = 0; from < expanded.size(); from += chunk) {
+            int to = Math.min(from + chunk, expanded.size());
+            StringBuilder ins = new StringBuilder("INSERT INTO ")
+                    .append(DuckDbSqlGenerator.quote(tempName)).append(" VALUES ");
+            for (int r = from; r < to; r++) {
+                if (r > from) ins.append(", ");
+                ins.append("(");
+                List<Object> row = expanded.get(r);
+                for (int c = 0; c < row.size(); c++) {
+                    if (c > 0) ins.append(", ");
+                    ins.append(sqlLiteral(row.get(c)));
+                }
+                ins.append(")");
+            }
+            executor.run(ins.toString());
+        }
+    }
+
+    private static String sqlLiteral(Object value) {
+        if (value == null) return "NULL";
+        if (value instanceof Boolean b) return b ? "TRUE" : "FALSE";
+        if (value instanceof Number) return value.toString();
+        String s = value.toString().replace("'", "''");
+        return "'" + s + "'";
     }
 
     /**

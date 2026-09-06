@@ -1,0 +1,55 @@
+localsql-app/src/test/java/io/github/joegxx/localsql/app/FunctionMapLoaderTest.java
+  s_b33fc4f71998f0::t_4a0af5a74bdf25 1-42
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/Lambda.java
+  s_b33fc4f71998f0::t_28748736b77f7c 1-23
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/CustomFunctionMapTest.java
+  s_b33fc4f71998f0::t_0cce4eab41fbeb 1-49,53-61
+  s_b33fc4f71998f0::t_5983a5daf638e4 50-52
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/visitor/IrVisitor.java
+  s_b33fc4f71998f0::t_203047f943f13c 43
+  s_b33fc4f71998f0::t_432abf18264c1d 122-126
+localsql-app/src/main/java/io/github/joegxx/localsql/app/FunctionMapLoader.java
+  s_b33fc4f71998f0::t_2d2e6e5ae86030 1-58
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_5f8a1921e69c30 151-188
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkExpressionBuilder.java
+  s_b33fc4f71998f0::t_f025ecdcbafd6d 227-231
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_c98f272f9cd1ce 57,61-65,72
+  s_b33fc4f71998f0::t_dc2765616eef03 38
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/SparkFunctionMappingTest.java
+  s_b33fc4f71998f0::t_ec82af0c924ec2 263-268,271
+  s_b33fc4f71998f0::t_cf9c1f80c4c5ba 262
+  s_b33fc4f71998f0::t_dc1696052d3c66 18,67,70-100,102-117,119-131,133-151,154-155,157-164,166-167,169-187,189-200,202-214,216-233,235-242,244-261
+  s_b33fc4f71998f0::t_ff7fe119efcdb9 269-270
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_f1e3cc134687f2 646-649
+  s_b33fc4f71998f0::t_4daa3c6dae98aa 685-730
+  s_b33fc4f71998f0::t_fa1555da5b2afd 1328-1348,1355-1364
+  s_b33fc4f71998f0::t_2d34c1648b026c 1349-1354
+  s_b33fc4f71998f0::t_dc8ced77f6bbc1 1387-1388
+  s_b33fc4f71998f0::t_4929fefb3b44ce 1371-1384
+  s_b33fc4f71998f0::t_1613fdc74e39f3 375
+  s_b33fc4f71998f0::t_aef903babeb2dd 666-679
+localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java
+  s_b33fc4f71998f0::t_631b1fa3e5858b 89,105
+  s_b33fc4f71998f0::t_bdd14a7d1b0b85 47,62-68
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_11fa7468a538e3 37,41,46-50,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "d5cf7b8328ee1e69963ff551e47f72effb6b1f33",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

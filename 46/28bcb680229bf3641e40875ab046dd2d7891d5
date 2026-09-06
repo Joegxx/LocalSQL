@@ -1,0 +1,35 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/UdfConfigPipelineTest.java
+  s_b33fc4f71998f0::t_b17501d5363040 70-76
+  s_b33fc4f71998f0::t_ccbcfaf769c7ef 108-115
+localsql-udf-runtime/src/main/java/io/github/joegxx/localsql/udf/runtime/HiveUdfGateway.java
+  s_b33fc4f71998f0::t_628abbd45a3867 41
+  s_b33fc4f71998f0::t_619714f366fb3b 16,20-25
+localsql-udf-runtime/src/test/java/io/github/joegxx/localsql/udf/runtime/HiveSimpleUdfGatewayTest.java
+  s_b33fc4f71998f0::t_768c8fbe70f9d4 1-86
+localsql-udf-runtime/src/main/java/io/github/joegxx/localsql/udf/runtime/HiveSimpleUdfGateway.java
+  s_b33fc4f71998f0::t_8cce64e26dc840 110
+  s_b33fc4f71998f0::t_488ac0eefea69f 46
+  s_b33fc4f71998f0::t_02a39c2c66bd72 1-45,47-109,111-246
+localsql-udf-runtime/src/test/java/io/github/joegxx/localsql/udf/runtime/TestSimpleUdf.java
+  s_b33fc4f71998f0::t_62d3dc6752740c 1-21
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_10664db73ddd11 135-140,145-149
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TestStarUdf.java
+  s_b33fc4f71998f0::t_a65ecfdbc9ba2f 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "4628bcb680229bf3641e40875ab046dd2d7891d5",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

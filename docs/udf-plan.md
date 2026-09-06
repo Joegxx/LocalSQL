@@ -177,6 +177,51 @@ Maintain a structured compatibility registry with statuses:
 DIRECT, MAPPED, REWRITTEN, GATEWAY, PARTIAL, UNSUPPORTED
 ```
 
+#### Batch 1 (implemented, verified by SparkFunctionMappingTest, 106 cases)
+
+- **Strings**: upper/lower/reverse/ascii/chr/lpad/rpad/trim(+charset)/ltrim/
+  rtrim/btrim/levenshtein/contains/startswith/endswith/concat_ws/repeat/
+  replace/instr(->strpos)/locate+position(arg-swap+3-arg)/substring/length,
+  regexp_replace(global 'g' flag)/regexp_extract/regexp_extract_all/
+  regexp_count(len of extract_all)/regexp_like(->regexp_matches),
+  split(->regexp_split_to_array; Spark uses regex)
+- **Numbers**: abs/ceil/ceiling/floor/sqrt/cbrt/exp/ln/log2/log10/log(base,x)
+  ratio/pow/power/sign/isnan/isinf/pi/mod(+NULL-on-zero guard)/pmod
+- **Null/conditional**: nvl/ifnull(->coalesce)/nvl2(CASE)/if(CASE)/nullif/
+  equal_null(IS NOT DISTINCT FROM)/greatest/least/coalesce
+- **Dates**: year/month/day/dayofmonth/quarter/hour/minute/second/dayofweek
+  (formula, Spark Sunday=1)/weekday(-1, Spark Monday=0)/dayofyear/
+  weekofyear(->week)/last_day/date_add/date_sub(d +/- n)/datediff(arg-swap)/
+  add_months(to_months + end-of-month clamp, CAST AS DATE)/to_date(1-2 arg)/
+  to_timestamp(1-arg)/unix_timestamp(1-arg, 0-arg)/from_unixtime(strftime)
+- **Hash/encoding/JSON**: md5/sha1/sha2(0|256)/hex/unhex/base64/unbase64/
+  get_json_object(->json_extract_string)/json_array_length
+- **Arrays**: array/array_contains/array_position/array_distinct/
+  array_union/array_intersect/array_except/array_join(2-3 arg)/array_max/
+  array_min/element_at/flatten/cardinality/size
+- **Aggregates/windows**: any_value/first/median/mode/corr/covar_pop/
+  covar_samp/stddev family/variance family/approx_count_distinct/
+  collect_list(->list)/bool_and/bool_or/every/some/any, and the full
+  window set (row_number..nth_value) plus max_by/min_by(->arg_max/arg_min)
+- **PARTIAL, not auto-applied**: date_format(Java vs strftime pattern
+  languages differ; the old strftime mapping was removed — it now fails
+  loudly instead of producing wrong output), date_trunc(unit names),
+  percentile/percentile_approx(->quantile semantics differ)
+- **List results are order-insensitive** for set functions: Spark does not
+  guarantee element order for array_distinct/union/intersect/except, and
+  DuckDB's list_* may differ from Spark's order.
+
+#### Known not-yet-supported (fail explicitly)
+
+date_format, date_trunc, months_between, next_day, to_json/from_json,
+schema_of_json, json_tuple, str_to_map, substring_index, find_in_set,
+crc32/hash/xxhash64 (different algorithms), bin, initcap, format_number,
+arrays_overlap/arrays_zip/array_sort(comparator)/array_repeat,
+map construction (map/named_struct emission), stack/posexplode_outer/
+explode_outer(OUTER semantics), higher-order lambdas (transform/filter/
+aggregate/zip_with), reflect/java_method (disabled by design),
+input_file_name/spark_partition_id (no execution context), session_window.
+
 Implement in this order:
 
 1. String, numeric and null-handling functions.

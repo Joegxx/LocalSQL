@@ -469,7 +469,13 @@ public final class DuckDbSqlGenerator {
         }
     }
 
+    /**
+     * Direct name mappings: Spark/Hive function name -> DuckDB function.
+     * Semantics must match Spark (verified in SparkFunctionMappingTest);
+     * functions needing argument restructuring live in emitMappedFunction.
+     */
     private static final Map<String, String> FN_MAP = Map.ofEntries(
+            // strings
             Map.entry("size", "array_length"),
             Map.entry("explode", "unnest"),
             Map.entry("posexplode", "unnest"),
@@ -477,23 +483,404 @@ public final class DuckDbSqlGenerator {
             Map.entry("substr", "substring"),
             Map.entry("substring", "substring"),
             Map.entry("concat", "concat"),
+            Map.entry("concat_ws", "concat_ws"),
             Map.entry("coalesce", "coalesce"),
-            Map.entry("if", "if"),
             Map.entry("cast", "cast"),
             Map.entry("count", "count"),
             Map.entry("sum", "sum"),
             Map.entry("avg", "avg"),
             Map.entry("min", "min"),
             Map.entry("max", "max"),
-            Map.entry("instr", "instr"),
-            Map.entry("split", "string_split"),
-            Map.entry("date_format", "strftime"),
-            Map.entry("to_date", "strptime"),
+            Map.entry("upper", "upper"),
+            Map.entry("lower", "lower"),
+            Map.entry("reverse", "reverse"),
+            Map.entry("ascii", "ascii"),
+            Map.entry("chr", "chr"),
+            Map.entry("lpad", "lpad"),
+            Map.entry("rpad", "rpad"),
+            Map.entry("trim", "trim"),
+            Map.entry("ltrim", "ltrim"),
+            Map.entry("rtrim", "rtrim"),
+            Map.entry("btrim", "btrim"),
+            Map.entry("levenshtein", "levenshtein"),
+            Map.entry("soundex", "soundex"),
+            Map.entry("contains", "contains"),
+            Map.entry("startswith", "starts_with"),
+            Map.entry("endswith", "ends_with"),
+            Map.entry("repeat", "repeat"),
+            Map.entry("replace", "replace"),
+            Map.entry("instr", "strpos"),
+            Map.entry("split", "regexp_split_to_array"),
+            Map.entry("regexp_replace", "regexp_replace"),
+            Map.entry("regexp_extract", "regexp_extract"),
+            Map.entry("regexp_extract_all", "regexp_extract_all"),
+            Map.entry("regexp_like", "regexp_matches"),
+            // numbers
+            Map.entry("abs", "abs"),
+            Map.entry("ceil", "ceil"),
+            Map.entry("ceiling", "ceiling"),
+            Map.entry("floor", "floor"),
+            Map.entry("sqrt", "sqrt"),
+            Map.entry("cbrt", "cbrt"),
+            Map.entry("exp", "exp"),
+            Map.entry("ln", "ln"),
+            Map.entry("log2", "log2"),
+            Map.entry("log10", "log10"),
+            Map.entry("pow", "pow"),
+            Map.entry("power", "pow"),
+            Map.entry("sign", "sign"),
+            Map.entry("isnan", "isnan"),
+            Map.entry("isinf", "isinf"),
+            Map.entry("pi", "pi"),
+            // encoding / hash
+            Map.entry("hex", "hex"),
+            Map.entry("unhex", "unhex"),
+            Map.entry("base64", "to_base64"),
+            Map.entry("unbase64", "from_base64"),
+            Map.entry("md5", "md5"),
+            Map.entry("sha1", "sha1"),
+            // dates
             Map.entry("current_date", "current_date"),
             Map.entry("current_timestamp", "current_timestamp"),
+            Map.entry("year", "year"),
+            Map.entry("month", "month"),
+            Map.entry("day", "day"),
+            Map.entry("dayofmonth", "day"),
+            Map.entry("quarter", "quarter"),
+            Map.entry("hour", "hour"),
+            Map.entry("minute", "minute"),
+            Map.entry("second", "second"),
+            Map.entry("dayofyear", "dayofyear"),
+            Map.entry("weekofyear", "week"),
+            Map.entry("last_day", "last_day"),
             Map.entry("get_json_object", "json_extract_string"),
-            Map.entry("json_extract", "json_extract")
+            Map.entry("json_extract", "json_extract"),
+            Map.entry("json_array_length", "json_array_length"),
+            // arrays / maps
+            Map.entry("array", "list_value"),
+            Map.entry("array_contains", "list_contains"),
+            Map.entry("array_position", "list_position"),
+            Map.entry("array_distinct", "list_distinct"),
+            Map.entry("array_intersect", "list_intersect"),
+            Map.entry("array_join", "array_to_string"),
+            Map.entry("array_max", "list_max"),
+            Map.entry("array_min", "list_min"),
+            Map.entry("element_at", "list_element"),
+            Map.entry("flatten", "flatten"),
+            Map.entry("cardinality", "len"),
+            Map.entry("map_keys", "map_keys"),
+            Map.entry("map_values", "map_values"),
+            // aggregates
+            Map.entry("nvl", "coalesce"),
+            Map.entry("ifnull", "coalesce"),
+            Map.entry("any_value", "any_value"),
+            Map.entry("first", "first"),
+            Map.entry("median", "median"),
+            Map.entry("mode", "mode"),
+            Map.entry("corr", "corr"),
+            Map.entry("covar_pop", "covar_pop"),
+            Map.entry("covar_samp", "covar_samp"),
+            Map.entry("stddev", "stddev_samp"),
+            Map.entry("stddev_pop", "stddev_pop"),
+            Map.entry("stddev_samp", "stddev_samp"),
+            Map.entry("variance", "var_samp"),
+            Map.entry("var_pop", "var_pop"),
+            Map.entry("var_samp", "var_samp"),
+            Map.entry("approx_count_distinct", "approx_count_distinct"),
+            Map.entry("collect_list", "list"),
+            Map.entry("bool_and", "bool_and"),
+            Map.entry("bool_or", "bool_or"),
+            Map.entry("every", "bool_and"),
+            Map.entry("some", "bool_or"),
+            Map.entry("any", "bool_or"),
+            // window
+            Map.entry("row_number", "row_number"),
+            Map.entry("rank", "rank"),
+            Map.entry("dense_rank", "dense_rank"),
+            Map.entry("percent_rank", "percent_rank"),
+            Map.entry("cume_dist", "cume_dist"),
+            Map.entry("ntile", "ntile"),
+            Map.entry("lag", "lag"),
+            Map.entry("lead", "lead"),
+            Map.entry("first_value", "first_value"),
+            Map.entry("last_value", "last_value"),
+            Map.entry("nth_value", "nth_value"),
+            Map.entry("max_by", "arg_max"),
+            Map.entry("min_by", "arg_min")
     );
+
+    /**
+     * Mappings that need argument restructuring (arg order swaps, arithmetic
+     * instead of functions, CASE rewrites, literal dispatch). Returns false
+     * when the shape does not apply and generic emission should proceed.
+     */
+    private boolean emitMappedFunction(String name, FunctionCall f, StringBuilder sb) {
+        List<io.github.joegxx.localsql.ir.expression.Expression> args = f.arguments();
+        switch (name) {
+            case "if" -> {
+                if (args.size() != 3) return false;
+                sb.append("(CASE WHEN ");
+                emitExpr(args.get(0), sb);
+                sb.append(" THEN ");
+                emitExpr(args.get(1), sb);
+                sb.append(" ELSE ");
+                emitExpr(args.get(2), sb);
+                sb.append(" END)");
+                return true;
+            }
+            case "nvl2" -> {
+                if (args.size() != 3) return false;
+                sb.append("(CASE WHEN ");
+                emitExpr(args.get(0), sb);
+                sb.append(" IS NOT NULL THEN ");
+                emitExpr(args.get(1), sb);
+                sb.append(" ELSE ");
+                emitExpr(args.get(2), sb);
+                sb.append(" END)");
+                return true;
+            }
+            case "equal_null" -> {
+                if (args.size() != 2) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" IS NOT DISTINCT FROM ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
+            case "mod", "pmod" -> {
+                if (args.size() != 2) return false;
+                // Spark returns NULL on zero divisor; pmod keeps a - floor(a/b)*b
+                sb.append("(CASE WHEN (");
+                emitExpr(args.get(1), sb);
+                sb.append(") = 0 THEN NULL ELSE ");
+                if (name.equals("mod")) {
+                    sb.append("(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" % ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(")");
+                } else {
+                    sb.append("((");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" % ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(") + ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(") % ");
+                    emitExpr(args.get(1), sb);
+                }
+                sb.append(" END)");
+                return true;
+            }
+            case "date_add", "date_sub" -> {
+                if (args.size() != 2) return false;
+                sb.append("(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS DATE) ").append(name.equals("date_add") ? "+" : "-").append(" (");
+                emitExpr(args.get(1), sb);
+                sb.append("))");
+                return true;
+            }
+            case "datediff" -> {
+                if (args.size() != 2) return false;
+                // Spark datediff(end, start); DuckDB date_diff(part, start, end)
+                sb.append("date_diff('day', CAST(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS DATE), CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS DATE))");
+                return true;
+            }
+            case "add_months" -> {
+                if (args.size() != 2) return false;
+                sb.append("(CAST(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS DATE) + to_months(");
+                emitExpr(args.get(1), sb);
+                sb.append(") AS DATE))");
+                return true;
+            }
+            case "unix_timestamp" -> {
+                if (args.size() == 1) {
+                    sb.append("CAST(epoch(CAST(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" AS TIMESTAMP)) AS BIGINT)");
+                    return true;
+                }
+                if (args.isEmpty()) {
+                    sb.append("CAST(epoch(CAST(CURRENT_TIMESTAMP AS TIMESTAMP)) AS BIGINT)");
+                    return true;
+                }
+                return false;
+            }
+            case "from_unixtime" -> {
+                if (args.size() != 1) return false;
+                sb.append("strftime(to_timestamp(");
+                emitExpr(args.get(0), sb);
+                sb.append("), '%Y-%m-%d %H:%M:%S')");
+                return true;
+            }
+            case "weekday" -> {
+                if (args.size() != 1) return false;
+                // Spark weekday: Monday=0..Sunday=6; DuckDB weekday is 1-based Monday
+                sb.append("((weekday(");
+                emitExpr(args.get(0), sb);
+                sb.append(")) - 1)");
+                return true;
+            }
+            case "dayofweek" -> {
+                if (args.size() != 1) return false;
+                // Spark dayofweek: Sunday=1..Saturday=7; DuckDB weekday: Monday=1..Sunday=7
+                sb.append("((weekday(");
+                emitExpr(args.get(0), sb);
+                sb.append(") % 7) + 1)");
+                return true;
+            }
+            case "regexp_replace" -> {
+                if (args.size() < 2 || args.size() > 3) return false;
+                // Spark replaces all occurrences; DuckDB needs the 'g' flag
+                sb.append("regexp_replace(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(", ");
+                if (args.size() == 3) emitExpr(args.get(2), sb);
+                else sb.append("''");
+                sb.append(", 'g')");
+                return true;
+            }
+            case "regexp_count" -> {
+                if (args.size() < 2 || args.size() > 3) return false;
+                sb.append("len(regexp_extract_all(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append("))");
+                return true;
+            }
+            case "array_union" -> {
+                if (args.size() != 2) return false;
+                sb.append("list_distinct(list_concat(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append("))");
+                return true;
+            }
+            case "array_except" -> {
+                if (args.size() != 2) return false;
+                sb.append("list_distinct(list_filter(");
+                emitExpr(args.get(0), sb);
+                sb.append(", x -> NOT list_contains(");
+                emitExpr(args.get(1), sb);
+                sb.append(", x)))");
+                return true;
+            }
+            case "array_join" -> {
+                if (args.size() == 2) return false; // DuckDB array_to_string(list, delim) is a direct match
+                if (args.size() != 3) return false;
+                sb.append("array_to_string(list_transform(");
+                emitExpr(args.get(0), sb);
+                sb.append(", x -> COALESCE(CAST(x AS VARCHAR), ");
+                emitExpr(args.get(2), sb);
+                sb.append(")), ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
+            case "to_date" -> {
+                if (args.size() == 1) {
+                    sb.append("CAST(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" AS DATE)");
+                    return true;
+                }
+                if (args.size() == 2) {
+                    sb.append("CAST(strptime(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(", ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(") AS DATE)");
+                    return true;
+                }
+                return false;
+            }
+            case "to_timestamp" -> {
+                if (args.size() != 1) return false;
+                sb.append("CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS TIMESTAMP)");
+                return true;
+            }
+            case "log" -> {
+                if (args.size() == 1) {
+                    sb.append("ln(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(")");
+                    return true;
+                }
+                if (args.size() == 2) {
+                    // Spark log(base, x); DuckDB log(x) is base 10
+                    sb.append("(ln(");
+                    emitExpr(args.get(1), sb);
+                    sb.append(") / ln(");
+                    emitExpr(args.get(0), sb);
+                    sb.append("))");
+                    return true;
+                }
+                return false;
+            }
+            case "locate", "position" -> {
+                if (args.size() == 2) {
+                    // Spark locate(substr, str); DuckDB strpos(str, substr)
+                    sb.append("strpos(");
+                    emitExpr(args.get(1), sb);
+                    sb.append(", ");
+                    emitExpr(args.get(0), sb);
+                    sb.append(")");
+                    return true;
+                }
+                if (args.size() == 3) {
+                    sb.append("(CASE WHEN strpos(substr(");
+                    emitExpr(args.get(1), sb);
+                    sb.append(", ");
+                    emitExpr(args.get(2), sb);
+                    sb.append("), ");
+                    emitExpr(args.get(0), sb);
+                    sb.append(") = 0 THEN 0 ELSE strpos(substr(");
+                    emitExpr(args.get(1), sb);
+                    sb.append(", ");
+                    emitExpr(args.get(2), sb);
+                    sb.append("), ");
+                    emitExpr(args.get(0), sb);
+                    sb.append(") + ");
+                    emitExpr(args.get(2), sb);
+                    sb.append(" - 1 END)");
+                    return true;
+                }
+                return false;
+            }
+            case "sha2" -> {
+                if (args.size() != 2) return false;
+                Object bits = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER
+                        ? l.value() : null;
+                if (bits == null || !(bits instanceof Number n)
+                        || (n.longValue() != 0 && n.longValue() != 256)) {
+                    throw new UnsupportedOperationException(
+                            "sha2 supports 0/256 bits via DuckDB sha256; requested: " + args.get(1));
+                }
+                sb.append("sha256(");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
 
     private void emitFunctionCall(FunctionCall f, StringBuilder sb) {
         String name = f.name().toLowerCase();
@@ -515,6 +902,7 @@ public final class DuckDbSqlGenerator {
             sb.append(")");
             return;
         }
+        if (emitMappedFunction(name, f, sb)) return;
         String mapped = FN_MAP.getOrDefault(name, name);
         sb.append(mapped).append("(");
         if (f.distinct()) sb.append("DISTINCT ");

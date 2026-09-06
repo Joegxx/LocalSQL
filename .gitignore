@@ -30,3 +30,4 @@ target/
 out/
 .idea/
 !/localsql-data/
+.DS_Store

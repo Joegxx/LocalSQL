@@ -1,0 +1,48 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java
+  s_b33fc4f71998f0::t_ddbb05091c1f77 37,41-45,47
+localsql-rewrite/pom.xml
+  s_b33fc4f71998f0::t_a47821150eade0 18-26
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfBatch.java
+  s_b33fc4f71998f0::t_132b75e752968f 3-4,10-14
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_cd2d8ca7a044a8 17
+  s_b33fc4f71998f0::t_90d28b4bf4dede 53-56,60-61
+  s_b33fc4f71998f0::t_139939a85bcbfd 42-43
+  s_b33fc4f71998f0::t_3bf5234d62cdbd 84-87
+  s_b33fc4f71998f0::t_48043fafef612d 117-181
+localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfRegistry.java
+  s_b33fc4f71998f0::t_7f105dc1c37c38 33-44
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/UdfSupport.java
+  s_b33fc4f71998f0::t_dbe027db019d6a 1-24
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/UdfPipelineTest.java
+  s_b33fc4f71998f0::t_100dd7eaa06da5 1-87,89,91-94,96,98-104
+  s_b33fc4f71998f0::t_0497c177fd1467 88,90,95,97
+localsql-thrift/pom.xml
+  s_b33fc4f71998f0::t_604a3360091dc9 39-52
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/TestUpperUdf.java
+  s_b33fc4f71998f0::t_f416fe6cc98702 1-30
+pom.xml
+  s_b33fc4f71998f0::t_85772350be5969 92-94
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/UdfProjectionSplitter.java
+  s_b33fc4f71998f0::t_1819261a7802d5 114
+  s_b33fc4f71998f0::t_7e656868f76548 1-38,40-104,109-113,115-120,122-153
+  s_b33fc4f71998f0::t_aca226466ce6b8 39
+  s_b33fc4f71998f0::t_48f5b1b14a74b2 105-108
+  s_b33fc4f71998f0::t_e68dbf0fce0802 121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "5ae26d45442852e11e7f81d85d1737e91aede38b",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

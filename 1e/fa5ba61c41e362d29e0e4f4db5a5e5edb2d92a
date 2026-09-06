@@ -1,0 +1,33 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/SparkFunctionMappingTest.java
+  s_b33fc4f71998f0::t_7a23a25cb2800b 222
+  s_b33fc4f71998f0::t_c1398acb91372b 209
+  s_b33fc4f71998f0::t_7ca93c9106a21d 183-208,210-221,223-261
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_67f24f50a1a98d 928-995,1004-1138,1140,1142-1194,1215-1229,1231-1233,1235-1262
+  s_b33fc4f71998f0::t_7239dbd8bd1e00 1230,1234
+  s_b33fc4f71998f0::t_b583342db66798 1139,1141
+  s_b33fc4f71998f0::t_cdff0e55649343 532,536-568,576-586,588-590
+  s_b33fc4f71998f0::t_0eac54536b91dd 587
+  s_b33fc4f71998f0::t_43dd92b793f2b7 996-1003
+  s_b33fc4f71998f0::t_3b43a637635dd5 1195-1214
+  s_b33fc4f71998f0::t_ab5d53d1593973 1301-1314
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_3b601f93173dbe 208-210
+  s_b33fc4f71998f0::t_2c0c49ee8e70ca 215-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "1efa5ba61c41e362d29e0e4f4db5a5e5edb2d92a",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

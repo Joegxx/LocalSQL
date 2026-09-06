@@ -36,6 +36,21 @@
             <artifactId>localsql-rewrite</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.github.joegxx.localsql</groupId>
+            <artifactId>localsql-udf-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.joegxx.localsql</groupId>
+            <artifactId>localsql-udf-runtime</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-exec</artifactId>
+            <version>${hive.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.hive</groupId>
             <artifactId>hive-service-rpc</artifactId>
         </dependency>

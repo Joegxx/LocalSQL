@@ -14,6 +14,7 @@ import io.github.joegxx.localsql.ir.statement.QueryStatement;
 import io.github.joegxx.localsql.ir.statement.Statement;
 import io.github.joegxx.localsql.parser.SparkSqlParser;
 import io.github.joegxx.localsql.rewrite.RewriteEngine;
+import io.github.joegxx.localsql.rewrite.UdfProjectionSplitter;
 import io.github.joegxx.localsql.spark.SparkAstBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,8 @@ final class SqlPipeline {
     private final SparkAstBuilder astBuilder = new SparkAstBuilder();
     private final SemanticAnalyzer analyzer;
     private final RewriteEngine rewriter = new RewriteEngine();
+    private final UdfSupport udfSupport;
+    private final UdfProjectionSplitter udfSplitter;
 
     /**
      * Session database for resolving unqualified table names (USE db; CREATE
@@ -47,9 +50,15 @@ final class SqlPipeline {
     private String sessionDatabase = "default";
 
     SqlPipeline(CatalogService catalogService, DuckDbExecutor executor) {
+        this(catalogService, executor, null);
+    }
+
+    SqlPipeline(CatalogService catalogService, DuckDbExecutor executor, UdfSupport udfSupport) {
         this.catalogService = catalogService;
         this.executor = executor;
         this.analyzer = new SemanticAnalyzer(catalogService.catalog());
+        this.udfSupport = udfSupport;
+        this.udfSplitter = udfSupport == null ? null : new UdfProjectionSplitter(udfSupport.registry());
     }
 
     /**
@@ -72,6 +81,10 @@ final class SqlPipeline {
             Relation rel = q.query();
             analyzer.analyze(rel, sessionDatabase);
             rewriter.rewrite(rel);
+            if (udfSplitter != null) {
+                UdfProjectionSplitter.SplitPlan plan = udfSplitter.trySplit(rel);
+                if (plan != null) return executeWithUdfSplit(plan);
+            }
             String duckSql = generator.generate(rel);
             LOG.info("Translated to DuckDB SQL: {}", duckSql);
             return executor.execute(duckSql);
@@ -98,6 +111,72 @@ final class SqlPipeline {
     @FunctionalInterface
     private interface SqlWork {
         void run() throws Exception;
+    }
+
+    /**
+     * Executes a UDF-split plan: run stage 1 (UDF calls replaced by their
+     * argument expressions), compute each registered UDF through the gateway
+     * in batches, then assemble the final result set in Java. Row order is
+     * preserved, so the UDF columns align with stage-1 rows by index.
+     */
+    private DuckDbExecutor.QueryResult executeWithUdfSplit(UdfProjectionSplitter.SplitPlan plan) throws SQLException {
+        String stage1Sql = generator.generate(plan.stage1());
+        LOG.info("UDF stage-1 SQL: {}", stage1Sql);
+        DuckDbExecutor.QueryResult stage1 = executor.execute(stage1Sql);
+        try {
+            List<String> outputNames = new ArrayList<>();
+            List<List<Object>> outputColumns = new ArrayList<>();
+            for (UdfProjectionSplitter.OutputSpec spec : plan.outputs()) {
+                if (spec instanceof UdfProjectionSplitter.OutputSpec.Column c) {
+                    outputNames.add(stage1.columns().get(c.stage1Index()));
+                    outputColumns.add(columnAt(stage1, c.stage1Index()));
+                } else if (spec instanceof UdfProjectionSplitter.OutputSpec.Udf u) {
+                    io.github.joegxx.localsql.udf.api.UdfBatch input =
+                            sliceRows(stage1, u.argIndexes());
+                    io.github.joegxx.localsql.udf.api.UdfBatch out =
+                            udfSupport.gateway().execute(u.definition(), input, udfSupport.timeoutMillis());
+                    outputNames.add(u.name());
+                    outputColumns.add(firstColumn(out));
+                    LOG.info("UDF executed: {} rows={} -> {} result rows",
+                            u.definition().id(), input.rowCount(), out.rowCount());
+                }
+            }
+            List<List<Object>> rows = new ArrayList<>(stage1.rows().size());
+            for (int r = 0; r < stage1.rows().size(); r++) {
+                List<Object> row = new ArrayList<>(outputColumns.size());
+                for (List<Object> col : outputColumns) row.add(r < col.size() ? col.get(r) : null);
+                rows.add(row);
+            }
+            return new DuckDbExecutor.QueryResult(outputNames, rows);
+        } catch (SQLException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SQLException("UDF execution failed: " + e.getMessage(), e);
+        }
+    }
+
+    private static List<Object> columnAt(DuckDbExecutor.QueryResult result, int index) {
+        List<Object> out = new ArrayList<>(result.rows().size());
+        for (List<Object> row : result.rows()) out.add(index < row.size() ? row.get(index) : null);
+        return out;
+    }
+
+    private static io.github.joegxx.localsql.udf.api.UdfBatch sliceRows(
+            DuckDbExecutor.QueryResult result, List<Integer> indexes) {
+        List<List<Object>> rows = new ArrayList<>(result.rows().size());
+        for (List<Object> row : result.rows()) {
+            List<Object> slice = new ArrayList<>(indexes.size());
+            for (int i : indexes) slice.add(i < row.size() ? row.get(i) : null);
+            rows.add(slice);
+        }
+        return new io.github.joegxx.localsql.udf.api.UdfBatch(
+                indexes.stream().map(i -> "__udf_arg_" + i).toList(), rows);
+    }
+
+    private static List<Object> firstColumn(io.github.joegxx.localsql.udf.api.UdfBatch batch) {
+        List<Object> out = new ArrayList<>(batch.rowCount());
+        for (List<Object> row : batch.rows()) out.add(row.isEmpty() ? null : row.get(0));
+        return out;
     }
 
     /**

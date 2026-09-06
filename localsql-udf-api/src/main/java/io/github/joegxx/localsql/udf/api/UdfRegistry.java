@@ -30,6 +30,18 @@ public final class UdfRegistry {
                 ? Optional.empty() : Optional.of(candidates.get(0));
     }
 
+    /**
+     * Resolve by name and argument count only (highest priority first). Used
+     * by the SQL pipeline where argument types are not reliably known yet.
+     */
+    public Optional<UdfDefinition> resolveByName(String name, int arity) {
+        String key = name.toLowerCase(Locale.ROOT);
+        return definitions.values().stream()
+                .flatMap(List::stream)
+                .filter(d -> d.signature().name().equals(key) && d.argumentTypes().size() == arity)
+                .findFirst();
+    }
+
     public List<UdfDefinition> definitions() {
         return definitions.values().stream().flatMap(List::stream).toList();
     }

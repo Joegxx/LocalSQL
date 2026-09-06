@@ -113,6 +113,32 @@ including dynamic output schema, `LATERAL VIEW`, `OUTER`, `explode`,
 
 ## Rollout phases
 
+### Configuration (implemented)
+
+`runtime.jar --load sandbox.duckdb --schema ods_fuaisv --udf-config udfs.yaml`:
+
+```yaml
+timeoutMillis: 30000          # per gateway call, optional
+udfs:
+  - name: mask_phone
+    class: com.company.udf.MaskPhone
+    jar: /opt/udf/company.jar   # jar file OR exploded class directory
+    kind: GENERIC               # GENERIC (default) | TABLE | SCALAR
+    args: [STRING, "DECIMAL(10,2)"]   # quote values containing YAML commas
+    returns: STRING
+    priority: 0
+  - name: split_tags
+    class: com.company.udf.SplitTags
+    jar: /opt/udf/company.jar
+    kind: TABLE
+    args: [STRING]
+```
+
+`UdfConfigLoader` validates jar existence, kinds and types (primitives plus
+DECIMAL(p,s); complex types rejected with a clear error). Ids default to
+`name/arity`. The composite `HiveUdfGateway` dispatches GENERIC calls to the
+projection splitter path and TABLE calls to the LATERAL VIEW path.
+
 ### Phase 1: contracts and registry
 
 - Add `localsql-udf-api`.

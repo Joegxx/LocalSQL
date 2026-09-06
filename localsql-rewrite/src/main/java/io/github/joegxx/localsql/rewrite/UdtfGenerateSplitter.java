@@ -62,6 +62,11 @@ public final class UdtfGenerateSplitter {
         if (registry == null || registry.definitions().stream().noneMatch(d -> d.kind() == UdfKind.TABLE)) {
             return null;
         }
+        // Cheap pre-check: never reject or reshape queries without a TABLE udf,
+        // so GENERIC/SCALAR udfs and plain builtins take the normal path.
+        List<FunctionCall> present = new ArrayList<>();
+        collectUdtfsInto(top, present);
+        if (present.isEmpty()) return null;
 
         Sort sort = null;
         Limit limit = null;

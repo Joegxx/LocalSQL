@@ -18,10 +18,19 @@ import java.util.Map;
 /**
  * CLI:
  *   runtime.jar [port]                                 in-memory demo (sample data)
- *   runtime.jar --load <file.duckdb> [port] [--schema <db>]
+ *   runtime.jar --load <file.duckdb> [port] [--schema <db>] [--udf-config <yaml>]
  *                                                      serve a persistent DuckDB file
  *   runtime.jar --import-ddl <dir> --out <file.duckdb> [--schema <db>]
  *               [--manifest <csv>] [--failures <txt>]  one-shot DDL import, then exit
+ *
+ * --udf-config points at a YAML registering Java Hive UDF jars:
+ *   udfs:
+ *     - name: mask_phone
+ *       class: com.company.udf.MaskPhone
+ *       jar: /opt/udf/company.jar
+ *       kind: GENERIC
+ *       args: [STRING]
+ *       returns: STRING
  */
 public final class Main {
 
@@ -34,9 +43,20 @@ public final class Main {
         String schema = flag(args, "--schema", "default");
         String manifest = flag(args, "--manifest");
         String failures = flag(args, "--failures", "import-failures.txt");
+        String udfConfigPath = flag(args, "--udf-config");
         int port = port(args, 10000);
 
         LOG.info("LocalSQL Embedded Spark SQL Runtime starting...");
+
+        io.github.joegxx.localsql.thrift.UdfSupport support = null;
+        if (udfConfigPath != null) {
+            var config = io.github.joegxx.localsql.udf.runtime.UdfConfigLoader.load(Paths.get(udfConfigPath));
+            support = new io.github.joegxx.localsql.thrift.UdfSupport(
+                    config.registry(), new io.github.joegxx.localsql.udf.runtime.HiveUdfGateway(),
+                    config.timeoutMillis());
+            LOG.info("Loaded {} UDF definitions from {} (timeout {}ms)",
+                    config.registry().definitions().size(), udfConfigPath, config.timeoutMillis());
+        }
 
         if (importDdl != null) {
             try (DuckDbExecutor executor = new DuckDbExecutor(out)) {
@@ -56,7 +76,7 @@ public final class Main {
                             "unqualified names will fail until USE switches the session",
                             schema, load, catalog.catalog().listDatabases());
                 }
-                ThriftServer server = new ThriftServer(catalog, executor, schema);
+                ThriftServer server = new ThriftServer(catalog, executor, schema, support);
                 server.start(port);
                 LOG.info("Loaded {} from {} (default schema: {})",
                         tableCount(executor), load, server.defaultDatabase());
@@ -72,7 +92,7 @@ public final class Main {
             registerUsers(catalog, executor);
             registerOrders(catalog, executor);
 
-            ThriftServer server = new ThriftServer(catalog, executor, schema);
+            ThriftServer server = new ThriftServer(catalog, executor, schema, support);
             server.start(port);
 
             String demo = "SELECT u.name, count(*) AS cnt FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.name ORDER BY cnt DESC";

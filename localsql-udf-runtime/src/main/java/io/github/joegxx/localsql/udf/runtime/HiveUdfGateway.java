@@ -13,14 +13,16 @@ public final class HiveUdfGateway implements UdfGateway {
 
     private final HiveGenericUdfGateway generic = new HiveGenericUdfGateway();
     private final HiveGenericUdtfGateway udtf = new HiveGenericUdtfGateway();
+    private final HiveSimpleUdfGateway simple = new HiveSimpleUdfGateway();
 
     @Override
     public UdfBatch execute(UdfDefinition definition, UdfBatch input, long timeoutMillis) throws Exception {
-        if (definition.kind() != io.github.joegxx.localsql.udf.api.UdfKind.GENERIC) {
-            throw new IllegalArgumentException("Function " + definition.id() + " has kind " + definition.kind()
-                    + "; only GENERIC functions may appear in scalar expressions");
-        }
-        return generic.execute(definition, input, timeoutMillis);
+        return switch (definition.kind()) {
+            case GENERIC -> generic.execute(definition, input, timeoutMillis);
+            case SCALAR -> simple.execute(definition, input, timeoutMillis);
+            case TABLE -> throw new IllegalArgumentException("Function " + definition.id()
+                    + " has kind TABLE; LATERAL VIEW functions cannot appear in scalar expressions");
+        };
     }
 
     @Override
@@ -36,5 +38,6 @@ public final class HiveUdfGateway implements UdfGateway {
     public void close() throws Exception {
         generic.close();
         udtf.close();
+        simple.close();
     }
 }

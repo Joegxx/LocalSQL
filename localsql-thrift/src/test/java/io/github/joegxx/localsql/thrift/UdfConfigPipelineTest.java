@@ -67,7 +67,13 @@ class UdfConfigPipelineTest {
                     jar: %s
                     kind: TABLE
                     args: [STRING, STRING]
-                """.formatted(testClasses, testClasses));
+                  - name: test_star
+                    class: io.github.joegxx.localsql.thrift.TestStarUdf
+                    jar: %s
+                    kind: SCALAR
+                    args: [STRING]
+                    returns: STRING
+                """.formatted(testClasses, testClasses, testClasses));
 
         UdfConfigLoader.UdfConfig config = UdfConfigLoader.load(yaml);
         support = new UdfSupport(config.registry(), new HiveUdfGateway(), config.timeoutMillis());
@@ -96,6 +102,15 @@ class UdfConfigPipelineTest {
         assertEquals("x", r.rows().get(0).get(1));
         assertEquals("y", r.rows().get(1).get(1));
         assertEquals("z", r.rows().get(2).get(1));
+    }
+
+    @Test
+    void yamlRegisteredSimpleUdfRunsInProjection() throws Exception {
+        var r = server.executeSparkSql(
+                "SELECT id, test_star(name) AS starred FROM people ORDER BY id");
+        assertEquals(2, r.rows().size());
+        assertEquals("***", r.rows().get(0).get(1));
+        assertEquals("***", r.rows().get(1).get(1));
     }
 
     @Test

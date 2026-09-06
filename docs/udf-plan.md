@@ -132,12 +132,21 @@ udfs:
     jar: /opt/udf/company.jar
     kind: TABLE
     args: [STRING]
+  - name: star
+    class: com.company.udf.StarUdf   # extends org.apache.hadoop.hive.ql.exec.UDF
+    jar: /opt/udf/company.jar
+    kind: SCALAR
+    args: [STRING]
+    returns: STRING
 ```
 
 `UdfConfigLoader` validates jar existence, kinds and types (primitives plus
 DECIMAL(p,s); complex types rejected with a clear error). Ids default to
-`name/arity`. The composite `HiveUdfGateway` dispatches GENERIC calls to the
-projection splitter path and TABLE calls to the LATERAL VIEW path.
+`name/arity`. The composite `HiveUdfGateway` dispatches by kind: GENERIC and
+SCALAR calls go through the projection split path (GenericUDF lifecycle vs
+reflected `evaluate` with java-boxed > hadoop-writable > Object overload
+matching; NULL args yield a NULL row like Hive), TABLE calls go through the
+LATERAL VIEW path.
 
 ### Phase 1: contracts and registry
 

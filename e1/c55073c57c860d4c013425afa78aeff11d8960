@@ -1,0 +1,37 @@
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_a8c60db162a3c6 1406-1419
+  s_b33fc4f71998f0::t_3413c03a7e995f 1488-1546
+  s_b33fc4f71998f0::t_6286205782d856 641-643
+  s_b33fc4f71998f0::t_f056179029e0e3 1368-1380,1382-1395,1397,1399-1405
+  s_b33fc4f71998f0::t_2b1a39e6e81730 1381
+  s_b33fc4f71998f0::t_b20e9b32473443 1396,1398
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/AggregateFunctionMapTest.java
+  s_b33fc4f71998f0::t_931b851595f680 74
+  s_b33fc4f71998f0::t_9554a4ef44eeeb 1-34,36-62,64-68,72-73,75-87
+  s_b33fc4f71998f0::t_5f8ca24a7dc804 70-71
+  s_b33fc4f71998f0::t_164039d3c2e636 35
+  s_b33fc4f71998f0::t_8d0eafbf154d5a 63
+  s_b33fc4f71998f0::t_12d0f9241c9dc5 69
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/SparkFunctionMappingTest.java
+  s_b33fc4f71998f0::t_1674ccb31bd0af 271-282
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/transform/IdentifierSubstituter.java
+  s_b33fc4f71998f0::t_2b1a39e6e81730 1-79
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_54b1093502a54d 185-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "e1c55073c57c860d4c013425afa78aeff11d8960",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

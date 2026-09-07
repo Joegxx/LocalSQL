@@ -195,8 +195,9 @@ udfSupport, generator)`.
   concat of strftime pieces plus a microsecond-derived lpad millis segment
 - struct/json: named_struct -> struct_pack, get_field -> struct_extract,
   from_json(json, '<spark schema literal>') -> from_json(json, '{...}' JSON
-  schema) with primitive/DECIMAL field type translation (nested arrays/
-  structs rejected), to_json direct
+  schema) with a recursive schema parser supporting nested STRUCT/ARRAY/
+  ARRAY-of-STRUCT/DECIMAL(p,s) and field COMMENT clauses (MAP still
+  rejected); to_json direct
 - percentile/percentile_approx/approx_percentile -> quantile_cont
 - zip_with, sort_array (comparator), map_zip_with remain unsupported
   (need lambda variable substitution into DuckDB list_zip struct fields)

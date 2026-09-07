@@ -295,7 +295,12 @@ class SparkFunctionMappingTest {
                     "get_field(named_struct('a', 1, 'b', 'x'), 'a') == 1",
                     "from_json('{\"a\": 1, \"b\": \"x\"}', 'STRUCT<a INT, b STRING>') == {a=1,b=x}",
                     "get_field(from_json('{\"a\": 1}', 'a INT'), 'a') == 1",
-                    "get_field(from_json('{\"a\": 3.14}', 'STRUCT<a DOUBLE>'), 'a') == 3.14"
+                    "get_field(from_json('{\"a\": 3.14}', 'STRUCT<a DOUBLE>'), 'a') == 3.14",
+                    // batch 7: nested structs in from_json
+                    "get_field(from_json('{\"a\": {\"b\": 1}}', 'STRUCT<a STRUCT<b INT>>'), 'a') == {b=1}",
+                    "get_field(get_field(from_json('{\"a\": {\"b\": 1}}', 'STRUCT<a STRUCT<b INT>>'), 'a'), 'b') == 1",
+                    "get_field(from_json('{\"a\": [1, 2]}', 'STRUCT<a ARRAY<INT>>'), 'a') == [1,2]",
+                    "get_field(from_json('{\"e\": 3.14}', 'STRUCT<e DECIMAL(10,2)>'), 'e') == 3.14"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

@@ -1576,33 +1576,119 @@ public final class DuckDbSqlGenerator {
 
     /**
      * Translates a Spark schema string literal into DuckDB's from_json JSON
-     * schema form: {'name': 'TYPE', ...}. Supports primitive fields and
-     * DECIMAL(p,s); nested arrays/structs are rejected explicitly for now.
+     * schema form: {'name': 'TYPE', ...}, where a TYPE is a primitive, a
+     * DECIMAL(p,s), a nested {'name': TYPE} object, or a [TYPE] array.
+     * Recursively supports STRUCT<> and ARRAY<> nesting.
      */
     static String sparkSchemaToDuckJson(String schema) {
-        String s = schema.trim();
-        if (s.regionMatches(true, 0, "STRUCT<", 0, 7)) {
-            s = s.substring(7, s.length() - 1).trim();
-        }
-        if (s.endsWith(">") && s.contains("STRUCT")) {
-            throw new UnsupportedOperationException("from_json nested structs are not supported yet: " + schema);
-        }
-        StringBuilder out = new StringBuilder("{");
-        int i = 0;
-        for (String field : s.split(",")) {
-            String f = field.trim();
-            if (f.isEmpty()) continue;
-            if (f.contains("<") || f.contains("(")) {
-                throw new UnsupportedOperationException(
-                        "from_json complex field types are not supported yet: " + f + " (in " + schema + ")");
+        SchemaParser p = new SchemaParser(schema);
+        return p.parseSchema();
+    }
+
+    /** Recursive Spark schema parser producing the DuckDB JSON schema string. */
+    private static final class SchemaParser {
+        private final String s;
+        private int i;
+
+        SchemaParser(String s) { this.s = s; }
+
+        String parseSchema() {
+            skipWs();
+            // STRUCT<...> or ARRAY<...> or DECIMAL(...): parse as a single type;
+            // otherwise treat the whole string as a bare field list
+            if (s.regionMatches(true, i, "STRUCT<", 0, 7)
+                    || s.regionMatches(true, i, "ARRAY<", 0, 6)) {
+                String t = parseType();
+                skipWs();
+                if (i != s.length()) {
+                    throw new UnsupportedOperationException("from_json trailing input after schema: " + s.substring(i));
+                }
+                return t;
             }
-            String[] parts = f.split("\\s+");
-            if (parts.length < 2) {
-                throw new IllegalArgumentException("from_json schema field must be 'name TYPE': " + f);
+            String t = parseStructBody();
+            skipWs();
+            if (i != s.length()) {
+                throw new UnsupportedOperationException("from_json trailing input after schema: " + s.substring(i));
             }
-            String name = parts[0];
-            String type = parts[1].toUpperCase(java.util.Locale.ROOT);
-            String duck = switch (type) {
+            return t;
+        }
+
+        private String parseType() {
+            skipWs();
+            String word = readWord();
+            switch (word.toUpperCase(java.util.Locale.ROOT)) {
+                case "STRUCT" -> {
+                    expect('<');
+                    return parseStructBody();
+                }
+                case "ARRAY" -> {
+                    expect('<');
+                    String element = parseType();
+                    skipWs();
+                    expect('>');
+                    return "[" + element + "]";
+                }
+                case "MAP" ->
+                        throw new UnsupportedOperationException("from_json MAP types are not supported yet: " + s);
+                case "DECIMAL", "NUMERIC" -> {
+                    skipWs();
+                    expect('(');
+                    String precision = readDigits();
+                    expect(',');
+                    String scale = readDigits();
+                    expect(')');
+                    return "\"DECIMAL(" + precision + "," + scale + ")\"";
+                }
+                default -> {
+                    String duck = primitive(word);
+                    if (duck == null) {
+                        throw new UnsupportedOperationException("from_json unsupported type '" + word + "' in " + s);
+                    }
+                    return '"' + duck + '"';
+                }
+            }
+        }
+
+        /** Parses the body of a struct: name TYPE, name TYPE, ... up to '>' or EOF. */
+        private String parseStructBody() {
+            StringBuilder out = new StringBuilder("{");
+            boolean first = true;
+            while (true) {
+                skipWs();
+                if (peek() == '>') { i++; break; }
+                if (i >= s.length()) break;
+                if (!first) {
+                    expect(',');
+                    skipWs();
+                }
+                String name = readWord();
+                if (name.isEmpty()) throw new IllegalArgumentException("missing field name in " + s);
+                skipWs();
+                String type = parseType();
+                skipComment();
+                if (!first) out.append(", ");
+                out.append('"').append(name.replace("\"", "\\\"")).append("\": ").append(type);
+                first = false;
+            }
+            out.append('}');
+            return out.toString();
+        }
+
+        /** Skips a trailing COMMENT '...' token after a field type. */
+        private void skipComment() {
+            skipWs();
+            if (s.regionMatches(true, i, "COMMENT", 0, 7)) {
+                i += 7;
+                skipWs();
+                if (i < s.length() && s.charAt(i) == '\'') {
+                    int close = s.indexOf('\'', i + 1);
+                    i = close < 0 ? s.length() : close + 1;
+                }
+            }
+        }
+
+        private String primitive(String word) {
+            return switch (word.toUpperCase(java.util.Locale.ROOT)) {
                 case "INT", "INTEGER" -> "INTEGER";
                 case "BIGINT", "LONG" -> "BIGINT";
                 case "SMALLINT" -> "SMALLINT";
@@ -1613,16 +1699,38 @@ public final class DuckDbSqlGenerator {
                 case "BOOLEAN", "BOOL" -> "BOOLEAN";
                 case "DATE" -> "DATE";
                 case "TIMESTAMP" -> "TIMESTAMP";
-                default -> throw new UnsupportedOperationException(
-                        "from_json unsupported field type '" + type + "' in " + schema);
+                default -> null;
             };
-            if (out.length() > 1) out.append(", ");
-            out.append('"').append(name.replace("\"", "\\\"")).append("\": \"").append(duck).append('"');
+        }
+
+        private void expect(char c) {
+            skipWs();
+            if (i >= s.length() || s.charAt(i) != c) {
+                throw new IllegalArgumentException("expected '" + c + "' at " + i + " in " + s);
+            }
             i++;
         }
-        if (i == 0) throw new IllegalArgumentException("from_json empty schema: " + schema);
-        out.append("}");
-        return out.toString();
+
+        private char peek() { return i < s.length() ? s.charAt(i) : 0; }
+
+        private void skipWs() {
+            while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        }
+
+        /** Reads an identifier/type keyword, stopping at non-word chars (< > ( , ). */
+        private String readWord() {
+            skipWs();
+            int start = i;
+            while (i < s.length() && (Character.isLetterOrDigit(s.charAt(i)) || s.charAt(i) == '_')) i++;
+            return s.substring(start, i);
+        }
+
+        private String readDigits() {
+            skipWs();
+            int start = i;
+            while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
+            return s.substring(start, i);
+        }
     }
 
     /** Spark next_day accepts full names and abbreviations; 0=Monday..6=Sunday. */

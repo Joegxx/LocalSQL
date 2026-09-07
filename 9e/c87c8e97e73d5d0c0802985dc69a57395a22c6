@@ -1,0 +1,22 @@
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_ba4664dc127469 1306-1345
+  s_b33fc4f71998f0::t_1b2285af96c268 619
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/SparkFunctionMappingTest.java
+  s_b33fc4f71998f0::t_97ad2290effc83 282-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "9ec87c8e97e73d5d0c0802985dc69a57395a22c6",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "deepseek-v4-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

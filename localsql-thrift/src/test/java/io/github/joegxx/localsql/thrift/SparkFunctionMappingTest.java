@@ -268,7 +268,18 @@ class SparkFunctionMappingTest {
                     "forall(array(2, 3), x -> x % 2 = 0) == false",
                     "aggregate(array(1, 2, 3), 0, (acc, x) -> acc + x) == 6",
                     "aggregate(array(1, 2, 3), 1, (acc, x) -> acc * x) == 6",
-                    "transform(array('a', 'b'), x -> concat(x, '!')) == [a!,b!]"
+                    "transform(array('a', 'b'), x -> concat(x, '!')) == [a!,b!]",
+                    // batch 4: map lambdas + date_format
+                    "transform_values(map('a', 1, 'b', 2), (k, v) -> v * 10) == {a=10,b=20}",
+                    "transform_keys(map('a', 1, 'b', 2), (k, v) -> upper(k)) == {A=1,B=2}",
+                    "map_filter(map('a', 1, 'b', 2), (k, v) -> v > 1) == {b=2}",
+                    "date_format(timestamp '2020-03-05 13:45:10', 'yyyy-MM-dd') == 2020-03-05",
+                    "date_format(timestamp '2020-03-05 13:45:10', 'yyyy-MM-dd HH:mm:ss') == 2020-03-05 13:45:10",
+                    "date_format(timestamp '2020-03-05 13:45:10', 'yyyy/MM/dd') == 2020/03/05",
+                    "date_format(timestamp '2020-03-05 13:45:10', 'yyyyMMdd') == 20200305",
+                    "date_format(timestamp '2020-03-05 13:45:10', 'HH:mm:ss') == 13:45:10",
+                    "date_format(date '2020-03-05', 'MMM') == Mar",
+                    "date_format(date '2020-03-05', 'EEE') == Thu"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

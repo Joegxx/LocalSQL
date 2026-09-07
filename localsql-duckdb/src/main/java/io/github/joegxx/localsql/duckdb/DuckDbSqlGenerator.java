@@ -638,6 +638,9 @@ public final class DuckDbSqlGenerator {
             Map.entry("var_samp", "var_samp"),
             Map.entry("approx_count_distinct", "approx_count_distinct"),
             Map.entry("collect_list", "list"),
+            Map.entry("percentile", "quantile_cont"),
+            Map.entry("percentile_approx", "quantile_cont"),
+            Map.entry("approx_percentile", "quantile_cont"),
             Map.entry("bool_and", "bool_and"),
             Map.entry("bool_or", "bool_or"),
             Map.entry("every", "bool_and"),
@@ -1362,6 +1365,58 @@ public final class DuckDbSqlGenerator {
                 sb.append(")");
                 return true;
             }
+            case "transform_values", "transform_keys", "map_filter" -> {
+                if (args.size() != 2 || !(args.get(1) instanceof Lambda lam)
+                        || lam.variables().size() != 2) {
+                    throw new UnsupportedOperationException(name
+                            + " requires a two-variable lambda, got: " + (args.size() >= 2 ? args.get(1) : ""));
+                }
+                // lower the two-variable Spark lambda onto a single-variable
+                // DuckDB lambda over map_entries structs: k -> "e"."key", v -> "e"."value"
+                String k = lam.variables().get(0);
+                String v = lam.variables().get(1);
+                java.util.Map<String, Expression> subst = java.util.Map.of(
+                        k, new AttributeReference("key", List.of("e")),
+                        v, new AttributeReference("value", List.of("e")));
+                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
+                        .rewrite(lam.body(), subst);
+                sb.append("map_from_entries(");
+                if (name.equals("map_filter")) {
+                    sb.append("list_filter(map_entries(");
+                    emitExpr(args.get(0), sb);
+                    sb.append("), e -> ");
+                    emitExpr(body, sb);
+                    sb.append(")");
+                } else {
+                    sb.append("list_transform(map_entries(");
+                    emitExpr(args.get(0), sb);
+                    sb.append("), e -> {'key': ");
+                    if (name.equals("transform_keys")) {
+                        emitExpr(body, sb);
+                        sb.append(", 'value': e.value");
+                    } else {
+                        sb.append("e.key, 'value': ");
+                        emitExpr(body, sb);
+                    }
+                    sb.append("})");
+                }
+                sb.append(")");
+                return true;
+            }
+            case "date_format" -> {
+                if (args.size() != 2) return false;
+                Object fmt = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
+                if (fmt == null) {
+                    throw new UnsupportedOperationException(
+                            "date_format requires a literal format string (Java -> strftime translation)");
+                }
+                String translated = javaFormatToStrftime(String.valueOf(fmt));
+                sb.append("strftime(");
+                emitExpr(args.get(0), sb);
+                sb.append(", '").append(translated.replace("'", "''")).append("')");
+                return true;
+            }
             default -> {
                 return false;
             }
@@ -1428,6 +1483,65 @@ public final class DuckDbSqlGenerator {
             case "sun", "sunday" -> 6;
             default -> -1;
         };
+    }
+
+    /**
+     * Translates a Java SimpleDateFormat pattern (Spark's date_format) into a
+     * DuckDB strftime pattern for the common specifiers. Unrecognized tokens
+     * fail loudly rather than emitting a silently wrong pattern. Literal
+     * single-quoted blocks pass through; %% is an escaped percent.
+     */
+    static String javaFormatToStrftime(String fmt) {
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < fmt.length()) {
+            char c = fmt.charAt(i);
+            if (c == '\'') {
+                // quoted literal block
+                int close = fmt.indexOf('\'', i + 1);
+                if (close < 0) throw new IllegalArgumentException("unterminated quote in date_format: " + fmt);
+                for (char q : fmt.substring(i + 1, close).toCharArray()) {
+                    if (q == '%') out.append("%%");
+                    else out.append(q);
+                }
+                i = close + 1;
+                continue;
+            }
+            if (c == '%') {
+                out.append("%%");
+                i++;
+                continue;
+            }
+            if (c == 'y' || c == 'M' || c == 'd' || c == 'H' || c == 'm' || c == 's'
+                    || c == 'E' || c == 'a' || c == 'D' || c == 'w' || c == 'u') {
+                int run = 0;
+                while (i + run < fmt.length() && fmt.charAt(i + run) == c) run++;
+                String spec = switch (c) {
+                    case 'y' -> run == 2 ? "%y" : "%Y";
+                    case 'M' -> run >= 3 ? "%b" : "%m";
+                    case 'd' -> run == 2 ? "%d" : "%e";
+                    case 'H' -> run == 2 ? "%H" : "%H";
+                    case 'm' -> run == 2 ? "%M" : "%M";
+                    case 's' -> run == 2 ? "%S" : "%S";
+                    case 'E' -> run >= 4 ? "%A" : "%a";
+                    case 'a' -> "%p";
+                    case 'D' -> "%j";
+                    case 'w' -> run == 1 ? "%u" : "%W";
+                    case 'u' -> "%u";
+                    default -> "%Y";
+                };
+                out.append(spec);
+                i += run;
+                continue;
+            }
+            if (c == 'S' || c == 'z' || c == 'Z' || c == 'G' || c == 'k' || c == 'K' || c == 'F' || c == 'W') {
+                throw new IllegalArgumentException("date_format specifier not supported: '" + c
+                        + "' in " + fmt + " (supported: y/M/d/H/m/s/E/a/D/w/u + quoted literals)");
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
     }
 
     private void emitWindowSpec(WindowSpec w, StringBuilder sb) {

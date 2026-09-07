@@ -182,9 +182,19 @@ udfSupport, generator)`.
 - aggregate(arr, zero, merge) -> list_reduce(list_concat(list_value(zero),
   arr), (acc, x) -> merge). A finish lambda is rejected explicitly (DuckDB
   cannot invoke lambdas)
-- zip_with, map_filter, transform_keys/values, map_zip_with, sort_array
-  (comparator) remain unsupported (need lambda variable substitution into
-  struct fields / DuckDB map lambdas)
+- map lambdas: transform_values/transform_keys/map_filter lower the Spark
+  two-variable lambda onto DuckDB single-variable lambdas over
+  map_entries structs via an IR-level Identifier substituter (k/v become
+  "e"."key"/"e"."value"): transform_values/keys ->
+  map_from_entries(list_transform(map_entries(m), e -> {'key':..., 'value':...})),
+  map_filter -> map_from_entries(list_filter(map_entries(m), e -> ...))
+- date_format: Java SimpleDateFormat -> strftime translation for the common
+  specifiers (yyyy/yy, MM/M/MMM, dd/d, HH, mm, ss, EEE/EEEE, a, D, w, u)
+  with quoted-literal passthrough and %% escaping; unsupported tokens fail
+  loudly; requires a literal format string
+- percentile/percentile_approx/approx_percentile -> quantile_cont
+- zip_with, sort_array (comparator), map_zip_with remain unsupported
+  (need lambda variable substitution into DuckDB list_zip struct fields)
 
 ### Phase 1: contracts and registry
 

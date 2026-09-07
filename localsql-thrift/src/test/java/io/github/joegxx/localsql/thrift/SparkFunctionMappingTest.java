@@ -287,7 +287,15 @@ class SparkFunctionMappingTest {
                     "sequence(1, 5) == [1,2,3,4,5]",
                     "sequence(1, 5, 2) == [1,3,5]",
                     "sequence(5, 1) == [5,4,3,2,1]",
-                    "json_object_keys('{\"a\":1,\"b\":2}') == [a,b]"
+                    "json_object_keys('{\"a\":1,\"b\":2}') == [a,b]",
+                    // batch 6: structs / json / date_format millis
+                    "date_format(timestamp '2020-03-05 13:45:10.123456', 'yyyy-MM-dd HH:mm:ss.SSS') == 2020-03-05 13:45:10.123",
+                    "named_struct('a', 1, 'b', 'x') == {a=1,b=x}",
+                    "to_json(named_struct('a', 1, 'b', 'x')) == {\"a\":1,\"b\":\"x\"}",
+                    "get_field(named_struct('a', 1, 'b', 'x'), 'a') == 1",
+                    "from_json('{\"a\": 1, \"b\": \"x\"}', 'STRUCT<a INT, b STRING>') == {a=1,b=x}",
+                    "get_field(from_json('{\"a\": 1}', 'a INT'), 'a') == 1",
+                    "get_field(from_json('{\"a\": 3.14}', 'STRUCT<a DOUBLE>'), 'a') == 3.14"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

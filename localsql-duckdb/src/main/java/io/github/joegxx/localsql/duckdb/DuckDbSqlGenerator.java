@@ -486,6 +486,7 @@ public final class DuckDbSqlGenerator {
             Map.entry("concat", "concat"),
             Map.entry("concat_ws", "concat_ws"),
             Map.entry("coalesce", "coalesce"),
+            Map.entry("get_field", "struct_extract"),
             Map.entry("cast", "cast"),
             Map.entry("count", "count"),
             Map.entry("sum", "sum"),
@@ -1452,10 +1453,65 @@ public final class DuckDbSqlGenerator {
                     throw new UnsupportedOperationException(
                             "date_format requires a literal format string (Java -> strftime translation)");
                 }
-                String translated = javaFormatToStrftime(String.valueOf(fmt));
+                String pattern = String.valueOf(fmt);
+                int sss = pattern.indexOf("SSS");
+                if (sss >= 0) {
+                    if (pattern.indexOf("SSS", sss + 3) >= 0) {
+                        throw new UnsupportedOperationException("date_format: multiple SSS segments are not supported: " + pattern);
+                    }
+                    // SSS (millis) cannot live inside strftime (only %f micros); emit a concat
+                    String before = javaFormatToStrftime(pattern.substring(0, sss));
+                    String after = javaFormatToStrftime(pattern.substring(sss + 3));
+                    sb.append("concat(");
+                    boolean first = true;
+                    if (!before.isEmpty()) {
+                        emitStrftime(args.get(0), before, sb);
+                        first = false;
+                    }
+                    if (!first) sb.append(", ");
+                    sb.append("lpad(CAST((CAST(EXTRACT(microsecond FROM CAST(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" AS TIMESTAMP)) AS BIGINT) % 1000000) / 1000 AS VARCHAR), 3, '0')");
+                    if (!after.isEmpty()) {
+                        sb.append(", ");
+                        emitStrftime(args.get(0), after, sb);
+                    }
+                    sb.append(")");
+                    return true;
+                }
                 sb.append("strftime(");
                 emitExpr(args.get(0), sb);
-                sb.append(", '").append(translated.replace("'", "''")).append("')");
+                sb.append(", '").append(javaFormatToStrftime(pattern).replace("'", "''")).append("')");
+                return true;
+            }
+            case "named_struct" -> {
+                if (args.isEmpty() || args.size() % 2 != 0) return false;
+                sb.append("struct_pack(");
+                for (int i = 0; i < args.size(); i += 2) {
+                    if (i > 0) sb.append(", ");
+                    Object fieldName = args.get(i) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
+                    if (fieldName == null) {
+                        throw new UnsupportedOperationException(
+                                "named_struct field names must be string literals; got: " + args.get(i));
+                    }
+                    sb.append(quote(String.valueOf(fieldName))).append(" := ");
+                    emitExpr(args.get(i + 1), sb);
+                }
+                sb.append(")");
+                return true;
+            }
+            case "from_json" -> {
+                if (args.size() < 2 || args.size() > 3) return false;
+                Object schema = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
+                if (schema == null) {
+                    throw new UnsupportedOperationException(
+                            "from_json requires a literal schema string (e.g. 'STRUCT<a INT, b STRING>' or 'a INT, b STRING')");
+                }
+                sb.append("from_json(");
+                emitExpr(args.get(0), sb);
+                sb.append(", '").append(sparkSchemaToDuckJson(String.valueOf(schema)).replace("'", "''")).append("')");
                 return true;
             }
             default -> {
@@ -1510,6 +1566,63 @@ public final class DuckDbSqlGenerator {
         }
         sb.append(")");
         if (f.windowSpec() != null) emitWindowSpec(f.windowSpec(), sb);
+    }
+
+    private void emitStrftime(Expression date, String strftimePattern, StringBuilder sb) {
+        sb.append("strftime(");
+        emitExpr(date, sb);
+        sb.append(", '").append(strftimePattern.replace("'", "''")).append("')");
+    }
+
+    /**
+     * Translates a Spark schema string literal into DuckDB's from_json JSON
+     * schema form: {'name': 'TYPE', ...}. Supports primitive fields and
+     * DECIMAL(p,s); nested arrays/structs are rejected explicitly for now.
+     */
+    static String sparkSchemaToDuckJson(String schema) {
+        String s = schema.trim();
+        if (s.regionMatches(true, 0, "STRUCT<", 0, 7)) {
+            s = s.substring(7, s.length() - 1).trim();
+        }
+        if (s.endsWith(">") && s.contains("STRUCT")) {
+            throw new UnsupportedOperationException("from_json nested structs are not supported yet: " + schema);
+        }
+        StringBuilder out = new StringBuilder("{");
+        int i = 0;
+        for (String field : s.split(",")) {
+            String f = field.trim();
+            if (f.isEmpty()) continue;
+            if (f.contains("<") || f.contains("(")) {
+                throw new UnsupportedOperationException(
+                        "from_json complex field types are not supported yet: " + f + " (in " + schema + ")");
+            }
+            String[] parts = f.split("\\s+");
+            if (parts.length < 2) {
+                throw new IllegalArgumentException("from_json schema field must be 'name TYPE': " + f);
+            }
+            String name = parts[0];
+            String type = parts[1].toUpperCase(java.util.Locale.ROOT);
+            String duck = switch (type) {
+                case "INT", "INTEGER" -> "INTEGER";
+                case "BIGINT", "LONG" -> "BIGINT";
+                case "SMALLINT" -> "SMALLINT";
+                case "TINYINT", "BYTE" -> "TINYINT";
+                case "STRING", "VARCHAR" -> "VARCHAR";
+                case "DOUBLE" -> "DOUBLE";
+                case "FLOAT", "REAL" -> "FLOAT";
+                case "BOOLEAN", "BOOL" -> "BOOLEAN";
+                case "DATE" -> "DATE";
+                case "TIMESTAMP" -> "TIMESTAMP";
+                default -> throw new UnsupportedOperationException(
+                        "from_json unsupported field type '" + type + "' in " + schema);
+            };
+            if (out.length() > 1) out.append(", ");
+            out.append('"').append(name.replace("\"", "\\\"")).append("\": \"").append(duck).append('"');
+            i++;
+        }
+        if (i == 0) throw new IllegalArgumentException("from_json empty schema: " + schema);
+        out.append("}");
+        return out.toString();
     }
 
     /** Spark next_day accepts full names and abbreviations; 0=Monday..6=Sunday. */

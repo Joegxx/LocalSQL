@@ -191,7 +191,12 @@ udfSupport, generator)`.
 - date_format: Java SimpleDateFormat -> strftime translation for the common
   specifiers (yyyy/yy, MM/M/MMM, dd/d, HH, mm, ss, EEE/EEEE, a, D, w, u)
   with quoted-literal passthrough and %% escaping; unsupported tokens fail
-  loudly; requires a literal format string
+  loudly; requires a literal format string. SSS (millis) is emitted as a
+  concat of strftime pieces plus a microsecond-derived lpad millis segment
+- struct/json: named_struct -> struct_pack, get_field -> struct_extract,
+  from_json(json, '<spark schema literal>') -> from_json(json, '{...}' JSON
+  schema) with primitive/DECIMAL field type translation (nested arrays/
+  structs rejected), to_json direct
 - percentile/percentile_approx/approx_percentile -> quantile_cont
 - zip_with, sort_array (comparator), map_zip_with remain unsupported
   (need lambda variable substitution into DuckDB list_zip struct fields)

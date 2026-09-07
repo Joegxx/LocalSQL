@@ -616,6 +616,7 @@ public final class DuckDbSqlGenerator {
             Map.entry("array_max", "list_max"),
             Map.entry("array_min", "list_min"),
             Map.entry("element_at", "list_element"),
+            Map.entry("json_object_keys", "json_keys"),
             Map.entry("flatten", "flatten"),
             Map.entry("cardinality", "len"),
             Map.entry("map_keys", "map_keys"),
@@ -1300,6 +1301,46 @@ public final class DuckDbSqlGenerator {
                 sb.append(") - 1)) % 7 + 7) % 7 = 0 THEN 7 ELSE (((").append(target).append(" - (weekday(");
                 emitExpr(args.get(0), sb);
                 sb.append(") - 1)) % 7 + 7) % 7) END AS INTEGER))");
+                return true;
+            }
+            case "sort_array" -> {
+                // sort_array(arr[, asc]) -> list_sort(arr, 'ASC'|'DESC'); the
+                // second arg must be a boolean literal (comparator lambdas unsupported)
+                if (args.size() < 1 || args.size() > 2) return false;
+                boolean desc = false;
+                if (args.size() == 2) {
+                    if (args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.BOOLEAN) {
+                        desc = !((Boolean) l.value());
+                    } else {
+                        throw new UnsupportedOperationException(
+                                "sort_array's second argument must be a boolean literal; comparator lambdas are not supported");
+                    }
+                }
+                sb.append("list_sort(");
+                emitExpr(args.get(0), sb);
+                sb.append(", '").append(desc ? "DESC" : "ASC").append("')");
+                return true;
+            }
+            case "sequence" -> {
+                // sequence(start, stop[, step]) -> range(); DuckDB range is
+                // upper-exclusive and does not auto-reverse, so handle both
+                if (args.size() < 2 || args.size() > 3) return false;
+                sb.append("CASE WHEN ");
+                emitExpr(args.get(1), sb);
+                sb.append(" >= ");
+                emitExpr(args.get(0), sb);
+                sb.append(" THEN range(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(" + 1");
+                if (args.size() == 3) { sb.append(", "); emitExpr(args.get(2), sb); }
+                sb.append(") ELSE range(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitExpr(args.get(1), sb);
+                sb.append(" - 1, -1) END");
                 return true;
             }
             case "date_trunc" -> {

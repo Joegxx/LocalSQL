@@ -279,7 +279,15 @@ class SparkFunctionMappingTest {
                     "date_format(timestamp '2020-03-05 13:45:10', 'yyyyMMdd') == 20200305",
                     "date_format(timestamp '2020-03-05 13:45:10', 'HH:mm:ss') == 13:45:10",
                     "date_format(date '2020-03-05', 'MMM') == Mar",
-                    "date_format(date '2020-03-05', 'EEE') == Thu"
+                    "date_format(date '2020-03-05', 'EEE') == Thu",
+                    // batch 5: arrays / misc
+                    "sort_array(array(3, 1, 2)) == [1,2,3]",
+                    "sort_array(array(3, 1, 2), false) == [3,2,1]",
+                    "sort_array(array(3, 1, 2), true) == [1,2,3]",
+                    "sequence(1, 5) == [1,2,3,4,5]",
+                    "sequence(1, 5, 2) == [1,3,5]",
+                    "sequence(5, 1) == [5,4,3,2,1]",
+                    "json_object_keys('{\"a\":1,\"b\":2}') == [a,b]"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

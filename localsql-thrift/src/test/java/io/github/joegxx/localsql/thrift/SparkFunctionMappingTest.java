@@ -60,6 +60,11 @@ class SparkFunctionMappingTest {
             return "[" + java.util.Arrays.stream(body.split(","))
                     .map(String::trim).sorted().reduce((a, b) -> a + "," + b).orElse("") + "]";
         }
+        if (s.startsWith("{") && s.endsWith("}")) {
+            String body = s.substring(1, s.length() - 1);
+            return "{" + java.util.Arrays.stream(body.split(","))
+                    .map(String::trim).sorted().reduce((a, b) -> a + "," + b).orElse("") + "}";
+        }
         return s.replaceAll("\\s", "");
     }
 
@@ -300,7 +305,19 @@ class SparkFunctionMappingTest {
                     "get_field(from_json('{\"a\": {\"b\": 1}}', 'STRUCT<a STRUCT<b INT>>'), 'a') == {b=1}",
                     "get_field(get_field(from_json('{\"a\": {\"b\": 1}}', 'STRUCT<a STRUCT<b INT>>'), 'a'), 'b') == 1",
                     "get_field(from_json('{\"a\": [1, 2]}', 'STRUCT<a ARRAY<INT>>'), 'a') == [1,2]",
-                    "get_field(from_json('{\"e\": 3.14}', 'STRUCT<e DECIMAL(10,2)>'), 'e') == 3.14"
+                    "get_field(from_json('{\"e\": 3.14}', 'STRUCT<e DECIMAL(10,2)>'), 'e') == 3.14",
+                    // batch 8: bround / conv / map_zip_with / from_json NULL behavior
+                    "bround(2.5, 0) == 2.0",
+                    "bround(3.5, 0) == 4.0",
+                    "bround(-2.5, 0) == -2.0",
+                    "bround(2.567, 2) == 2.57",
+                    "conv(15, 10, 16) == F",
+                    "conv('255', 10, 16) == FF",
+                    "conv(255, 10, 2) == 11111111",
+                    "map_zip_with(map('a', 1, 'b', 2), map('b', 3, 'c', 4), (k, v1, v2) -> coalesce(v1, 0) + coalesce(v2, 0)) == {a=1,b=5,c=4}",
+                    "from_json('not json', 'STRUCT<a INT>') == null",
+                    "from_json(null, 'STRUCT<a INT>') == null",
+                    "to_json(null) == null"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

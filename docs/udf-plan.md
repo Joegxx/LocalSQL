@@ -197,7 +197,12 @@ udfSupport, generator)`.
   from_json(json, '<spark schema literal>') -> from_json(json, '{...}' JSON
   schema) with a recursive schema parser supporting nested STRUCT/ARRAY/
   ARRAY-of-STRUCT/DECIMAL(p,s) and field COMMENT clauses (MAP still
-  rejected); to_json direct
+  rejected); malformed JSON returns NULL like Spark (guarded by
+  json_valid); to_json direct
+- misc: bround (half-to-even emulated via CASE), conv (from_base 10 only,
+  to_base in [2,36]; negative and other bases rejected - DuckDB has no
+  from_base), map_zip_with (union keys + map_extract lookups, values null
+  when a key is missing), from_json NULL/malformed semantics, to_json(NULL)
 - percentile/percentile_approx/approx_percentile -> quantile_cont
 - zip_with, sort_array (comparator), map_zip_with remain unsupported
   (need lambda variable substitution into DuckDB list_zip struct fields)

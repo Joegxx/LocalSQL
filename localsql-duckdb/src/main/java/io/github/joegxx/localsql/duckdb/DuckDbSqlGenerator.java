@@ -1509,9 +1509,87 @@ public final class DuckDbSqlGenerator {
                     throw new UnsupportedOperationException(
                             "from_json requires a literal schema string (e.g. 'STRUCT<a INT, b STRING>' or 'a INT, b STRING')");
                 }
-                sb.append("from_json(");
+                // Spark returns NULL on malformed JSON; DuckDB errors, so guard with json_valid
+                sb.append("CASE WHEN json_valid(");
                 emitExpr(args.get(0), sb);
-                sb.append(", '").append(sparkSchemaToDuckJson(String.valueOf(schema)).replace("'", "''")).append("')");
+                sb.append(") THEN from_json(");
+                emitExpr(args.get(0), sb);
+                sb.append(", '").append(sparkSchemaToDuckJson(String.valueOf(schema)).replace("'", "''")).append("') ELSE NULL END");
+                return true;
+            }
+            case "map_zip_with" -> {
+                if (args.size() != 3 || !(args.get(2) instanceof Lambda lam)
+                        || lam.variables().size() != 3) {
+                    throw new UnsupportedOperationException(
+                            "map_zip_with requires (m1, m2, (k, v1, v2) -> expr)");
+                }
+                String k = lam.variables().get(0);
+                String v1 = lam.variables().get(1);
+                String v2 = lam.variables().get(2);
+                // union keys, look up each value, apply the lambda over them
+                java.util.Map<String, Expression> subst = java.util.Map.of(
+                        v1, mapValueLookup(args.get(0), k),
+                        v2, mapValueLookup(args.get(1), k));
+                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
+                        .rewrite(lam.body(), subst);
+                sb.append("map_from_entries(list_transform(list_distinct(list_concat(map_keys(");
+                emitExpr(args.get(0), sb);
+                sb.append("), map_keys(");
+                emitExpr(args.get(1), sb);
+                sb.append("))), ");
+                sb.append(quote(k)).append(" -> {'key': ").append(quote(k)).append(", 'value': ");
+                emitExpr(body, sb);
+                sb.append("}))");
+                return true;
+            }
+            case "bround" -> {
+                if (args.size() < 1 || args.size() > 2) return false;
+                // Spark bround = half-to-even; DuckDB has no roundeven, so emulate
+                String x = "TMP_X";
+                sb.append("CASE WHEN ABS((");
+                emitExpr(args.get(0), sb);
+                sb.append(" * pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(")) - FLOOR((");
+                emitExpr(args.get(0), sb);
+                sb.append(" * pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(")) + 0.5)) = 0.5 THEN (CASE WHEN MOD(FLOOR(");
+                emitExpr(args.get(0), sb);
+                sb.append(" * pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(")), 2) = 0 THEN FLOOR(");
+                emitExpr(args.get(0), sb);
+                sb.append(" * pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(")) ELSE CEIL(");
+                emitExpr(args.get(0), sb);
+                sb.append(" * pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(")) END) / pow(10.0, ");
+                emitScale(args, sb);
+                sb.append(") ELSE round(");
+                emitExpr(args.get(0), sb);
+                sb.append(", ");
+                emitScale(args, sb);
+                sb.append(") END");
+                return true;
+            }
+            case "conv" -> {
+                if (args.size() != 3) return false;
+                // DuckDB has to_base but no from_base: only from_base 10 works
+                Object from = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
+                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
+                Object to = args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l2
+                        && l2.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l2.value() : null;
+                if (from == null || ((Number) from).intValue() != 10 || to == null
+                        || ((Number) to).intValue() < 2 || ((Number) to).intValue() > 36) {
+                    throw new UnsupportedOperationException(
+                            "conv supports literal from_base=10 to_base in [2,36] only (DuckDB has to_base but no from_base)");
+                }
+                sb.append("to_base(CAST(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS BIGINT), ").append(((Number) to).intValue()).append(")");
                 return true;
             }
             default -> {
@@ -1731,6 +1809,19 @@ public final class DuckDbSqlGenerator {
             while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
             return s.substring(start, i);
         }
+    }
+
+    /** Builds list_extract(map_extract(map, key), 1) as an IR expression (map value lookup). */
+    private Expression mapValueLookup(Expression mapExpr, String keyName) {
+        return new FunctionCall("list_extract",
+                List.of(new FunctionCall("map_extract", List.of(mapExpr, new Identifier(keyName, false))),
+                        new Literal(1L, io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER)));
+    }
+
+    /** Emits the scale argument of bround/round(x, d): the arg or literal 0. */
+    private void emitScale(List<Expression> args, StringBuilder sb) {
+        if (args.size() == 2) emitExpr(args.get(1), sb);
+        else sb.append("0");
     }
 
     /** Spark next_day accepts full names and abbreviations; 0=Monday..6=Sunday. */

@@ -1,0 +1,35 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_4c08aa7aab159d 25,27
+  s_b33fc4f71998f0::t_8e606af76961c0 406-407,410
+  s_b33fc4f71998f0::t_49065ec1561f00 787-796
+  s_b33fc4f71998f0::t_034807bf637749 419
+  s_b33fc4f71998f0::t_7bc31dce487c3e 798-802,815
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/CreateTable.java
+  s_b33fc4f71998f0::t_e66ddfb0fc41e9 13-17,25,29-34,40,48
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/AdminStatementHandler.java
+  s_b33fc4f71998f0::t_debfbdc9785501 285-302
+  s_b33fc4f71998f0::t_b960188c790ff1 229-244
+  s_b33fc4f71998f0::t_2637ea14e1cf28 342-353
+localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java
+  s_b33fc4f71998f0::t_6f41dc258e858e 138
+  s_b33fc4f71998f0::t_63043662650d52 149,155,157,161
+  s_b33fc4f71998f0::t_794ea0b860259b 170
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/AdminShowCreateTest.java
+  s_b33fc4f71998f0::t_38064baf6cc23e 87-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "f8fcf73add2b0924abe6bd7fe25dbb760d535e49",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ark-code-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+docs/usage.md
+  s_b33fc4f71998f0::t_869411bbe5ca94 207,214
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/AdminShowCreateTest.java
+  s_b33fc4f71998f0::t_e099bf14f485c5 132-134
+  s_b33fc4f71998f0::t_e461f4d1d68eb9 124
+  s_b33fc4f71998f0::t_3cd96ab23fc299 116-123,125-126,130-131,135-142
+  s_b33fc4f71998f0::t_3fd9435780a0b1 127-129
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_b33fc4f71998f0::t_8b32777229debe 587-590,603-640,651-652,654-655,659,661,663-676,678,681-690,695-697
+  s_b33fc4f71998f0::t_7c067feb8cf5b8 679-680,691-694
+  s_b33fc4f71998f0::t_4ddd33908df493 641-650,653,656-658,660,662
+  s_b33fc4f71998f0::t_8b74a4df07cda0 677
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "8ac958b81ee490bcc32e8563dbfe2aebbed1ff1f",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ark-code-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

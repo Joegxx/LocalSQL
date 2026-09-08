@@ -22,7 +22,9 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * End-to-end pipeline for one Spark SQL statement: parse -> IR -> analyze ->
@@ -401,9 +403,11 @@ final class SqlPipeline {
             }
             CreateTable resolved = new CreateTable(ct.tableName(), false, cols, null, null);
             createSql = generator.generateCreateTable(resolved);
+            Map<String, String> srcPartitionProps = src.properties().containsKey(PARTITION_COLUMNS_KEY)
+                    ? Map.of(PARTITION_COLUMNS_KEY, src.properties().get(PARTITION_COLUMNS_KEY)) : null;
             inTransaction(() -> {
                 executor.run(createSql);
-                registerPhysical(db, table, "TABLE", createSql);
+                registerPhysical(db, table, "TABLE", createSql, srcPartitionProps);
                 patchColumnComments(db, table, commentMap(cols));
             });
             return empty();
@@ -412,7 +416,7 @@ final class SqlPipeline {
             createSql = generator.generateCreateTable(ct);
             inTransaction(() -> {
                 executor.run(createSql);
-                registerPhysical(db, table, "TABLE", createSql);
+                registerPhysical(db, table, "TABLE", createSql, partitionProps(ct));
                 patchColumnComments(db, table, commentMap(ct.columns()));
             });
             return empty();
@@ -780,7 +784,22 @@ final class SqlPipeline {
         }
     }
 
+    /** Catalog property recording which columns are Hive-style partition keys. */
+    static final String PARTITION_COLUMNS_KEY = "partition.columns";
+
+    private static Map<String, String> partitionProps(CreateTable ct) {
+        if (ct.partitionColumnNames().isEmpty()) return null;
+        Map<String, String> props = new LinkedHashMap<>();
+        props.put(PARTITION_COLUMNS_KEY, String.join(",", ct.partitionColumnNames()));
+        return props;
+    }
+
     private void registerPhysical(String db, String table, String type, String createSql) throws SQLException {
+        registerPhysical(db, table, type, createSql, null);
+    }
+
+    private void registerPhysical(String db, String table, String type, String createSql,
+                                  Map<String, String> extraProperties) throws SQLException {
         try {
             DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + DuckDbSqlGenerator.quote(table));
             List<CatalogService.ColumnDef> cols = new ArrayList<>();
@@ -793,7 +812,7 @@ final class SqlPipeline {
                         nullable, null));
             }
             Catalog.Table t = catalogService.registerTable(
-                    db, table, type, cols, null, null, null, null, null);
+                    db, table, type, cols, null, null, null, extraProperties, null);
             if (catalogService.store() != null) {
                 catalogService.store().saveRuntimeInfo(t.tableId(), table, createSql);
             }

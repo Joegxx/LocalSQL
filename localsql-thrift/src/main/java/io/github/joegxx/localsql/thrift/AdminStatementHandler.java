@@ -226,6 +226,22 @@ final class AdminStatementHandler {
             }
         }
         sb.append(")");
+        List<String> partitionColumns = partitionColumnNames(t);
+        if (!partitionColumns.isEmpty()) {
+            sb.append(" PARTITIONED BY (");
+            boolean first = true;
+            for (String pc : partitionColumns) {
+                Catalog.Column col = findColumn(t, pc);
+                if (col == null) continue;
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(quoteSql(col.name())).append(' ').append(createType(col.type()));
+                if (col.comment() != null) {
+                    sb.append(" COMMENT '").append(col.comment().replace("'", "''")).append("'");
+                }
+            }
+            sb.append(")");
+        }
         if (t.comment() != null) {
             sb.append(" COMMENT '").append(t.comment().replace("'", "''")).append("'");
         }
@@ -266,6 +282,24 @@ final class AdminStatementHandler {
         return "`" + ident.replace("`", "``") + "`";
     }
 
+    /** Partition key names recorded by CREATE TABLE ... PARTITIONED BY. */
+    private static List<String> partitionColumnNames(Catalog.Table t) {
+        String raw = t.properties().get(SqlPipeline.PARTITION_COLUMNS_KEY);
+        if (raw == null || raw.isBlank()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String p : raw.split(",")) {
+            if (!p.isBlank()) out.add(p.trim());
+        }
+        return out;
+    }
+
+    private static Catalog.Column findColumn(Catalog.Table t, String name) {
+        for (Catalog.Column c : t.columns()) {
+            if (c.name().equalsIgnoreCase(name)) return c;
+        }
+        return null;
+    }
+
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {
         return describe(catalog, qualified, currentDatabase, false);
     }
@@ -304,6 +338,18 @@ final class AdminStatementHandler {
                 if (tableInfo.comment() != null) rows.add(List.of("Comment", tableInfo.comment(), ""));
                 if (!tableInfo.properties().isEmpty()) {
                     rows.add(List.of("Properties", tableInfo.properties().toString(), ""));
+                }
+                List<String> partitionColumns = partitionColumnNames(tableInfo);
+                if (!partitionColumns.isEmpty()) {
+                    rows.add(List.of("", "", ""));
+                    rows.add(List.of("# Partition Information", "", ""));
+                    rows.add(List.of("# col_name", "data_type", "comment"));
+                    for (String pc : partitionColumns) {
+                        Catalog.Column col = findColumn(tableInfo, pc);
+                        if (col == null) continue;
+                        rows.add(List.of(col.name(), displayType(col.type()),
+                                col.comment() == null ? "" : col.comment()));
+                    }
                 }
             }
         }

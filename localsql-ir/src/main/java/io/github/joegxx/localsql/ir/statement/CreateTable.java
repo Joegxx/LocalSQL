@@ -10,9 +10,11 @@ import java.util.List;
  *  - explicit columns: CREATE TABLE t (c1 T1, ...) [AS query]
  *  - CTAS: CREATE TABLE t AS query (columns empty, query non-null)
  *  - LIKE: CREATE TABLE t LIKE src (likeSource non-null, columns empty)
- * PARTITIONED BY columns declared with a type were already appended to
- * `columns` by the AST builder (partitioning is a storage detail DuckDB does
- * not have); partition-by references to existing columns are schema-neutral.
+ * PARTITIONED BY columns (declared with a type) are appended to `columns`
+ * by the AST builder (partitioning is a storage detail DuckDB does not have);
+ * their names are also recorded in `partitionColumnNames` so the catalog can
+ * keep partition metadata. Partition-by references to existing columns are
+ * schema-neutral and recorded in the same list.
  */
 public final class CreateTable extends Statement {
     private final List<String> tableName;
@@ -20,14 +22,22 @@ public final class CreateTable extends Statement {
     private final List<ColumnDef> columns;
     private final Relation query;
     private final List<String> likeSource;
+    private final List<String> partitionColumnNames;
 
     public CreateTable(List<String> tableName, boolean ifNotExists,
                        List<ColumnDef> columns, Relation query, List<String> likeSource) {
+        this(tableName, ifNotExists, columns, query, likeSource, List.of());
+    }
+
+    public CreateTable(List<String> tableName, boolean ifNotExists,
+                       List<ColumnDef> columns, Relation query, List<String> likeSource,
+                       List<String> partitionColumnNames) {
         this.tableName = List.copyOf(tableName);
         this.ifNotExists = ifNotExists;
         this.columns = List.copyOf(columns);
         this.query = query;
         this.likeSource = likeSource == null ? null : List.copyOf(likeSource);
+        this.partitionColumnNames = List.copyOf(partitionColumnNames);
     }
 
     public List<String> tableName() { return tableName; }
@@ -35,6 +45,7 @@ public final class CreateTable extends Statement {
     public List<ColumnDef> columns() { return columns; }
     public Relation query() { return query; }
     public List<String> likeSource() { return likeSource; }
+    public List<String> partitionColumnNames() { return partitionColumnNames; }
 
     public record ColumnDef(String name, DataType type, boolean nullable, String comment) {}
 

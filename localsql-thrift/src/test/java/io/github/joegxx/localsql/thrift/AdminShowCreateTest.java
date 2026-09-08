@@ -84,6 +84,35 @@ class AdminShowCreateTest {
     }
 
     @Test
+    void partitionedTableMetadata() throws Exception {
+        exec("CREATE DATABASE pdb");
+        exec("CREATE TABLE pdb.pt (id INT, name STRING) PARTITIONED BY (`d` string COMMENT 'date part')");
+        // partition column is part of the schema (last, Spark style)
+        var desc = exec("DESCRIBE pdb.pt");
+        assertEquals("d", desc.rows().get(desc.rows().size() - 1).get(0));
+        // SHOW CREATE TABLE emits a PARTITIONED BY clause
+        var r = exec("SHOW CREATE TABLE pdb.pt");
+        String ddl = String.valueOf(r.rows().get(0).get(1));
+        assertTrue(ddl.contains("PARTITIONED BY (`d` STRING COMMENT 'date part')"), ddl);
+        // DESCRIBE FORMATTED carries the partition block
+        var f = exec("DESCRIBE FORMATTED pdb.pt");
+        boolean inPartitionSection = false;
+        boolean sawPartitionHeader = false;
+        boolean sawPartitionCol = false;
+        for (var row : f.rows()) {
+            if ("# Partition Information".equals(row.get(0))) { sawPartitionHeader = true; inPartitionSection = true; continue; }
+            if (inPartitionSection && "d".equals(row.get(0))) sawPartitionCol = true;
+        }
+        assertTrue(sawPartitionHeader);
+        assertTrue(sawPartitionCol);
+        // LIKE keeps the partition metadata
+        exec("CREATE TABLE pdb.pt2 LIKE pdb.pt");
+        var r2 = exec("SHOW CREATE TABLE pdb.pt2");
+        assertTrue(String.valueOf(r2.rows().get(0).get(1)).contains("PARTITIONED BY"));
+        exec("DROP DATABASE pdb CASCADE");
+    }
+
+    @Test
     void showIndexesEmpty() throws Exception {
         exec("CREATE TABLE idxt (id INT)");
         assertEquals(0, exec("SHOW INDEXES ON idxt").rows().size());

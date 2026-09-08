@@ -135,6 +135,7 @@ public final class SparkAstBuilder {
         // clause is a storage hint on DuckDB (no partitioning concept) and is
         // accepted as a no-op — the query's own output already provides the
         // column; we skip the schema mutation entirely.
+        List<String> partitionColumns = new ArrayList<>();
         if (clauses != null && !clauses.partitionFieldList().isEmpty() && ct.query() == null) {
             for (PartitionFieldContext pf : clauses.partitionFieldList().get(0).partitionField()) {
                 if (pf instanceof PartitionTransformContext t) {
@@ -145,16 +146,19 @@ public final class SparkAstBuilder {
                             throw new IllegalArgumentException(
                                     "PARTITIONED BY column not defined in table schema: " + name);
                         }
+                        partitionColumns.add(name);
                     } else {
                         throw new UnsupportedOperationException(
                                 "Partition transforms (e.g. years(dt)) are not supported");
                     }
                 } else if (pf instanceof PartitionColumnContext pc) {
+                    String name = SparkExpressionBuilder.unquote(pc.colType().colName.getText());
                     columns.add(new io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef(
-                            SparkExpressionBuilder.unquote(pc.colType().colName.getText()),
+                            name,
                             SparkDataTypeBuilder.build(pc.colType().dataType()),
                             pc.colType().NOT() == null,
                             comment(pc.colType().commentSpec())));
+                    partitionColumns.add(name);
                 }
             }
         }
@@ -163,7 +167,7 @@ public final class SparkAstBuilder {
             throw new IllegalArgumentException("CREATE TABLE requires a column list or AS query");
         }
         return new io.github.joegxx.localsql.ir.statement.CreateTable(
-                parts(header.multipartIdentifier()), ifNotExists, columns, query, null);
+                parts(header.multipartIdentifier()), ifNotExists, columns, query, null, partitionColumns);
     }
 
     private io.github.joegxx.localsql.ir.statement.CreateTable buildCreateTableLike(CreateTableLikeContext ctl) {

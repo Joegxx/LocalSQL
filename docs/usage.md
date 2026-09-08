@@ -204,13 +204,14 @@ ORDER BY cnt DESC;
 - **`CREATE TABLE`**:`CREATE TABLE t (id BIGINT, name STRING, score DOUBLE)`(支持 `NOT NULL`、`IF NOT EXISTS`)
 - **`CREATE TABLE ... AS SELECT`**(CTAS):从查询结果建表,类型自动推导
 - **`CREATE TABLE ... LIKE src`**:复制源表 schema 建空表
-- **`PARTITIONED BY (col TYPE)`**:分区列追加到 schema 末尾(DuckDB 无分区概念,当普通列用);裸列引用需已存在于 schema;`PARTITIONED BY … AS SELECT` 与 `CLUSTERED BY / SKEWED BY` 接受为无操作提示
+- **`PARTITIONED BY (col TYPE)`**:分区列追加到 schema 末尾(DuckDB 无分区概念,当普通列用),并以 `partition.columns` 表属性保留分区元数据;裸列引用需已存在于 schema;`PARTITIONED BY … AS SELECT` 与 `CLUSTERED BY / SKEWED BY` 接受为无操作提示
 - **`INSERT INTO t [(c1, c2)]`** + `VALUES` / `SELECT`:追加数据,返回受影响行数(`count` 列)
 - **`INSERT OVERWRITE TABLE t`**:事务内 `DELETE` + `INSERT`,整表替换
 - **`CREATE VIEW v AS SELECT ...`** / **`CREATE OR REPLACE VIEW`** / `IF NOT EXISTS`;视图可被查询,出现在 `SHOW TABLES`
 - **`DROP TABLE [IF EXISTS] t`** / **`DROP VIEW [IF EXISTS] v`**:删物理对象 + 清 Catalog 元数据;类型不匹配(DROP TABLE 删视图等)报错
 - **`CREATE/DROP/ALTER DATABASE`**:`CREATE DATABASE [IF NOT EXISTS] db` / `DROP DATABASE [IF EXISTS] db [CASCADE|RESTRICT]`(默认 RESTRICT,非空库需 CASCADE) / `ALTER DATABASE db SET DBPROPERTIES / LOCATION`
 - **`ALTER TABLE`**:`ADD COLUMNS` / `DROP COLUMNS` / `RENAME COLUMN` / `ALTER COLUMN TYPE / SET NOT NULL` / `REPLACE COLUMNS` / `RENAME TO` / `SET/UNSET TBLPROPERTIES`(视图同理);执行后 `DESCRIBE` 刷新 Catalog
+- **分区表 `ADD COLUMNS`(MVP 用重建表实现)**:Hive 语义要求新列插在分区列之前,而 DuckDB 只能尾部追加,因此对带 `PARTITIONED BY` 的表执行 `ADD COLUMNS` 时走 `CREATE tmp → INSERT SELECT → DROP → RENAME` 重建,数据保留。⚠️ 已知限制:整表重写(大表 O(全量行) 且重建期间占用双倍空间)、`ADD COLUMNS (col AFTER x)` 指定位置被忽略(一律插在分区列前)、重建 DDL 未回写 `runtime_table` 的 `create_sql`(重启回放得到的是旧 schema)——后续版本用 DuckDB 1.5 的 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + `ALTER [COLUMN]` 位置语法或原生实现替换
 - 运行期建的表/视图注册进 Catalog,IDEA 数据源刷新后可见,`DESCRIBE` 能看到真实列类型
 
 ## 显式不支持的特性

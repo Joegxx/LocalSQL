@@ -584,6 +584,10 @@ final class SqlPipeline {
         analyzer.analyze(ac, sessionDatabase);
         String db = databaseOf(ac.tableName());
         String table = ac.tableName().get(ac.tableName().size() - 1);
+        Catalog.Table t = catalogService.getTable(db, table).orElse(null);
+        if (t != null && t.properties().containsKey(PARTITION_COLUMNS_KEY)) {
+            return addColumnsOnPartitionedTable(ac, db, table, t);
+        }
         inTransaction(() -> {
             for (var col : ac.columns()) {
                 String sql = generator.generateAddColumn(ac.tableName(), col);
@@ -593,6 +597,104 @@ final class SqlPipeline {
             refreshFromDescribe(db, table);
             patchColumnComments(db, table, colDefComments(ac.columns()));
         });
+        return empty();
+    }
+
+    /**
+     * Hive keeps partition columns last: ALTER TABLE ADD COLUMNS must insert
+     * the new columns *before* the partition keys, but DuckDB can only append.
+     * MVP rebuilds the physical table (CREATE new / INSERT SELECT / DROP old /
+     * RENAME) inside one transaction — data-preserving, O(all rows) but simple.
+     */
+    private DuckDbExecutor.QueryResult addColumnsOnPartitionedTable(
+            io.github.joegxx.localsql.ir.statement.AddColumns ac, String db, String table, Catalog.Table t) throws SQLException {
+        // desired final column order: existing non-partition columns, new columns,
+        // then partition columns (exactly where Spark puts them)
+        List<String> partitionKeys = new ArrayList<>();
+        String raw = t.properties().get(PARTITION_COLUMNS_KEY);
+        for (String p : raw.split(",")) if (!p.isBlank()) partitionKeys.add(p.trim());
+
+        // duplicate / conflicting new columns
+        for (var col : ac.columns()) {
+            boolean exists = t.columns().stream().anyMatch(c -> c.name().equalsIgnoreCase(col.name()));
+            if (exists) throw new IllegalArgumentException("Column already exists: " + col.name());
+        }
+        List<Catalog.Column> head = new ArrayList<>();
+        for (Catalog.Column c : t.columns()) {
+            boolean isPartition = partitionKeys.stream().anyMatch(p -> p.equalsIgnoreCase(c.name()));
+            if (!isPartition) head.add(c);
+        }
+        List<Catalog.Column> finalOrder = new ArrayList<>(head);
+        for (var col : ac.columns()) {
+            finalOrder.add(new Catalog.Column(col.name(), col.type(), col.nullable(), col.comment(),
+                    -1, null, null));
+        }
+        for (String pk : partitionKeys) {
+            Catalog.Column pc = t.columns().stream()
+                    .filter(c -> c.name().equalsIgnoreCase(pk)).findFirst().orElse(null);
+            if (pc != null) finalOrder.add(pc);
+        }
+
+        String tmp = "__localsql_rebuild_" + table;
+        String qTable = DuckDbSqlGenerator.quote(table);
+        String qTmp = DuckDbSqlGenerator.quote(tmp);
+        StringBuilder rebuildDdl = new StringBuilder("CREATE TABLE ").append(qTable).append(" (");
+        for (int i = 0; i < finalOrder.size(); i++) {
+            Catalog.Column c = finalOrder.get(i);
+            if (i > 0) rebuildDdl.append(", ");
+            rebuildDdl.append(DuckDbSqlGenerator.quote(c.name())).append(' ')
+                    .append(Catalog.toStorageType(c.type()));
+            if (!c.nullable()) rebuildDdl.append(" NOT NULL");
+        }
+        rebuildDdl.append(")");
+        String newCreateSql = rebuildDdl.toString();
+        inTransaction(() -> {
+            // 1. build the new physical table with the final column order
+            String ddl = "CREATE TABLE " + qTmp + " (";
+            for (int i = 0; i < finalOrder.size(); i++) {
+                Catalog.Column c = finalOrder.get(i);
+                if (i > 0) ddl += ", ";
+                ddl += DuckDbSqlGenerator.quote(c.name()) + " " + Catalog.toStorageType(c.type());
+                if (!c.nullable()) ddl += " NOT NULL";
+            }
+            ddl += ")";
+            LOG.info("Rebuilding partitioned table {} (add columns): {}", table, ddl);
+            executor.run(ddl);
+            // 2. copy data in the new column order (new columns are NULL)
+            StringBuilder ins = new StringBuilder("INSERT INTO ").append(qTmp).append(" (");
+            StringBuilder sel = new StringBuilder("SELECT ");
+            for (int i = 0; i < finalOrder.size(); i++) {
+                Catalog.Column c = finalOrder.get(i);
+                if (i > 0) { ins.append(", "); sel.append(", "); }
+                ins.append(DuckDbSqlGenerator.quote(c.name()));
+                boolean isNew = ac.columns().stream().anyMatch(col -> col.name().equalsIgnoreCase(c.name()));
+                sel.append(isNew ? "NULL" : DuckDbSqlGenerator.quote(c.name()));
+            }
+            ins.append(") ").append(sel).append(" FROM ").append(qTable);
+            executor.run(ins.toString());
+            // 3. swap names
+            executor.run("DROP TABLE " + qTable);
+            executor.run("ALTER TABLE " + qTmp + " RENAME TO " + qTable);
+        });
+        // 4. metadata: final order + new column comments; also refresh the
+        //    stored runtime DDL so a restart replays the new schema
+        List<CatalogService.ColumnDef> defs = new ArrayList<>();
+        for (Catalog.Column c : finalOrder) {
+            String comment = c.comment();
+            var matched = ac.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst();
+            if (matched.isPresent() && matched.get().comment() != null) comment = matched.get().comment();
+            defs.add(new CatalogService.ColumnDef(c.name(), c.type(), c.nullable(), comment,
+                    c.defaultValue(), c.expression()));
+        }
+        try {
+            catalogService.refreshTable(db, table, defs);
+            if (catalogService.store() != null) {
+                Catalog.Table t2 = catalogService.getTable(db, table).orElseThrow();
+                catalogService.store().saveRuntimeInfo(t2.tableId(), table, newCreateSql);
+            }
+        } catch (Exception e) {
+            throw new SQLException("Failed to refresh metadata for " + table + ": " + e.getMessage(), e);
+        }
         return empty();
     }
 

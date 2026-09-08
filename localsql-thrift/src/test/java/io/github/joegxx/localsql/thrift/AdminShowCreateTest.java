@@ -113,6 +113,34 @@ class AdminShowCreateTest {
     }
 
     @Test
+    void addColumnsOnPartitionedTableReordersBeforePartitionKeys() throws Exception {
+        exec("CREATE DATABASE pdb");
+        exec("CREATE TABLE pdb.pt (id INT, name STRING) PARTITIONED BY (`d` string COMMENT 'date part')");
+        exec("INSERT INTO pdb.pt VALUES (1, 'a', '2026-01-01'), (2, 'b', '2026-01-02')");
+        exec("ALTER TABLE pdb.pt ADD COLUMNS (extra STRING COMMENT 'new col', cnt BIGINT)");
+        // data survived the rebuild
+        var rows = exec("SELECT * FROM pdb.pt ORDER BY id").rows();
+        assertEquals(2, rows.size());
+        assertEquals(5, rows.get(0).size());
+        assertEquals(1, rows.get(0).get(0));
+        assertEquals("a", rows.get(0).get(1));
+        // physical column order after rebuild: id, name, extra, cnt, d
+        assertEquals("2026-01-01", rows.get(0).get(4));
+        assertNull(rows.get(0).get(2));
+        var desc = exec("DESCRIBE pdb.pt");
+        assertEquals("id", desc.rows().get(0).get(0));
+        assertEquals("extra", desc.rows().get(2).get(0));
+        assertEquals("cnt", desc.rows().get(3).get(0));
+        assertEquals("d", desc.rows().get(4).get(0));
+        // SHOW CREATE TABLE keeps the PARTITIONED BY clause
+        var r = exec("SHOW CREATE TABLE pdb.pt");
+        String ddl = String.valueOf(r.rows().get(0).get(1));
+        assertTrue(ddl.contains("PARTITIONED BY"), ddl);
+        assertTrue(ddl.contains("`extra` STRING COMMENT 'new col'"), ddl);
+        exec("DROP DATABASE pdb CASCADE");
+    }
+
+    @Test
     void showIndexesEmpty() throws Exception {
         exec("CREATE TABLE idxt (id INT)");
         assertEquals(0, exec("SHOW INDEXES ON idxt").rows().size());

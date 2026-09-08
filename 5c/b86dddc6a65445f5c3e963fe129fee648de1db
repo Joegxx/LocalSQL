@@ -1,0 +1,33 @@
+docs/udf-plan.md
+  s_b33fc4f71998f0::t_a69b9d86986c24 202-211
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbBuiltinUdfRegistrar.java
+  s_b33fc4f71998f0::t_f6a2f5a1efcf85 1-39,58-63,77-96,106,110-111,113-122,130-134,141-142
+  s_b33fc4f71998f0::t_22a231b8e87d3d 40-57,64,72-74,76
+  s_b33fc4f71998f0::t_ddf771cf4b7d68 65-71
+  s_b33fc4f71998f0::t_f5c6d1adde7a95 97-104,109,123-129
+  s_b33fc4f71998f0::t_0d66586864e809 75
+  s_b33fc4f71998f0::t_cc0ccc7825d29c 105,107-108,112,135-140
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/SparkFunctionMappingTest.java
+  s_b33fc4f71998f0::t_3fc01ebbedff6d 317-321
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_b33fc4f71998f0::t_bdd58615768f2e 739-744
+  s_b33fc4f71998f0::t_5cf2690540e558 1553-1555,1560,1569-1578
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbExecutor.java
+  s_b33fc4f71998f0::t_1d64626fffda4c 20,25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "5cb86dddc6a65445f5c3e963fe129fee648de1db",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ark-code-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

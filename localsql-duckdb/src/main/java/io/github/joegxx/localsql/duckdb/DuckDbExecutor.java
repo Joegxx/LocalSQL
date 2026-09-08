@@ -17,10 +17,12 @@ public final class DuckDbExecutor implements AutoCloseable {
 
     public DuckDbExecutor() throws SQLException {
         this.connection = DriverManager.getConnection("jdbc:duckdb:");
+        DuckDbBuiltinUdfRegistrar.register(connection);
     }
 
     public DuckDbExecutor(String path) throws SQLException {
         this.connection = DriverManager.getConnection("jdbc:duckdb:" + (path == null ? "" : path));
+        DuckDbBuiltinUdfRegistrar.register(connection);
     }
 
     public QueryResult execute(String sql) throws SQLException {

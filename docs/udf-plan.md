@@ -199,10 +199,16 @@ udfSupport, generator)`.
   ARRAY-of-STRUCT/DECIMAL(p,s) and field COMMENT clauses (MAP still
   rejected); malformed JSON returns NULL like Spark (guarded by
   json_valid); to_json direct
-- misc: bround (half-to-even emulated via CASE), conv (from_base 10 only,
-  to_base in [2,36]; negative and other bases rejected - DuckDB has no
-  from_base), map_zip_with (union keys + map_extract lookups, values null
-  when a key is missing), from_json NULL/malformed semantics, to_json(NULL)
+- misc: initcap, bround and conv are registered as **Java UDFs on the
+  DuckDB connection** (DuckDbBuiltinUdfRegistrar; DuckDB 1.5.x JDBC
+  scalarFunction builder) and passed through by the generator with CAST
+  wrapping (DuckDB binder does no implicit casts for UDFs). bround is
+  BigDecimal HALF_EVEN; conv is full Spark semantics (negative num as
+  64-bit two's complement for positive to_base, signed output for
+  negative to_base, 64-bit saturation, stops at first invalid digit).
+  map_zip_with is a generator rewrite (union keys + map_extract lookups,
+  values null when a key is missing). from_json: malformed JSON returns
+  NULL like Spark (guarded by json_valid); to_json(NULL) native
 - percentile/percentile_approx/approx_percentile -> quantile_cont
 - zip_with, sort_array (comparator), map_zip_with remain unsupported
   (need lambda variable substitution into DuckDB list_zip struct fields)

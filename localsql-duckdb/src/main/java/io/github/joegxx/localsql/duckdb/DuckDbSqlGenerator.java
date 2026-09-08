@@ -736,6 +736,12 @@ public final class DuckDbSqlGenerator {
     private boolean emitMappedFunction(String name, FunctionCall f, StringBuilder sb) {
         List<io.github.joegxx.localsql.ir.expression.Expression> args = f.arguments();
         switch (name) {
+            case "initcap" -> {
+                if (args.size() != 1) return false;
+                // registered as a Java UDF on the DuckDB connection (DuckDB has no initcap)
+                emitBuiltinUdfCall("initcap", args, List.of("VARCHAR"), sb);
+                return true;
+            }
             case "if" -> {
                 if (args.size() != 3) return false;
                 sb.append("(CASE WHEN ");
@@ -1544,58 +1550,32 @@ public final class DuckDbSqlGenerator {
             }
             case "bround" -> {
                 if (args.size() < 1 || args.size() > 2) return false;
-                // Spark bround = half-to-even; DuckDB has no roundeven, so emulate
-                String x = "TMP_X";
-                sb.append("CASE WHEN ABS((");
-                emitExpr(args.get(0), sb);
-                sb.append(" * pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(")) - FLOOR((");
-                emitExpr(args.get(0), sb);
-                sb.append(" * pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(")) + 0.5)) = 0.5 THEN (CASE WHEN MOD(FLOOR(");
-                emitExpr(args.get(0), sb);
-                sb.append(" * pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(")), 2) = 0 THEN FLOOR(");
-                emitExpr(args.get(0), sb);
-                sb.append(" * pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(")) ELSE CEIL(");
-                emitExpr(args.get(0), sb);
-                sb.append(" * pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(")) END) / pow(10.0, ");
-                emitScale(args, sb);
-                sb.append(") ELSE round(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitScale(args, sb);
-                sb.append(") END");
+                // registered as a Java UDF on the DuckDB connection; binder needs
+                // explicit casts (no implicit DECIMAL/INTEGER -> DOUBLE for UDFs)
+                emitBuiltinUdfCall("bround", args, List.of("DOUBLE", "DOUBLE"), sb);
                 return true;
             }
             case "conv" -> {
                 if (args.size() != 3) return false;
-                // DuckDB has to_base but no from_base: only from_base 10 works
-                Object from = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
-                Object to = args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l2
-                        && l2.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l2.value() : null;
-                if (from == null || ((Number) from).intValue() != 10 || to == null
-                        || ((Number) to).intValue() < 2 || ((Number) to).intValue() > 36) {
-                    throw new UnsupportedOperationException(
-                            "conv supports literal from_base=10 to_base in [2,36] only (DuckDB has to_base but no from_base)");
-                }
-                sb.append("to_base(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS BIGINT), ").append(((Number) to).intValue()).append(")");
+                emitBuiltinUdfCall("conv", args, List.of("VARCHAR", "VARCHAR", "VARCHAR"), sb);
                 return true;
             }
             default -> {
                 return false;
             }
         }
+    }
+
+    /** Emits fn(CAST(a1 AS t1), ...) for a connection-registered Java UDF. */
+    private void emitBuiltinUdfCall(String fn, List<Expression> args, List<String> types, StringBuilder sb) {
+        sb.append(fn).append('(');
+        for (int i = 0; i < args.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("CAST(");
+            emitExpr(args.get(i), sb);
+            sb.append(" AS ").append(types.get(i)).append(')');
+        }
+        sb.append(')');
     }
 
     private void emitLambda(Lambda lam, StringBuilder sb) {

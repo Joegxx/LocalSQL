@@ -30,6 +30,7 @@ public final class ThriftServer {
     private final CatalogService catalogService;
     private final SqlPipeline pipeline;
     private final String defaultDatabase;
+    private volatile String sessionDatabase;
     private TServer server;
     private LocalSqlThriftService service;
 
@@ -93,8 +94,17 @@ public final class ThriftServer {
 
     public DuckDbExecutor.QueryResult executeSparkSql(String sql) throws SQLException {
         LOG.info("Executing Spark SQL: {}", sql);
-        var admin = AdminStatementHandler.tryHandle(catalogService, sql, defaultDatabase);
-        if (admin.isPresent()) return admin.get().result();
-        return pipeline.execute(sql);
+        var admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDatabase());
+        if (admin.isPresent()) {
+            sessionDatabase = admin.get().newCurrentDatabase() != null
+                    ? admin.get().newCurrentDatabase() : sessionDatabase;
+            return admin.get().result();
+        }
+        return pipeline.execute(sql, currentDatabase());
+    }
+
+    private String currentDatabase() {
+        String db = sessionDatabase != null ? sessionDatabase : defaultDatabase;
+        return db == null ? "default" : db;
     }
 }

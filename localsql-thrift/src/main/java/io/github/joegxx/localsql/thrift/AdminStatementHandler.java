@@ -29,6 +29,12 @@ final class AdminStatementHandler {
             Pattern.compile("(?i)^SHOW\\s+COLUMNS\\s+(IN|FROM)\\s+([A-Za-z_][\\w]*(\\.[A-Za-z_][\\w]*)*)\\s*$");
     private static final Pattern DESCRIBE =
             Pattern.compile("(?i)^(DESCRIBEFORMATTED|DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+((?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\")(?:\\.(?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\"))*)\\s*$");
+    private static final String IDENT = "(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"|'[^']*')";
+    private static final String QUALIFIED = IDENT + "(?:\\." + IDENT + ")*";
+    private static final Pattern SHOW_CREATE =
+            Pattern.compile("(?i)^SHOW\\s+CREATE\\s+(TABLE|VIEW|DATABASE|SCHEMA)\\s+(" + QUALIFIED + ")(?:\\s+AS\\s+SEMI)?\\s*$");
+    private static final Pattern SHOW_INDEXES =
+            Pattern.compile("(?i)^SHOW\\s+(?:FORMATTED\\s+)?(?:EXTENDED\\s+)?INDEX(?:ES)?(\\s+(?:IN|FROM|ON)\\s+" + QUALIFIED + ")?\\s*$");
     private static final Pattern USE =
             Pattern.compile("(?i)^USE\\s+(?:(?:DATABASE)\\s+)?((?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\")(?:\\.(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"))*)\\s*$");
     private static final Pattern EMPTY_USE =
@@ -84,6 +90,24 @@ final class AdminStatementHandler {
             boolean formatted = "DESCRIBEFORMATTED".equalsIgnoreCase(m.group(1))
                     || m.group(3) != null;
             return Optional.of(describe(catalog, m.group(5), currentDatabase, formatted));
+        }
+
+        m = SHOW_CREATE.matcher(s);
+        if (m.matches()) {
+            String kind = m.group(1).toUpperCase(Locale.ROOT);
+            String target = unquoteQualified(m.group(2));
+            if ("DATABASE".equals(kind) || "SCHEMA".equals(kind)) {
+                return Optional.of(showCreateDatabase(catalog, target));
+            }
+            return Optional.of(showCreateTable(catalog, target, currentDatabase));
+        }
+
+        // LocalSQL/DuckDB have no index concept; return an empty result like
+        // Hive does for an indexless table instead of failing IDE probes.
+        if (SHOW_INDEXES.matcher(s).matches()) {
+            return Optional.of(new Outcome(new DuckDbExecutor.QueryResult(
+                    List.of("index_name", "tab_name", "idx_original_col_name", "idx_col_name"),
+                    new ArrayList<>()), null));
         }
 
         m = USE.matcher(s);
@@ -147,6 +171,101 @@ final class AdminStatementHandler {
         return out.toString();
     }
 
+    private static Outcome showCreateDatabase(CatalogService catalog, String name) {
+        Catalog.Database db = catalog.catalog().getDatabase(name)
+                .orElseThrow(() -> new IllegalArgumentException("Database does not exist: " + name));
+        StringBuilder sb = new StringBuilder("CREATE DATABASE ").append(quoteSql(db.name()));
+        if (db.description() != null) {
+            sb.append(" COMMENT '").append(db.description().replace("'", "''")).append("'");
+        }
+        if (db.location() != null) {
+            sb.append(" LOCATION '").append(db.location().replace("'", "''")).append("'");
+        }
+        if (!db.properties().isEmpty()) {
+            sb.append(" WITH DBPROPERTIES (");
+            boolean first = true;
+            for (var e : db.properties().entrySet()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append("'").append(String.valueOf(e.getKey()).replace("'", "''")).append("'")
+                  .append("='").append(String.valueOf(e.getValue()).replace("'", "''")).append("'");
+            }
+            sb.append(")");
+        }
+        return new Outcome(new DuckDbExecutor.QueryResult(
+                List.of("database_name", "create_statement"), List.of(List.of(db.name(), sb.toString()))), null);
+    }
+
+    private static Outcome showCreateTable(CatalogService catalog, String qualified, String currentDatabase) {
+        String[] parts = qualified.split("\\.");
+        String db;
+        String table;
+        if (parts.length >= 2) {
+            db = parts[parts.length - 2].toLowerCase(Locale.ROOT);
+            table = parts[parts.length - 1];
+        } else {
+            db = currentDatabase;
+            table = parts[0];
+        }
+        Catalog.Table t = catalog.catalog().getTable(db, table)
+                .orElseThrow(() -> new IllegalArgumentException("Table or view not found: " + db + "." + table));
+        if ("VIEW".equalsIgnoreCase(t.tableType())) {
+            return new Outcome(new DuckDbExecutor.QueryResult(
+                    List.of("view_name", "create_statement"),
+                    List.of(List.of(t.tableName(), createViewSql(catalog, t)))), null);
+        }
+        StringBuilder sb = new StringBuilder("CREATE TABLE ").append(quoteSql(db)).append('.').append(quoteSql(t.tableName()));
+        sb.append(" (");
+        for (int i = 0; i < t.columns().size(); i++) {
+            Catalog.Column c = t.columns().get(i);
+            if (i > 0) sb.append(", ");
+            sb.append(quoteSql(c.name())).append(' ').append(createType(c.type()));
+            if (!c.nullable()) sb.append(" NOT NULL");
+            if (c.comment() != null) {
+                sb.append(" COMMENT '").append(c.comment().replace("'", "''")).append("'");
+            }
+        }
+        sb.append(")");
+        if (t.comment() != null) {
+            sb.append(" COMMENT '").append(t.comment().replace("'", "''")).append("'");
+        }
+        if (t.location() != null && !t.location().isEmpty()) {
+            sb.append(" LOCATION '").append(t.location().replace("'", "''")).append("'");
+        }
+        if (!t.properties().isEmpty()) {
+            sb.append(" TBLPROPERTIES (");
+            boolean first = true;
+            for (var e : t.properties().entrySet()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append("'").append(String.valueOf(e.getKey()).replace("'", "''")).append("'")
+                  .append("='").append(String.valueOf(e.getValue()).replace("'", "''")).append("'");
+            }
+            sb.append(")");
+        }
+        return new Outcome(new DuckDbExecutor.QueryResult(
+                List.of("table_name", "create_statement"),
+                List.of(List.of(t.tableName(), sb.toString()))), null);
+    }
+
+    /** Views replay from the runtime store DDL; fall back to a synthesized form. */
+    private static String createViewSql(CatalogService catalog, Catalog.Table t) {
+        if (catalog.store() != null && t.tableId() > 0) {
+            try {
+                var rt = catalog.store().loadRuntimeInfo(t.tableId());
+                if (rt.isPresent() && rt.get().createSql() != null) {
+                    return rt.get().createSql();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return "CREATE VIEW " + quoteSql(t.database()) + '.' + quoteSql(t.tableName());
+    }
+
+    private static String quoteSql(String ident) {
+        return "`" + ident.replace("`", "``") + "`";
+    }
+
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {
         return describe(catalog, qualified, currentDatabase, false);
     }
@@ -190,6 +309,11 @@ final class AdminStatementHandler {
         }
         return new Outcome(new DuckDbExecutor.QueryResult(
                 List.of("col_name", "data_type", "comment"), rows), null);
+    }
+
+    /** SHOW CREATE TABLE displays types the Spark way: upper case. */
+    private static String createType(io.github.joegxx.localsql.ir.type.DataType t) {
+        return displayType(t).toUpperCase(Locale.ROOT);
     }
 
     /** Spark-style type display; decimal keeps its precision/scale. */

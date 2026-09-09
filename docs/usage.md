@@ -11,6 +11,7 @@ LocalSQL 是一个内嵌的 Spark SQL 运行时:用 Spark SQL 3.2.0 语法写查
 - [用代码连接](#用代码连接)
 - [内置样例数据](#内置样例数据)
 - [支持的 SQL 特性](#支持的-sql-特性)
+- [函数支持一览](./functions.md)
 - [显式不支持的特性](#显式不支持的特性)
 - [常见问题排查](#常见问题排查)
 - [运行测试](#运行测试)
@@ -196,7 +197,7 @@ ORDER BY cnt DESC;
 - **操作符**:`+ - * / %`、整数除法 `DIV`(-> `//`)、位运算 `& | ^`、字符串 `||`、空安全相等 `<=>`(`IS NOT DISTINCT FROM`)
 - **CAST**:含 `DECIMAL(p,s)`
 - **字面量**:整数/小数/科学计数/字符串/日期(`DATE '2020-01-01'`)、`INTERVAL 30 days`
-- **常用函数**:`count/sum/avg/min/max`、`coalesce`、`substring`、`concat`、`row_number/rank/dense_rank`、`size`(-> `array_length`)、`explode`(-> `unnest`)等
+- **常用函数**:`count/sum/avg/min/max`、`coalesce`、`substring`、`concat`、`row_number/rank/dense_rank`、`size`(-> `array_length`)、`explode`(-> `unnest`)等 —— 完整清单见 [functions.md](./functions.md)
 - 标识符支持反引号(`` `order count` ``)和大小写混合;DuckDB 保留字自动引号化
 
 ## DML / DDL(建表、插入、视图)

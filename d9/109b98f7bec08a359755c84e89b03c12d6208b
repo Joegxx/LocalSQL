@@ -1,0 +1,24 @@
+docs/functions.md
+  s_b33fc4f71998f0::t_36b868faa7d1a5 63
+  s_b33fc4f71998f0::t_e408aecc582cbe 1-60,64-210
+  s_b33fc4f71998f0::t_1515e97d909c38 61-62
+docs/usage.md
+  s_b33fc4f71998f0::t_acf5970e4f3ba6 14
+  s_b33fc4f71998f0::t_5a8cbbb4338e09 200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "d9109b98f7bec08a359755c84e89b03c12d6208b",
+  "prompts": {},
+  "sessions": {
+    "s_b33fc4f71998f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_082558af8ffem9fFqjSr9sc6kb",
+        "model": "ark-code-latest"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

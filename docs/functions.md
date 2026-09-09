@@ -47,6 +47,7 @@
 | `encode` / `decode` | 同名 | 仅 UTF-8(Spark 默认) |
 | `octet_length` | 参数重构 | BLOB cast 后取字节长度 |
 | `initcap` | Java UDF | 词首字母大写、其余小写(字母数字词边界) |
+| `parse_url` | Java UDF | HOST/PATH/QUERY/QUERY+key/REF/PROTOCOL/AUTHORITY/USERINFO/FILE/PORT(java.net.URI) |
 | `conv` | Java UDF | 完整 Spark 语义(见 Java UDF 外挂节) |
 
 ## 数值
@@ -183,7 +184,7 @@
 | `aggregate(arr, zero, merge)` | 参数重构 | zero 前置合并;**带 finish lambda 的 4 参形式不支持** |
 | `transform_values` / `transform_keys` / `map_filter` | 参数重构 | map_entries 单变量 lambda 组合 |
 | `map_zip_with(m1, m2, (k,v1,v2)->e)` | 参数重构 | 键并集 + `map_extract` 查值,缺键 → NULL |
-| `zip_with` | **不支持** | `list_zip` 生成的 struct 字段名为空,lambda 引用不了 |
+| `zip_with(a, b, (x,y)->e)` | 参数重构 | 下标迭代绕开 list_zip 字段名为空的问题 |
 
 ## 条件 / 类型 / 其他
 
@@ -217,11 +218,11 @@
 |---|---|
 | `from_json` | MAP schema 不支持(DuckDB JSON schema 无 map 形式);schema 必须是字面量 |
 | `percentile` 族 | 映射为 `quantile_cont`,精确 percentile 语义有近似偏差 |
-| `zip_with` | 不支持(list_zip struct 字段名为空) |
 | `aggregate` 4 参 | finish lambda 不支持 |
 | `date_format` | 多个 `SSS` 段不支持;非常见 Java pattern token 可能漏译 |
 | `substring_index` / `next_day` / `date_trunc` / `format_number` | 相应参数必须是字面量 |
 | `encode` / `decode` | 仅 UTF-8 |
-| `conv` 等 Java UDF | 需经 `DuckDbExecutor` 创建连接;工具直连 DuckDB 文件时函数不存在 |
+| `conv` / `parse_url` 等 Java UDF | 需经 `DuckDbExecutor` 创建连接;工具直连 DuckDB 文件时函数不存在 |
+| `reflect` / `java_method` | 仅白名单静态方法(java.lang.Math 的 max/min/abs/sqrt/pow/round/floor/ceil/log/log10/exp);其余明确报错 |
 
 除上表外,未列出的 Spark 函数会在翻译期以 `Unsupported expr: <name>` 明确报错(而不是静默错译);需要时优先考虑 `--function-map` 用户映射或 `--udf-config` Java UDF 扩展。

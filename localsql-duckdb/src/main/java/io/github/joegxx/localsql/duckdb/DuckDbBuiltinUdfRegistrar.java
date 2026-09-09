@@ -22,6 +22,7 @@ public final class DuckDbBuiltinUdfRegistrar {
         registerInitcap(connection);
         registerConv(connection);
         registerBround(connection);
+        registerParseUrl(connection);
     }
 
     private static void registerInitcap(Connection connection) throws SQLException {
@@ -75,6 +76,76 @@ public final class DuckDbBuiltinUdfRegistrar {
                         (x, scale) -> bround(x, scale))
                 .withNullInNullOut()
                 .register(connection);
+    }
+
+    private static void registerParseUrl(Connection connection) throws SQLException {
+        // 2-arg: parse_url(url, part); 3-arg: parse_url(url, 'QUERY', key)
+        for (int arity = 2; arity <= 3; arity++) {
+            var b = DuckDBFunctions.scalarFunction()
+                    .withName("parse_url")
+                    .withParameter(org.duckdb.DuckDBColumnType.VARCHAR)
+                    .withParameter(org.duckdb.DuckDBColumnType.VARCHAR);
+            if (arity == 3) b.withParameter(org.duckdb.DuckDBColumnType.VARCHAR);
+            final int n = arity;
+            b.withReturnType(org.duckdb.DuckDBColumnType.VARCHAR)
+                    .withVectorizedFunction((chunk, out) -> {
+                        org.duckdb.DuckDBReadableVector url = chunk.vector(0);
+                        org.duckdb.DuckDBReadableVector part = chunk.vector(1);
+                        for (long row = 0; row < chunk.rowCount(); row++) {
+                            if (url.isNull(row) || part.isNull(row)) {
+                                out.setNull(row);
+                                continue;
+                            }
+                            String kv = n < 3 || chunk.vector(2).isNull(row)
+                                    ? null : chunk.vector(2).getString(row);
+                            String v = parseUrl(url.getString(row), part.getString(row), kv);
+                            if (v == null) out.setNull(row);
+                            else out.setString(row, v);
+                        }
+                    })
+                    .register(connection);
+        }
+    }
+
+    /** Spark parse_url partToExtract: HOST/PATH/QUERY/REF/PROTOCOL/FILE/AUTHORITY/USERINFO. */
+    static String parseUrl(String url, String part, String key) {
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(url);
+        } catch (java.net.URISyntaxException e) {
+            return null;
+        }
+        switch (part.toUpperCase()) {
+            case "HOST": return uri.getHost();
+            case "PATH": return uri.getRawPath();
+            case "QUERY": {
+                if (key != null) {
+                    String query = uri.getRawQuery();
+                    if (query == null) return null;
+                    for (String pair : query.split("&")) {
+                        int eq = pair.indexOf('=');
+                        String k = eq < 0 ? pair : pair.substring(0, eq);
+                        if (k.equalsIgnoreCase(key)) {
+                            return eq < 0 ? "" : pair.substring(eq + 1);
+                        }
+                    }
+                    return null;
+                }
+                return uri.getRawQuery();
+            }
+            case "REF": return uri.getRawFragment();
+            case "PROTOCOL": return uri.getScheme();
+            case "AUTHORITY": return uri.getRawAuthority();
+            case "USERINFO": return uri.getRawUserInfo();
+            case "FILE": return uri.getRawPath() == null ? null
+                    : uri.getRawQuery() == null ? uri.getRawPath() : uri.getRawPath() + "?" + uri.getRawQuery();
+            case "PORT": {
+                int p = uri.getPort();
+                return p < 0 ? null : String.valueOf(p);
+            }
+            default:
+                return null;
+        }
     }
 
     /** Spark initcap: first letter of each word upper, rest lower; word = alphanumeric run. */

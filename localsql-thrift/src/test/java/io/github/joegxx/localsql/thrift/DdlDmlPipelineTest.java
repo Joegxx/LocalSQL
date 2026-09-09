@@ -367,4 +367,17 @@ class DdlDmlPipelineTest {
             client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
         }
     }
+
+    @Test
+    void jsonTupleExpandsToColumns() throws Exception {
+        exec("CREATE TABLE jt (id INT, j STRING)");
+        exec("INSERT INTO jt VALUES (1, '{\"a\":1,\"b\":\"x\"}'), (2, '{\"a\":2,\"b\":\"y\"}')");
+        var r = exec("SELECT a, b FROM (SELECT json_tuple(j, 'a', 'b') FROM jt) t");
+        assertEquals(List.of("a", "b"), r.columns());
+        assertEquals(List.of("1", "\"x\""), r.rows().get(0).stream().map(String::valueOf).toList());
+        assertEquals(List.of("2", "\"y\""), r.rows().get(1).stream().map(String::valueOf).toList());
+        var r2 = exec("SELECT json_tuple(j, 'a', 'b') FROM jt WHERE id = 2");
+        assertEquals(List.of("2", "\"y\""), r2.rows().get(0).stream().map(String::valueOf).toList());
+        exec("DROP TABLE jt");
+    }
 }

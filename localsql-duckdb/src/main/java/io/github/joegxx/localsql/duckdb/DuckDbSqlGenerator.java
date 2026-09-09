@@ -1573,6 +1573,61 @@ public final class DuckDbSqlGenerator {
                 emitBuiltinUdfCall("conv", args, List.of("VARCHAR", "VARCHAR", "VARCHAR"), sb);
                 return true;
             }
+            case "parse_url" -> {
+                if (args.size() < 2 || args.size() > 3) return false;
+                // registered as a Java UDF on the DuckDB connection
+                List<String> types = args.size() == 3
+                        ? List.of("VARCHAR", "VARCHAR", "VARCHAR") : List.of("VARCHAR", "VARCHAR");
+                emitBuiltinUdfCall("parse_url", args, types, sb);
+                return true;
+            }
+            case "zip_with" -> {
+                if (args.size() != 3 || !(args.get(2) instanceof Lambda lam) || lam.variables().size() != 2) {
+                    throw new UnsupportedOperationException("zip_with requires (a, b, (x, y) -> expr)");
+                }
+                // DuckDB's list_zip produces structs with empty field names, so
+                // the lambda cannot reference them; instead iterate 1..max(len)
+                // by index and substitute each variable with a list_extract.
+                // list_extract out of range yields NULL, matching Spark's NULL
+                // padding for the shorter list.
+                String x = lam.variables().get(0);
+                String y = lam.variables().get(1);
+                java.util.Map<String, Expression> subst = java.util.Map.of(
+                        x, listExtractAt(args.get(0)),
+                        y, listExtractAt(args.get(1)));
+                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
+                        .rewrite(lam.body(), subst);
+                sb.append("list_transform(range(1, greatest(len(");
+                emitExpr(args.get(0), sb);
+                sb.append("), len(");
+                emitExpr(args.get(1), sb);
+                sb.append(")) + 1), i -> ");
+                emitExpr(body, sb);
+                sb.append(")");
+                return true;
+            }
+            case "reflect", "java_method" -> {
+                // Only a whitelist of side-effect-free statics is supported.
+                if (args.size() < 2) return false;
+                String className = literalString(args.get(0));
+                String methodName = literalString(args.get(1));
+                if (className == null || methodName == null) {
+                    throw new UnsupportedOperationException(
+                            "reflect requires literal class and method names");
+                }
+                String mapped = REFLECT_MAP.get(className + "." + methodName);
+                if (mapped == null) {
+                    throw new UnsupportedOperationException(
+                            "reflect: only these methods are supported: " + REFLECT_MAP.keySet());
+                }
+                sb.append(mapped).append("(");
+                for (int i = 2; i < args.size(); i++) {
+                    if (i > 2) sb.append(", ");
+                    emitExpr(args.get(i), sb);
+                }
+                sb.append(")");
+                return true;
+            }
             case "array_repeat" -> {
                 if (args.size() != 2) return false;
                 // DuckDB has no list_repeat: list_resize(list_value(x), n, x)
@@ -1701,6 +1756,32 @@ public final class DuckDbSqlGenerator {
             }
         }
     }
+
+    /** list_extract(list, i) for the zip_with index-iteration rewrite. */
+    private Expression listExtractAt(Expression list) {
+        return new FunctionCall("list_extract",
+                List.of(list, new Identifier("i", false)));
+    }
+
+    private static String literalString(Expression e) {
+        if (e instanceof Literal l && l.kind() == Literal.Kind.STRING) return String.valueOf(l.value());
+        return null;
+    }
+
+    /** reflect/java_method whitelist: Spark-style class.method -> DuckDB scalar. */
+    private static final Map<String, String> REFLECT_MAP = Map.ofEntries(
+            Map.entry("java.lang.Math.max", "greatest"),
+            Map.entry("java.lang.Math.min", "least"),
+            Map.entry("java.lang.Math.abs", "abs"),
+            Map.entry("java.lang.Math.sqrt", "sqrt"),
+            Map.entry("java.lang.Math.pow", "pow"),
+            Map.entry("java.lang.Math.round", "round"),
+            Map.entry("java.lang.Math.floor", "floor"),
+            Map.entry("java.lang.Math.ceil", "ceil"),
+            Map.entry("java.lang.Math.log", "ln"),
+            Map.entry("java.lang.Math.log10", "log10"),
+            Map.entry("java.lang.Math.exp", "exp")
+    );
 
     /** Emits fn(CAST(a1 AS t1), ...) for a connection-registered Java UDF. */
     private void emitBuiltinUdfCall(String fn, List<Expression> args, List<String> types, StringBuilder sb) {

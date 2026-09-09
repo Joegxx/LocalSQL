@@ -353,7 +353,20 @@ class SparkFunctionMappingTest {
                     "CASE WHEN unix_timestamp(localtimestamp()) > 0 THEN 1 ELSE 0 END == 1",
                     "CASE WHEN unix_timestamp(localtimestamp()) < 4102444800 THEN 1 ELSE 0 END == 1",
                     "CAST(timestamp_seconds(1700000000) AS STRING) == 2023-11-15 06:13:20",
-                    "CAST(timestamp_millis(1700000000500) AS STRING) == 2023-11-15 06:13:20.5"
+                    "CAST(timestamp_millis(1700000000500) AS STRING) == 2023-11-15 06:13:20.5",
+                    // batch 10: json_tuple / zip_with / reflect / parse_url
+                    "json_tuple('{\"a\":1,\"b\":\"x\"}', 'a', 'b') == 1",
+                    "zip_with(array(1,2), array(10,20), (x, y) -> x + y) == [11,22]",
+                    "zip_with(array(1,2), array(10,20,30), (x, y) -> coalesce(x, 0) + coalesce(y, 0)) == [11,22,30]",
+                    "zip_with(array(1), array(10,20), (x, y) -> coalesce(x, 0) + coalesce(y, 0)) == [11,20]",
+                    "reflect('java.lang.Math', 'max', 3, 7) == 7",
+                    "reflect('java.lang.Math', 'abs', -5) == 5",
+                    "java_method('java.lang.Math', 'min', 3, 7) == 3",
+                    "parse_url('https://user:pw@example.com:8080/a/b?x=1&y=2#frag', 'HOST') == example.com",
+                    "parse_url('https://example.com/a/b?x=1', 'PATH') == /a/b",
+                    "parse_url('https://example.com/a/b?x=1&y=2', 'QUERY', 'y') == 2",
+                    "parse_url('https://example.com/a?x=1', 'PROTOCOL') == https",
+                    "parse_url('https://example.com/a?x=1#sec', 'REF') == sec"
             })
     void mapsSparkFunction(String expr, String expected) throws Exception {
         assertEquals(normalize(expected), normalize(eval(expr)), () -> expr);

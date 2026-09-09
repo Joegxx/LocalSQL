@@ -452,7 +452,27 @@ public final class SparkAstBuilder {
         List<Expression> selectItems = new ArrayList<>();
         boolean distinct = select.setQuantifier() != null && select.setQuantifier().DISTINCT() != null;
         for (NamedExpressionContext ne : select.namedExpressionSeq().namedExpression()) {
-            selectItems.add(visitNamedExpression(ne));
+            Expression item = visitNamedExpression(ne);
+            // json_tuple(j, 'k1', ..., 'kn') is row-preserving (one output row
+            // per input row), so it can expand inline to N json_extract
+            // projections instead of going through the Generate machinery.
+            if (item instanceof FunctionCall call && call.name().equalsIgnoreCase("json_tuple")
+                    && call.arguments().size() >= 1) {
+                for (int i = 1; i < call.arguments().size(); i++) {
+                    Expression key = call.arguments().get(i);
+                    if (!(key instanceof Literal l) || l.kind() != io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING) {
+                        throw new UnsupportedOperationException("json_tuple keys must be string literals: " + key);
+                    }
+                    String name = String.valueOf(l.value());
+                    Expression extract = new FunctionCall("json_extract", List.of(
+                            call.arguments().get(0),
+                            new io.github.joegxx.localsql.ir.expression.Literal("$." + name,
+                                    io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING)));
+                    selectItems.add(new io.github.joegxx.localsql.ir.expression.Alias(extract, name, List.of()));
+                }
+            } else {
+                selectItems.add(item);
+            }
         }
 
         boolean aggregated = false;

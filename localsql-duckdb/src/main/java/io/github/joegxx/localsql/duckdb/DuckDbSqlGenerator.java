@@ -665,7 +665,20 @@ public final class DuckDbSqlGenerator {
             Map.entry("last_value", "last_value"),
             Map.entry("nth_value", "nth_value"),
             Map.entry("max_by", "arg_max"),
-            Map.entry("min_by", "arg_min")
+            Map.entry("min_by", "arg_min"),
+            // Spark 3.5 registry backfill: DuckDB-native renames
+            Map.entry("greatest", "greatest"),
+            Map.entry("least", "least"),
+            Map.entry("nullif", "nullif"),
+            Map.entry("last", "last"),
+            Map.entry("skewness", "skewness"),
+            Map.entry("kurtosis", "kurtosis"),
+            Map.entry("format_string", "printf"),
+            Map.entry("array_sort", "list_sort"),
+            Map.entry("arrays_overlap", "list_has_any"),
+            Map.entry("bit_length", "bit_length"),
+            Map.entry("bit_count", "bit_count"),
+            Map.entry("rint", "round")
     );
 
     /** Custom rename overlay (from --function-map); overrides built-ins. */
@@ -1558,6 +1571,129 @@ public final class DuckDbSqlGenerator {
             case "conv" -> {
                 if (args.size() != 3) return false;
                 emitBuiltinUdfCall("conv", args, List.of("VARCHAR", "VARCHAR", "VARCHAR"), sb);
+                return true;
+            }
+            case "array_repeat" -> {
+                if (args.size() != 2) return false;
+                // DuckDB has no list_repeat: list_resize(list_value(x), n, x)
+                // grows the one-element list to n entries filled with x
+                sb.append("list_resize(list_value(");
+                emitExpr(args.get(0), sb);
+                sb.append("), CAST(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS BIGINT), ");
+                emitExpr(args.get(0), sb);
+                sb.append(")");
+                return true;
+            }
+            case "shiftleft" -> {
+                if (args.size() != 2) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" << ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
+            case "shiftright" -> {
+                if (args.size() != 2) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" >> ");
+                emitExpr(args.get(1), sb);
+                sb.append(")");
+                return true;
+            }
+            case "shiftrightunsigned" -> {
+                if (args.size() != 2) return false;
+                // mask to unsigned 64-bit first so the shift is logical, not
+                // arithmetic (Spark fills with zeros even for negatives)
+                sb.append("CAST((");
+                emitExpr(args.get(0), sb);
+                sb.append(" & 18446744073709551615) AS UBIGINT) >> ");
+                emitExpr(args.get(1), sb);
+                return true;
+            }
+            case "getbit", "bit_get" -> {
+                if (args.size() != 2) return false;
+                sb.append("(");
+                emitExpr(args.get(0), sb);
+                sb.append(" >> ");
+                emitExpr(args.get(1), sb);
+                sb.append(") & 1");
+                return true;
+            }
+            case "bit_and", "bit_or", "bit_xor" -> {
+                if (args.size() != 2) return false;
+                // scalar (non-aggregate) form; the aggregate form passes
+                // through FN_MAP untouched (DuckDB bit_and/bit_or/bit_xor)
+                if (name.equals("bit_xor")) {
+                    sb.append("xor(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(", ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(")");
+                } else {
+                    sb.append("(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(name.equals("bit_and") ? " & " : " | ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(")");
+                }
+                return true;
+            }
+            case "try_add" -> {
+                if (args.size() != 2) return false;
+                // Spark returns NULL on overflow; DuckDB errors. Wrap each side
+                // with try_cast to BIGINT so overflow yields NULL.
+                sb.append("(try_cast(");
+                emitExpr(args.get(0), sb);
+                sb.append(" AS HUGEINT) + try_cast(");
+                emitExpr(args.get(1), sb);
+                sb.append(" AS HUGEINT))");
+                return true;
+            }
+            case "from_utc_timestamp", "to_utc_timestamp" -> {
+                if (args.size() != 2) return false;
+                // from_utc: naive ts is UTC -> render in tz
+                //   timezone(tz, CAST(ts AS TIMESTAMP) AT TIME ZONE 'UTC')
+                // to_utc: naive ts is tz-local -> render in UTC
+                //   timezone('UTC', CAST(ts AS TIMESTAMP) AT TIME ZONE tz)
+                if (name.equals("from_utc_timestamp")) {
+                    sb.append("timezone(");
+                    emitExpr(args.get(1), sb);
+                    sb.append(", CAST(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" AS TIMESTAMP) AT TIME ZONE 'UTC')");
+                } else {
+                    sb.append("timezone('UTC', CAST(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(" AS TIMESTAMP) AT TIME ZONE ");
+                    emitExpr(args.get(1), sb);
+                    sb.append(")");
+                }
+                return true;
+            }
+            case "localtimestamp" -> {
+                if (!args.isEmpty()) return false;
+                sb.append("CAST(now() AS TIMESTAMP)");
+                return true;
+            }
+            case "timestamp_seconds", "timestamp_millis", "timestamp_micros" -> {
+                if (args.size() != 1) return false;
+                // epoch value -> TIMESTAMP; DuckDB to_timestamp takes seconds
+                // (accepts fractional for sub-second precision)
+                String divisor = name.equals("timestamp_seconds") ? "1"
+                        : name.equals("timestamp_millis") ? "1000" : "1000000";
+                sb.append("CAST(to_timestamp(CAST(");
+                if (divisor.equals("1")) {
+                    emitExpr(args.get(0), sb);
+                } else {
+                    sb.append("(");
+                    emitExpr(args.get(0), sb);
+                    sb.append(") / ").append(divisor);
+                }
+                sb.append(" AS DOUBLE)) AS TIMESTAMP)");
                 return true;
             }
             default -> {

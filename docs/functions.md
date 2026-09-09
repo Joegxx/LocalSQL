@@ -1,6 +1,6 @@
 # 函数支持一览
 
-按 Spark SQL 3.5.x 名称列出已实现的函数,括号内是翻译到的 DuckDB 目标。生成器函数映射(`DuckDbSqlGenerator.FN_MAP` + 参数重构 `emitMappedFunction` + 连接级 Java UDF)由 `SparkFunctionMappingTest` 参数化回归保护(232 个表达式用例);有语义差异或 DuckDB 限制的条目单独标注。
+按 Spark SQL 3.5.x 名称列出已实现的函数,括号内是翻译到的 DuckDB 目标。生成器函数映射(`DuckDbSqlGenerator.FN_MAP` + 参数重构 `emitMappedFunction` + 连接级 Java UDF)由 `SparkFunctionMappingTest` 参数化回归保护(262 个表达式用例);有语义差异或 DuckDB 限制的条目单独标注。
 
 - [字符串](#字符串)
 - [数值](#数值)
@@ -41,6 +41,7 @@
 | `elt` | 参数重构 | 1-based 取第 N 个参数 |
 | `space` | 参数重构 | `repeat(' ', n)` |
 | `format_number` | 参数重构 | 字面量 scale → `printf`/四舍五入 |
+| `format_string` | `printf` | |
 | `hex` / `unhex` | 同名 | |
 | `base64` / `unbase64` | `to_base64` / `from_base64` | |
 | `encode` / `decode` | 同名 | 仅 UTF-8(Spark 默认) |
@@ -67,6 +68,13 @@
 | `positive` / `negative` | `+x` / `-x` | |
 | `isnan` / `isinf` | 同名 | |
 | `try_divide` | 参数重构 | `a / NULLIF(b, 0)` |
+| `try_add` | 参数重构 | `try_cast(a AS HUGEINT) + try_cast(b AS HUGEINT)`,溢出 → NULL |
+| `rint` | `round` | |
+| `greatest` / `least` | 同名 | 变参 |
+| `shl`/`shiftleft` / `shiftright` / `shiftrightunsigned` | 参数重构 | `<<` / `>>` / 掩码后 `>>`(逻辑移位) |
+| `bit_and` / `bit_or` / `bit_xor`(标量) | 参数重构 | `&` / `|` / `xor()`;同名聚合形式透传 DuckDB |
+| `getbit` / `bit_get` | 参数重构 | `(x >> n) & 1` |
+| `bit_length` / `bit_count` | 同名 | |
 | `bround` | Java UDF | HALF_EVEN(BigDecimal),1 参/2 参重载 |
 
 ## 日期时间
@@ -92,6 +100,10 @@
 | `to_unix_timestamp` | 参数重构 | `epoch(CAST(... AS TIMESTAMP))` |
 | `from_unixtime` | 参数重构 | `strftime`;默认格式 `yyyy-MM-dd HH:mm:ss` |
 | `unix_seconds` / `unix_millis` / `unix_micros` | `epoch` / `epoch_ms` / `epoch_us` | |
+| `timestamp_seconds` / `timestamp_millis` / `timestamp_micros` | 参数重构 | epoch 值 → `to_timestamp(x / 1000 / 1000000)` 后 CAST TIMESTAMP |
+| `from_utc_timestamp` | 参数重构 | `timezone(tz, ts AT TIME ZONE 'UTC')` |
+| `to_utc_timestamp` | 参数重构 | `timezone('UTC', ts AT TIME ZONE tz)` |
+| `localtimestamp` | `CAST(now() AS TIMESTAMP)` | 会话时区近似(Spark 语义为会话时区) |
 | `unix_date` | 参数重构 | `epoch(DATE)` |
 | `date_from_unix_date` | 参数重构 | `DATE 'epoch' + days` |
 | `current_timezone` | `strftime(now(), '%Z')` | |
@@ -105,6 +117,9 @@
 | `array_contains` | `list_contains` | |
 | `array_position` | `list_position` | |
 | `array_distinct` / `array_intersect` / `array_except` / `array_union` | `list_distinct` / `list_intersect` / 参数重构 / 参数重构 | except/union 用 `list_distinct(list_concat(...))` 组合 |
+| `array_sort` | `list_sort` | |
+| `array_repeat` | 参数重构 | `list_resize(list_value(x), n, x)`(DuckDB 无 list_repeat) |
+| `arrays_overlap` | `list_has_any` | |
 | `array_join` | `array_to_string` | |
 | `array_max` / `array_min` | `list_max` / `list_min` | |
 | `array_remove` | `list_remove` | |
@@ -150,6 +165,8 @@
 | `percentile` / `percentile_approx` / `approx_percentile` | `quantile_cont` | 近似语义,精确 percentile 可能偏差 |
 | `count_if` | 参数重构 | `count(CASE WHEN p THEN 1 END)` |
 | `bool_and` / `bool_or` / `every` / `some` / `any` | 同名 | |
+| `last` | `last` | |
+| `skewness` / `kurtosis` | 同名 | |
 
 ## 窗口
 

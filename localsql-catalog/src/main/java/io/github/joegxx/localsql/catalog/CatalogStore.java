@@ -3,7 +3,13 @@ package io.github.joegxx.localsql.catalog;
 import java.util.List;
 import java.util.Optional;
 
-public interface CatalogStore {
+/**
+ * Persistence for logical catalog metadata: databases, tables, columns and
+ * properties. Runtime execution state (physical table names, replay DDL) is
+ * a separate concern in {@link RuntimeStore}; a CatalogStore implementation
+ * does not have to persist it.
+ */
+public interface CatalogStore extends RuntimeStore {
 
     void init() throws Exception;
 
@@ -17,11 +23,11 @@ public interface CatalogStore {
 
     List<Catalog.Table> loadTables(String database) throws Exception;
 
-    void saveRuntimeInfo(long tableId, String duckTableName, String createSql) throws Exception;
+    // ---- database-level metadata ----
 
-    Optional<RuntimeInfo> loadRuntimeInfo(long tableId) throws Exception;
+    void saveDatabase(Catalog.Database database) throws Exception;
 
-    List<RuntimeInfo> loadAllRuntimeInfo() throws Exception;
+    void deleteDatabase(String name) throws Exception;
 
-    record RuntimeInfo(long tableId, String duckTableName, String createSql, String lastRefresh) {}
+    List<Catalog.Database> loadDatabases() throws Exception;
 }

@@ -72,6 +72,7 @@ public final class UdfProjectionSplitter {
         List<Expression> stage1Items = new ArrayList<>();
         List<OutputSpec> outputs = new ArrayList<>();
         boolean anyUdf = false;
+        boolean sawStar = false;
         for (Expression item : project.projectList()) {
             Expression inner = item instanceof Alias a ? a.child() : item;
             Optional<UdfDefinition> udf = inner instanceof FunctionCall call && call.windowSpec() == null
@@ -95,16 +96,25 @@ public final class UdfProjectionSplitter {
                                     + "found nested inside: " + item);
                 }
                 if (item instanceof Star) {
-                    throw new UnsupportedOperationException(
-                            "SELECT * combined with Java UDF is not supported yet");
+                    // Only a problem when UDF calls share the projection;
+                    // a UDF-free query returns null below and takes the
+                    // normal DuckDB path.
+                    sawStar = true;
                 }
                 stage1Items.add(item);
                 outputs.add(new OutputSpec.Column(stage1Items.size() - 1));
             }
         }
         if (!anyUdf) {
+            // No UDF in this projection: plain DuckDB path handles it,
+            // including SELECT *; but a UDF used elsewhere (WHERE, JOIN,
+            // aggregates) must still be rejected explicitly.
             requireNoUdf(top, "only top-level SELECT projection is supported (not WHERE/JOIN/aggregate/window)");
             return null;
+        }
+        if (sawStar) {
+            throw new UnsupportedOperationException(
+                    "SELECT * combined with Java UDF is not supported yet");
         }
 
         Project stage1 = new Project(project.child(), stage1Items);

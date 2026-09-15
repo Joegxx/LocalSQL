@@ -1,6 +1,17 @@
 # LocalSQL 使用指南
 
-LocalSQL 是一个内嵌的 Spark SQL 运行时:用 Spark SQL 3.2.0 语法写查询,翻译后在进程内 DuckDB 上执行,并通过标准 HiveServer2 Thrift 协议对外提供服务。无需部署 Spark/Hadoop/Hive,任何支持 Hive JDBC 的客户端都能直接连接。
+LocalSQL 是一个本地 SQL Sandbox：用 Spark SQL 3.2.0 语法写查询，翻译后在进程内 DuckDB 上执行，并提供 HiveServer2 Thrift 连接入口。无需部署 Spark/Hadoop/Hive 服务，但不保证任意 Hive JDBC 客户端的全部协议行为或 Spark 语义一致性。
+
+## 当前使用边界（2026-09-11）
+
+- Analyzer 已提供严格的名称解析：不存在的数据库/表、缺失列、歧义引用在执行前拒绝（错库限定名不再落到其他物理表）。函数元数据目录已接入（未知函数在 strict 模式拒绝，默认 lenient 透传）；类型推导仍不完整，函数返回类型来自通用推导而非签名。
+- DDL 失败后物理库与持久化元数据一致，内存 Catalog 由快照恢复；数据库级属性的持久化仍有限。
+- `--import-ddl` 异常清理可能删除其他库的同名物理表，修复前只在可丢弃副本上使用。
+- 正式 `runtime.jar --udf-config ...` 会因缺少 Hive 运行类而失败；测试 classpath 中可用不代表产物可用。注册 UDF/UDTF 不再影响未使用它们的普通查询。
+- Thrift 的类型元数据、状态查询、取消与 Session 清理存在缺口（GetTypeInfo 空值崩溃已修复）；不能把接口方法齐全理解为协议兼容已完成。
+- 保留语法一律明确拒绝（见"显式不支持的特性"），不会静默返回错误结果。
+
+修复方案、实施顺序及验收标准见[开发计划](./development-plan.md)。以下命令是当前入口说明，不代表上述缺陷已经修复。
 
 ## 目录
 
@@ -30,10 +41,10 @@ ANTLR 解析 (Spark 3.2.0 SqlBase 语法)
 Common IR (唯一真相源)
    |
    v
-Analyzer   (Catalog 元数据填充、类型推导)
+Analyzer   (已接入，名称/类型绑定不完整)
    |
    v
-Rewrite    (Spark -> DuckDB 函数名映射)
+Rewrite    (部分映射；其余转换仍在 Generator)
    |
    v
 DuckDB SQL 生成
@@ -183,7 +194,7 @@ ORDER BY cnt DESC;
 
 ## 支持的 SQL 特性
 
-以下特性均已通过与 DuckDB 原生执行的差分一致性验证(TPC-DS 135 个查询全量对比):
+以下特性已有实现路径及回归样例。TPC-DS 差分以 DuckDB 原生执行为期望，不是 Spark oracle，也不检查结果类型或行顺序：
 
 - **基本查询**:`SELECT` / `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT`
 - `SELECT DISTINCT`
@@ -211,8 +222,8 @@ ORDER BY cnt DESC;
 - **`CREATE VIEW v AS SELECT ...`** / **`CREATE OR REPLACE VIEW`** / `IF NOT EXISTS`;视图可被查询,出现在 `SHOW TABLES`
 - **`DROP TABLE [IF EXISTS] t`** / **`DROP VIEW [IF EXISTS] v`**:删物理对象 + 清 Catalog 元数据;类型不匹配(DROP TABLE 删视图等)报错
 - **`CREATE/DROP/ALTER DATABASE`**:`CREATE DATABASE [IF NOT EXISTS] db` / `DROP DATABASE [IF EXISTS] db [CASCADE|RESTRICT]`(默认 RESTRICT,非空库需 CASCADE) / `ALTER DATABASE db SET DBPROPERTIES / LOCATION`
-- **`ALTER TABLE`**:`ADD COLUMNS` / `DROP COLUMNS` / `RENAME COLUMN` / `ALTER COLUMN TYPE / SET NOT NULL` / `REPLACE COLUMNS` / `RENAME TO` / `SET/UNSET TBLPROPERTIES`(视图同理);执行后 `DESCRIBE` 刷新 Catalog
-- **分区表 `ADD COLUMNS`(MVP 用重建表实现)**:Hive 语义要求新列插在分区列之前,而 DuckDB 只能尾部追加,因此对带 `PARTITIONED BY` 的表执行 `ADD COLUMNS` 时走 `CREATE tmp → INSERT SELECT → DROP → RENAME` 重建,数据保留。⚠️ 已知限制:整表重写(大表 O(全量行) 且重建期间占用双倍空间)、`ADD COLUMNS (col AFTER x)` 指定位置被忽略(一律插在分区列前)、重建 DDL 未回写 `runtime_table` 的 `create_sql`(重启回放得到的是旧 schema)——后续版本用 DuckDB 1.5 的 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + `ALTER [COLUMN]` 位置语法或原生实现替换
+- **`ALTER TABLE`**：`ADD/DROP COLUMNS`、`RENAME COLUMN`、`ALTER COLUMN TYPE / SET NOT NULL`、`REPLACE COLUMNS`、`RENAME TO`、`SET/UNSET TBLPROPERTIES`；列变更后 `DESCRIBE` 刷新 Catalog。视图不能执行表的列变更操作。
+- **分区表 `ADD COLUMNS`**：当前在事务内重建物理表，把新列插在分区列前；需要全量复制并占用额外空间。FIRST/AFTER 位置请求被 Analyzer 拒绝。运行时 DDL 信息及失败后的缓存恢复仍需完善；当前加载文件库不依赖 DDL 自动重放。
 - 运行期建的表/视图注册进 Catalog,IDEA 数据源刷新后可见,`DESCRIBE` 能看到真实列类型
 
 ## 显式不支持的特性
@@ -228,7 +239,9 @@ ORDER BY cnt DESC;
 | `NATURAL JOIN` | 需要同名列解析 |
 | 命名窗口 `WINDOW w AS ...` | 先写 `OVER (...)` 内联形式 |
 | 聚合 `FILTER (WHERE ...)` 子句 | |
-| Lambda / TRANSFORM | |
+| `SORT BY` / `CLUSTER BY` / `DISTRIBUTE BY` | DuckDB 无对应执行语义，请改用 `ORDER BY` |
+| 非字面量 `LIMIT`（如 `LIMIT 1+1`）、`LIMIT ALL` | LIMIT 必须是整数字面量 |
+| 脚本 TRANSFORM 查询 | 部分高阶 Lambda 函数已实现，见函数支持一览 |
 
 ## 常见问题排查
 
@@ -236,7 +249,7 @@ ORDER BY cnt DESC;
 确认使用的是当前版本。历史版本不支持小写关键字,现已在词法层做大小写折叠;若仍失败,检查是否端口连到了别的服务。
 
 **客户端连不上?**
-1. `lsof -iTCP:10000 -sTCP:LISTEN` 确认进程监听;若提示端口被占,说明有旧实例还在跑——先 `pkill -f runtime.jar` 再启动(当前版本端口被占会直接报错退出,不会静默假活);
+1. `lsof -iTCP:10000 -sTCP:LISTEN` 确认端口占用；先核实进程身份，再停止自己启动的实例或改用其他端口。当前绑定失败会退出整个 JVM；也可能是环境禁止监听，不一定是旧实例占用。
 2. 客户端 JDBC URL 必须是 `jdbc:hive2://` 前缀(不是 `jdbc:duckdb`);
 3. 用了自定义端口时,URL 里的端口要一致。
 
@@ -257,22 +270,24 @@ DataGrip/IntelliJ 的内省依赖 `SHOW DATABASES` / `SHOW TABLES` / `DESCRIBE` 
 ## 运行测试
 
 ```bash
-# 全量(284 个)
+# 全量；需要允许本地端口监听
 mvn clean test
 
 # 只跑 TPC-DS 差分一致性(135 个,需要网络装 DuckDB tpcds 扩展)
-mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest
+mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest -Dsurefire.failIfNoSpecifiedTests=false
 
-# 只跑翻译回归(136 个,不执行)
-mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest
+# 只跑翻译回归(135 份 SQL + 1 个汇总测试，不执行)
+mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 测试体系分三层:
 
 | 层 | 测试类 | 内容 |
 |---|---|---|
-| L1 翻译回归 | `TpcdsQueryPipelineTest` | 136 个 TPC-DS 查询 parse->generate,不执行 |
+| L1 翻译回归 | `TpcdsQueryPipelineTest` | 135 份 SQL + 1 个汇总测试，parse->analyze->rewrite->generate，不执行 |
 | L3 手工 golden | `TpcdsGoldenResultTest` | 走真实 Thrift 端点执行,与 Spark 语义手工校准值对比 |
-| L3 差分 oracle | `TpcdsConsistencyTest` | 同一数据同一 SQL:期望侧 DuckDB 原生执行原文,实际侧走 Thrift 管线,双向 `EXCEPT ALL` 严格对比,135/135 |
+| L3 DuckDB 差分 | `TpcdsConsistencyTest` | DuckDB 原生 vs. Thrift；字符串化多重集比较，oracle 不可用的查询只检查执行成功 |
+
+2026-09-10 审查：Java 21 打包成功；排除 7 个端口相关测试类后 455 项测试通过，全量测试受沙箱绑定权限限制未完成。可复现命令和完整排除清单见开发计划，不能据此宣称全量测试或 Spark 语义一致性通过。
 
 更多面向开发者的架构约束见根目录 `AGENTS.md`。

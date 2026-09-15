@@ -417,7 +417,7 @@ public final class DuckDbSqlGenerator {
         }
         else if (e instanceof FunctionCall f) emitFunctionCall(f, sb);
         else if (e instanceof Cast c) {
-            sb.append("CAST(");
+            sb.append(c.tryCast() ? "TRY_CAST(" : "CAST(");
             emitExpr(c.child(), sb);
             sb.append(" AS ").append(duckType(c.target())).append(")");
         }
@@ -477,16 +477,12 @@ public final class DuckDbSqlGenerator {
      */
     private static final Map<String, String> FN_MAP = Map.ofEntries(
             // strings
-            Map.entry("size", "array_length"),
-            Map.entry("explode", "unnest"),
-            Map.entry("posexplode", "unnest"),
             Map.entry("length", "length"),
-            Map.entry("substr", "substring"),
+            Map.entry("map_from_arrays", "map"),
             Map.entry("substring", "substring"),
             Map.entry("concat", "concat"),
             Map.entry("concat_ws", "concat_ws"),
             Map.entry("coalesce", "coalesce"),
-            Map.entry("get_field", "struct_extract"),
             Map.entry("cast", "cast"),
             Map.entry("count", "count"),
             Map.entry("sum", "sum"),
@@ -507,16 +503,10 @@ public final class DuckDbSqlGenerator {
             Map.entry("levenshtein", "levenshtein"),
             Map.entry("soundex", "soundex"),
             Map.entry("contains", "contains"),
-            Map.entry("startswith", "starts_with"),
-            Map.entry("endswith", "ends_with"),
             Map.entry("repeat", "repeat"),
             Map.entry("replace", "replace"),
-            Map.entry("instr", "strpos"),
-            Map.entry("split", "regexp_split_to_array"),
-            Map.entry("regexp_replace", "regexp_replace"),
             Map.entry("regexp_extract", "regexp_extract"),
             Map.entry("regexp_extract_all", "regexp_extract_all"),
-            Map.entry("regexp_like", "regexp_matches"),
             // numbers
             Map.entry("abs", "abs"),
             Map.entry("ceil", "ceil"),
@@ -529,9 +519,7 @@ public final class DuckDbSqlGenerator {
             Map.entry("log2", "log2"),
             Map.entry("log10", "log10"),
             Map.entry("pow", "pow"),
-            Map.entry("power", "pow"),
             Map.entry("sign", "sign"),
-            Map.entry("signum", "sign"),
             Map.entry("isnan", "isnan"),
             Map.entry("isinf", "isinf"),
             Map.entry("pi", "pi"),
@@ -564,15 +552,9 @@ public final class DuckDbSqlGenerator {
             Map.entry("right", "right"),
             Map.entry("translate", "translate"),
             Map.entry("printf", "printf"),
-            Map.entry("char", "chr"),
-            Map.entry("sha", "sha1"),
-            Map.entry("mean", "avg"),
-            Map.entry("std", "stddev_samp"),
             // encoding / hash
             Map.entry("hex", "hex"),
             Map.entry("unhex", "unhex"),
-            Map.entry("base64", "to_base64"),
-            Map.entry("unbase64", "from_base64"),
             Map.entry("md5", "md5"),
             Map.entry("sha1", "sha1"),
             // encoding (charset support: utf-8 only, like Spark's default)
@@ -586,7 +568,6 @@ public final class DuckDbSqlGenerator {
             Map.entry("map_concat", "map_concat"),
             Map.entry("map_entries", "map_entries"),
             Map.entry("map_from_entries", "map_from_entries"),
-            Map.entry("map_from_arrays", "map"),
             Map.entry("to_json", "to_json"),
             Map.entry("typeof", "typeof"),
             Map.entry("uuid", "uuid"),
@@ -596,35 +577,20 @@ public final class DuckDbSqlGenerator {
             Map.entry("year", "year"),
             Map.entry("month", "month"),
             Map.entry("day", "day"),
-            Map.entry("dayofmonth", "day"),
             Map.entry("quarter", "quarter"),
             Map.entry("hour", "hour"),
             Map.entry("minute", "minute"),
             Map.entry("second", "second"),
             Map.entry("dayofyear", "dayofyear"),
-            Map.entry("weekofyear", "week"),
             Map.entry("last_day", "last_day"),
-            Map.entry("get_json_object", "json_extract_string"),
             Map.entry("json_extract", "json_extract"),
             Map.entry("json_array_length", "json_array_length"),
             // arrays / maps
-            Map.entry("array", "list_value"),
-            Map.entry("array_contains", "list_contains"),
-            Map.entry("array_position", "list_position"),
-            Map.entry("array_distinct", "list_distinct"),
-            Map.entry("array_intersect", "list_intersect"),
             Map.entry("array_join", "array_to_string"),
-            Map.entry("array_max", "list_max"),
-            Map.entry("array_min", "list_min"),
-            Map.entry("element_at", "list_element"),
-            Map.entry("json_object_keys", "json_keys"),
             Map.entry("flatten", "flatten"),
-            Map.entry("cardinality", "len"),
             Map.entry("map_keys", "map_keys"),
             Map.entry("map_values", "map_values"),
             // aggregates
-            Map.entry("nvl", "coalesce"),
-            Map.entry("ifnull", "coalesce"),
             Map.entry("any_value", "any_value"),
             Map.entry("first", "first"),
             Map.entry("median", "median"),
@@ -632,26 +598,14 @@ public final class DuckDbSqlGenerator {
             Map.entry("corr", "corr"),
             Map.entry("covar_pop", "covar_pop"),
             Map.entry("covar_samp", "covar_samp"),
-            Map.entry("stddev", "stddev_samp"),
             Map.entry("stddev_pop", "stddev_pop"),
             Map.entry("stddev_samp", "stddev_samp"),
-            Map.entry("variance", "var_samp"),
             Map.entry("var_pop", "var_pop"),
             Map.entry("var_samp", "var_samp"),
             Map.entry("approx_count_distinct", "approx_count_distinct"),
-            Map.entry("collect_list", "list"),
-            Map.entry("percentile", "quantile_cont"),
-            Map.entry("percentile_approx", "quantile_cont"),
-            Map.entry("approx_percentile", "quantile_cont"),
             Map.entry("bool_and", "bool_and"),
             Map.entry("bool_or", "bool_or"),
-            Map.entry("every", "bool_and"),
-            Map.entry("some", "bool_or"),
-            Map.entry("any", "bool_or"),
             // higher-order functions (lambda-capable in DuckDB)
-            Map.entry("transform", "list_transform"),
-            Map.entry("filter", "list_filter"),
-            Map.entry("reduce", "list_reduce"),
             // window
             Map.entry("row_number", "row_number"),
             Map.entry("rank", "rank"),
@@ -664,8 +618,6 @@ public final class DuckDbSqlGenerator {
             Map.entry("first_value", "first_value"),
             Map.entry("last_value", "last_value"),
             Map.entry("nth_value", "nth_value"),
-            Map.entry("max_by", "arg_max"),
-            Map.entry("min_by", "arg_min"),
             // Spark 3.5 registry backfill: DuckDB-native renames
             Map.entry("greatest", "greatest"),
             Map.entry("least", "least"),
@@ -673,12 +625,8 @@ public final class DuckDbSqlGenerator {
             Map.entry("last", "last"),
             Map.entry("skewness", "skewness"),
             Map.entry("kurtosis", "kurtosis"),
-            Map.entry("format_string", "printf"),
-            Map.entry("array_sort", "list_sort"),
-            Map.entry("arrays_overlap", "list_has_any"),
             Map.entry("bit_length", "bit_length"),
-            Map.entry("bit_count", "bit_count"),
-            Map.entry("rint", "round")
+            Map.entry("bit_count", "bit_count")
     );
 
     /** Custom rename overlay (from --function-map); overrides built-ins. */
@@ -693,6 +641,13 @@ public final class DuckDbSqlGenerator {
     public DuckDbSqlGenerator(Map<String, String> customRenames, Map<String, String> customTemplates) {
         this.customRenames = Map.copyOf(customRenames == null ? Map.of() : customRenames);
         this.customTemplates = Map.copyOf(customTemplates == null ? Map.of() : customTemplates);
+    }
+
+    /** Source function names with a generator-owned custom rename or template rule. */
+    public java.util.Set<String> customFunctionNames() {
+        java.util.Set<String> names = new java.util.HashSet<>(customRenames.keySet());
+        names.addAll(customTemplates.keySet());
+        return names;
     }
 
     /**
@@ -755,17 +710,6 @@ public final class DuckDbSqlGenerator {
                 emitBuiltinUdfCall("initcap", args, List.of("VARCHAR"), sb);
                 return true;
             }
-            case "if" -> {
-                if (args.size() != 3) return false;
-                sb.append("(CASE WHEN ");
-                emitExpr(args.get(0), sb);
-                sb.append(" THEN ");
-                emitExpr(args.get(1), sb);
-                sb.append(" ELSE ");
-                emitExpr(args.get(2), sb);
-                sb.append(" END)");
-                return true;
-            }
             case "nvl2" -> {
                 if (args.size() != 3) return false;
                 sb.append("(CASE WHEN ");
@@ -811,92 +755,6 @@ public final class DuckDbSqlGenerator {
                 sb.append(" END)");
                 return true;
             }
-            case "date_add", "date_sub" -> {
-                if (args.size() != 2) return false;
-                sb.append("(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS DATE) ").append(name.equals("date_add") ? "+" : "-").append(" (");
-                emitExpr(args.get(1), sb);
-                sb.append("))");
-                return true;
-            }
-            case "datediff" -> {
-                if (args.size() != 2) return false;
-                // Spark datediff(end, start); DuckDB date_diff(part, start, end)
-                sb.append("date_diff('day', CAST(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS DATE), CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS DATE))");
-                return true;
-            }
-            case "add_months" -> {
-                if (args.size() != 2) return false;
-                sb.append("(CAST(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS DATE) + to_months(");
-                emitExpr(args.get(1), sb);
-                sb.append(") AS DATE))");
-                return true;
-            }
-            case "unix_timestamp" -> {
-                if (args.size() == 1) {
-                    sb.append("CAST(epoch(CAST(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" AS TIMESTAMP)) AS BIGINT)");
-                    return true;
-                }
-                if (args.isEmpty()) {
-                    sb.append("CAST(epoch(CAST(CURRENT_TIMESTAMP AS TIMESTAMP)) AS BIGINT)");
-                    return true;
-                }
-                return false;
-            }
-            case "from_unixtime" -> {
-                if (args.size() != 1) return false;
-                sb.append("strftime(to_timestamp(");
-                emitExpr(args.get(0), sb);
-                sb.append("), '%Y-%m-%d %H:%M:%S')");
-                return true;
-            }
-            case "weekday" -> {
-                if (args.size() != 1) return false;
-                // Spark weekday: Monday=0..Sunday=6; DuckDB weekday is 1-based Monday
-                sb.append("((weekday(");
-                emitExpr(args.get(0), sb);
-                sb.append(")) - 1)");
-                return true;
-            }
-            case "dayofweek" -> {
-                if (args.size() != 1) return false;
-                // Spark dayofweek: Sunday=1..Saturday=7; DuckDB weekday: Monday=1..Sunday=7
-                sb.append("((weekday(");
-                emitExpr(args.get(0), sb);
-                sb.append(") % 7) + 1)");
-                return true;
-            }
-            case "regexp_replace" -> {
-                if (args.size() < 2 || args.size() > 3) return false;
-                // Spark replaces all occurrences; DuckDB needs the 'g' flag
-                sb.append("regexp_replace(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(", ");
-                if (args.size() == 3) emitExpr(args.get(2), sb);
-                else sb.append("''");
-                sb.append(", 'g')");
-                return true;
-            }
-            case "regexp_count" -> {
-                if (args.size() < 2 || args.size() > 3) return false;
-                sb.append("len(regexp_extract_all(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append("))");
-                return true;
-            }
             case "array_union" -> {
                 if (args.size() != 2) return false;
                 sb.append("list_distinct(list_concat(");
@@ -926,48 +784,6 @@ public final class DuckDbSqlGenerator {
                 emitExpr(args.get(1), sb);
                 sb.append(")");
                 return true;
-            }
-            case "to_date" -> {
-                if (args.size() == 1) {
-                    sb.append("CAST(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" AS DATE)");
-                    return true;
-                }
-                if (args.size() == 2) {
-                    sb.append("CAST(strptime(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(", ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(") AS DATE)");
-                    return true;
-                }
-                return false;
-            }
-            case "to_timestamp" -> {
-                if (args.size() != 1) return false;
-                sb.append("CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS TIMESTAMP)");
-                return true;
-            }
-            case "log" -> {
-                if (args.size() == 1) {
-                    sb.append("ln(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(")");
-                    return true;
-                }
-                if (args.size() == 2) {
-                    // Spark log(base, x); DuckDB log(x) is base 10
-                    sb.append("(ln(");
-                    emitExpr(args.get(1), sb);
-                    sb.append(") / ln(");
-                    emitExpr(args.get(0), sb);
-                    sb.append("))");
-                    return true;
-                }
-                return false;
             }
             case "locate", "position" -> {
                 if (args.size() == 2) {
@@ -999,21 +815,6 @@ public final class DuckDbSqlGenerator {
                 }
                 return false;
             }
-            case "sha2" -> {
-                if (args.size() != 2) return false;
-                Object bits = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER
-                        ? l.value() : null;
-                if (bits == null || !(bits instanceof Number n)
-                        || (n.longValue() != 0 && n.longValue() != 256)) {
-                    throw new UnsupportedOperationException(
-                            "sha2 supports 0/256 bits via DuckDB sha256; requested: " + args.get(1));
-                }
-                sb.append("sha256(");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
             case "map" -> {
                 if (args.isEmpty() || args.size() % 2 != 0) return false;
                 sb.append("map(list_value(");
@@ -1029,135 +830,12 @@ public final class DuckDbSqlGenerator {
                 sb.append("))");
                 return true;
             }
-            case "string", "tinyint", "smallint", "int", "bigint", "float", "double",
-                 "boolean", "date", "timestamp", "binary", "decimal" -> {
-                if (args.isEmpty() || args.size() > 3) return false;
-                String sqlType = switch (name) {
-                    case "string" -> "VARCHAR";
-                    case "date" -> "DATE";
-                    case "timestamp" -> "TIMESTAMP";
-                    case "binary" -> "BLOB";
-                    default -> name.toUpperCase();
-                };
-                sb.append("CAST(");
-                emitExpr(args.get(0), sb);
-                if (name.equals("decimal") && args.size() >= 2) {
-                    Object p = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
-                    if (p == null) throw new UnsupportedOperationException("decimal(x, p[, s]) requires literal precision");
-                    Object s = args.size() == 3 && args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l2
-                            && l2.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l2.value() : 0;
-                    sqlType = "DECIMAL(" + p + "," + s + ")";
-                } else if (name.equals("decimal")) {
-                    sqlType = "DECIMAL(10,0)";
-                }
-                sb.append(" AS ").append(sqlType).append(")");
-                return true;
-            }
-            case "isnull" -> {
-                if (args.size() != 1) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" IS NULL)");
-                return true;
-            }
-            case "isnotnull" -> {
-                if (args.size() != 1) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" IS NOT NULL)");
-                return true;
-            }
-            case "positive" -> {
-                if (args.size() != 1) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "negative" -> {
-                if (args.size() != 1) return false;
-                sb.append("(-(");
-                emitExpr(args.get(0), sb);
-                sb.append("))");
-                return true;
-            }
             case "octet_length" -> {
                 // DuckDB's octet_length only binds for BLOB; strings need an explicit cast
                 if (args.size() != 1) return false;
                 sb.append("octet_length(CAST(");
                 emitExpr(args.get(0), sb);
                 sb.append(" AS BLOB))");
-                return true;
-            }
-            case "e" -> {
-                sb.append("exp(1)");
-                return true;
-            }
-            case "expm1" -> {
-                if (args.size() != 1) return false;
-                sb.append("(exp(");
-                emitExpr(args.get(0), sb);
-                sb.append(") - 1)");
-                return true;
-            }
-            case "log1p" -> {
-                if (args.size() != 1) return false;
-                sb.append("ln((");
-                emitExpr(args.get(0), sb);
-                sb.append(") + 1)");
-                return true;
-            }
-            case "hypot" -> {
-                if (args.size() != 2) return false;
-                sb.append("sqrt((");
-                emitExpr(args.get(0), sb);
-                sb.append(" * ");
-                emitExpr(args.get(0), sb);
-                sb.append(") + (");
-                emitExpr(args.get(1), sb);
-                sb.append(" * ");
-                emitExpr(args.get(1), sb);
-                sb.append("))");
-                return true;
-            }
-            case "nanvl" -> {
-                if (args.size() != 2) return false;
-                sb.append("(CASE WHEN isnan(");
-                emitExpr(args.get(0), sb);
-                sb.append(") THEN ");
-                emitExpr(args.get(1), sb);
-                sb.append(" ELSE ");
-                emitExpr(args.get(0), sb);
-                sb.append(" END)");
-                return true;
-            }
-            case "elt" -> {
-                if (args.size() < 2) return false;
-                sb.append("list_element(list_value(");
-                for (int i = 1; i < args.size(); i++) {
-                    if (i > 1) sb.append(", ");
-                    emitExpr(args.get(i), sb);
-                }
-                sb.append("), ");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "space" -> {
-                if (args.size() != 1) return false;
-                sb.append("repeat(' ', ");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "find_in_set" -> {
-                if (args.size() != 2) return false;
-                sb.append("coalesce(list_position(string_split(CAST(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS VARCHAR), ','), CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS VARCHAR)), 0)");
                 return true;
             }
             case "substring_index" -> {
@@ -1215,14 +893,6 @@ public final class DuckDbSqlGenerator {
                 sb.append(")");
                 return true;
             }
-            case "current_catalog" -> {
-                sb.append("'spark_catalog'");
-                return true;
-            }
-            case "current_timezone" -> {
-                sb.append("current_setting('TimeZone')");
-                return true;
-            }
             case "date_from_unix_date" -> {
                 if (args.size() != 1) return false;
                 sb.append("(DATE '1970-01-01' + CAST((");
@@ -1235,48 +905,6 @@ public final class DuckDbSqlGenerator {
                 sb.append("date_diff('day', DATE '1970-01-01', CAST(");
                 emitExpr(args.get(0), sb);
                 sb.append(" AS DATE))");
-                return true;
-            }
-            case "unix_seconds", "unix_millis", "unix_micros" -> {
-                if (args.size() != 1) return false;
-                String fn = switch (name) {
-                    case "unix_seconds" -> "epoch";
-                    case "unix_millis" -> "epoch_ms";
-                    default -> "epoch_us";
-                };
-                sb.append("CAST(").append(fn).append("(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS TIMESTAMP)) AS BIGINT)");
-                return true;
-            }
-            case "to_unix_timestamp" -> {
-                if (args.size() != 1) return false;
-                sb.append("CAST(epoch(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS TIMESTAMP)) AS BIGINT)");
-                return true;
-            }
-            case "count_if" -> {
-                if (args.size() != 1) return false;
-                sb.append("count(CASE WHEN ");
-                emitExpr(args.get(0), sb);
-                sb.append(" THEN 1 END)");
-                return true;
-            }
-            case "collect_set" -> {
-                if (args.size() != 1) return false;
-                sb.append("list(DISTINCT ");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "try_divide" -> {
-                if (args.size() != 2) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" / NULLIF(");
-                emitExpr(args.get(1), sb);
-                sb.append(", 0))");
                 return true;
             }
             case "months_between" -> {
@@ -1321,72 +949,6 @@ public final class DuckDbSqlGenerator {
                 sb.append(") - 1)) % 7 + 7) % 7 = 0 THEN 7 ELSE (((").append(target).append(" - (weekday(");
                 emitExpr(args.get(0), sb);
                 sb.append(") - 1)) % 7 + 7) % 7) END AS INTEGER))");
-                return true;
-            }
-            case "sort_array" -> {
-                // sort_array(arr[, asc]) -> list_sort(arr, 'ASC'|'DESC'); the
-                // second arg must be a boolean literal (comparator lambdas unsupported)
-                if (args.size() < 1 || args.size() > 2) return false;
-                boolean desc = false;
-                if (args.size() == 2) {
-                    if (args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.BOOLEAN) {
-                        desc = !((Boolean) l.value());
-                    } else {
-                        throw new UnsupportedOperationException(
-                                "sort_array's second argument must be a boolean literal; comparator lambdas are not supported");
-                    }
-                }
-                sb.append("list_sort(");
-                emitExpr(args.get(0), sb);
-                sb.append(", '").append(desc ? "DESC" : "ASC").append("')");
-                return true;
-            }
-            case "sequence" -> {
-                // sequence(start, stop[, step]) -> range(); DuckDB range is
-                // upper-exclusive and does not auto-reverse, so handle both
-                if (args.size() < 2 || args.size() > 3) return false;
-                sb.append("CASE WHEN ");
-                emitExpr(args.get(1), sb);
-                sb.append(" >= ");
-                emitExpr(args.get(0), sb);
-                sb.append(" THEN range(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(" + 1");
-                if (args.size() == 3) { sb.append(", "); emitExpr(args.get(2), sb); }
-                sb.append(") ELSE range(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(" - 1, -1) END");
-                return true;
-            }
-            case "date_trunc" -> {
-                if (args.size() != 2) return false;
-                Object unit = args.get(0) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
-                if (unit == null) {
-                    throw new UnsupportedOperationException("date_trunc requires a literal unit");
-                }
-                String translated = switch (String.valueOf(unit).toLowerCase()) {
-                    case "year", "yyyy", "yy" -> "year";
-                    case "quarter" -> "quarter";
-                    case "mon", "month", "mm" -> "month";
-                    case "week" -> "week";
-                    case "day", "dd" -> "day";
-                    case "hour" -> "hour";
-                    case "minute" -> "minute";
-                    case "second" -> "second";
-                    default -> null;
-                };
-                if (translated == null) {
-                    throw new UnsupportedOperationException("date_trunc unit not supported: " + unit);
-                }
-                sb.append("date_trunc('").append(translated).append("', ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
                 return true;
             }
             case "exists" -> {
@@ -1606,108 +1168,6 @@ public final class DuckDbSqlGenerator {
                 sb.append(")");
                 return true;
             }
-            case "reflect", "java_method" -> {
-                // Only a whitelist of side-effect-free statics is supported.
-                if (args.size() < 2) return false;
-                String className = literalString(args.get(0));
-                String methodName = literalString(args.get(1));
-                if (className == null || methodName == null) {
-                    throw new UnsupportedOperationException(
-                            "reflect requires literal class and method names");
-                }
-                String mapped = REFLECT_MAP.get(className + "." + methodName);
-                if (mapped == null) {
-                    throw new UnsupportedOperationException(
-                            "reflect: only these methods are supported: " + REFLECT_MAP.keySet());
-                }
-                sb.append(mapped).append("(");
-                for (int i = 2; i < args.size(); i++) {
-                    if (i > 2) sb.append(", ");
-                    emitExpr(args.get(i), sb);
-                }
-                sb.append(")");
-                return true;
-            }
-            case "array_repeat" -> {
-                if (args.size() != 2) return false;
-                // DuckDB has no list_repeat: list_resize(list_value(x), n, x)
-                // grows the one-element list to n entries filled with x
-                sb.append("list_resize(list_value(");
-                emitExpr(args.get(0), sb);
-                sb.append("), CAST(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS BIGINT), ");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "shiftleft" -> {
-                if (args.size() != 2) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" << ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
-                return true;
-            }
-            case "shiftright" -> {
-                if (args.size() != 2) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" >> ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
-                return true;
-            }
-            case "shiftrightunsigned" -> {
-                if (args.size() != 2) return false;
-                // mask to unsigned 64-bit first so the shift is logical, not
-                // arithmetic (Spark fills with zeros even for negatives)
-                sb.append("CAST((");
-                emitExpr(args.get(0), sb);
-                sb.append(" & 18446744073709551615) AS UBIGINT) >> ");
-                emitExpr(args.get(1), sb);
-                return true;
-            }
-            case "getbit", "bit_get" -> {
-                if (args.size() != 2) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" >> ");
-                emitExpr(args.get(1), sb);
-                sb.append(") & 1");
-                return true;
-            }
-            case "bit_and", "bit_or", "bit_xor" -> {
-                if (args.size() != 2) return false;
-                // scalar (non-aggregate) form; the aggregate form passes
-                // through FN_MAP untouched (DuckDB bit_and/bit_or/bit_xor)
-                if (name.equals("bit_xor")) {
-                    sb.append("xor(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(", ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(")");
-                } else {
-                    sb.append("(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(name.equals("bit_and") ? " & " : " | ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(")");
-                }
-                return true;
-            }
-            case "try_add" -> {
-                if (args.size() != 2) return false;
-                // Spark returns NULL on overflow; DuckDB errors. Wrap each side
-                // with try_cast to BIGINT so overflow yields NULL.
-                sb.append("(try_cast(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS HUGEINT) + try_cast(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS HUGEINT))");
-                return true;
-            }
             case "from_utc_timestamp", "to_utc_timestamp" -> {
                 if (args.size() != 2) return false;
                 // from_utc: naive ts is UTC -> render in tz
@@ -1727,28 +1187,6 @@ public final class DuckDbSqlGenerator {
                     emitExpr(args.get(1), sb);
                     sb.append(")");
                 }
-                return true;
-            }
-            case "localtimestamp" -> {
-                if (!args.isEmpty()) return false;
-                sb.append("CAST(now() AS TIMESTAMP)");
-                return true;
-            }
-            case "timestamp_seconds", "timestamp_millis", "timestamp_micros" -> {
-                if (args.size() != 1) return false;
-                // epoch value -> TIMESTAMP; DuckDB to_timestamp takes seconds
-                // (accepts fractional for sub-second precision)
-                String divisor = name.equals("timestamp_seconds") ? "1"
-                        : name.equals("timestamp_millis") ? "1000" : "1000000";
-                sb.append("CAST(to_timestamp(CAST(");
-                if (divisor.equals("1")) {
-                    emitExpr(args.get(0), sb);
-                } else {
-                    sb.append("(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(") / ").append(divisor);
-                }
-                sb.append(" AS DOUBLE)) AS TIMESTAMP)");
                 return true;
             }
             default -> {
@@ -2176,6 +1614,8 @@ public final class DuckDbSqlGenerator {
             case "SMALLINT" -> "SMALLINT";
             case "INT" -> "INTEGER";
             case "BIGINT" -> "BIGINT";
+            case "UBIGINT" -> "UBIGINT";
+            case "HUGEINT" -> "HUGEINT";
             case "FLOAT" -> "FLOAT";
             case "DOUBLE" -> "DOUBLE";
             case "STRING" -> "VARCHAR";

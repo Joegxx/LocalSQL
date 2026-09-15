@@ -33,6 +33,11 @@ public final class IdentifierSubstituter {
         }
         if (e instanceof io.github.joegxx.localsql.ir.expression.Literal) return e;
         if (e instanceof AttributeReference a) {
+            // analyzed lambda bodies reference their variables as (unqualified)
+            // attribute references, so those must be substitutable too
+            if (a.qualifier().isEmpty() && substitutions.containsKey(a.name())) {
+                return substitutions.get(a.name());
+            }
             return new AttributeReference(a.name(), a.qualifier());
         }
         if (e instanceof Alias a) return new Alias(rewrite(a.child(), substitutions), a.name(), a.qualifier());
@@ -40,7 +45,7 @@ public final class IdentifierSubstituter {
             return new BinaryExpression(rewrite(b.left(), substitutions), b.op(), rewrite(b.right(), substitutions));
         }
         if (e instanceof UnaryExpression u) return new UnaryExpression(u.op(), rewrite(u.child(), substitutions));
-        if (e instanceof Cast c) return new Cast(rewrite(c.child(), substitutions), c.target());
+        if (e instanceof Cast c) return new Cast(rewrite(c.child(), substitutions), c.target(), c.tryCast());
         if (e instanceof FunctionCall f) {
             List<Expression> args = f.arguments().stream()
                     .map(a -> rewrite(a, substitutions)).toList();

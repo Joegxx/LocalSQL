@@ -1,6 +1,8 @@
 # AGENTS.md
 
-面向 AI agent 的协作指南。内容已对照当前代码核对,代码永远比文档更可信。
+面向 AI agent 的协作指南。2026-09-10 对照代码及本地审查更新。代码永远比文档更可信；“目标职责”不代表当前实现已满足。
+
+当前修复范围与验收标准见 [docs/development-plan.md](docs/development-plan.md)。本次更新仅修改文档，计划中的代码修复均未实施。
 
 ## 设计哲学(最高优先级,违反即架构腐化)
 
@@ -15,7 +17,7 @@
 
 ## 这是什么
 
-LocalSQL:内嵌的 Spark SQL 运行时。流水线:
+LocalSQL:解析 Spark SQL 3.2.0 并在 DuckDB 中执行的本地 SQL Sandbox，不是 Spark 执行引擎。当前流水线:
 
 ```
 Spark SQL
@@ -24,51 +26,58 @@ ANTLR parse
    ↓
 Common IR (唯一真相源)
    ↓
-Analyzer (当前 no-op,未接入)
+Analyzer (已接入，名称与类型绑定未完成)
    ↓
-Rewrite (当前 no-op,未接入)
+Rewrite (已接入，转换逻辑仍有一部分位于 Generator)
    ↓
 DuckDB SQL
    ↓
 DuckDB execute
 ```
 
-目标是无需部署 Spark/Hadoop/Hive 即可在本地跑数据仓库 SQL。MVP 仅支持 DQL。
+目标是无需部署 Spark/Hadoop/Hive 服务即可在本地跑数据仓库 SQL。已有 DQL、基础 DML/DDL、文件库导入/加载、进程内 UDF/UDTF 路径；仍有正确性及打包缺口，不能声称与 Spark 语义一致。
 
-设计文档在飞书 wiki(标题"SQL Runtime");仓库 README 只有一行。代码优先。
+本地说明以 README、README.zh-CN、docs/usage.md 和开发计划为入口；。代码优先，不要求先访问外部设计文档。
 
 ## 构建与运行
 
 - **必须 Java 21**(`maven.compiler.release=21`)。IntelliJ 的 `.idea/misc.xml` 可能显示 JDK 24 - 忽略,以 Maven 配置为准。
+- 同时检查 `java -version` 与 `mvn -version`；两者可能使用不同 JDK，审查中 Maven 默认使用了 Java 24，需显式选择 Java 21。
 - 多模块 Maven,根目录有父 pom。完整构建:`mvn clean package -DskipTests`
 - 运行 demo(启动运行时,在 10000 端口监听 HiveServer2 Thrift,跑一个 JOIN/GROUP BY 样例查询):
   ```
   java -jar localsql-app/target/runtime.jar
   ```
-  进程持续监听 Thrift 端口(Main 在 shutdown hook 上 join)。可用参数覆盖默认端口 10000。
+  进程持续监听 Thrift 端口（Main 阻塞等待，shutdown hook 调用 stop）。可用参数覆盖默认端口 10000。
+- `Main` 支持 `--import-ddl` / `--out` / `--load` / `--schema` / `--manifest` / `--failures` / `--udf-config` / `--function-map`。导入失败清理存在误删风险，只使用可丢弃副本；正式 JAR 的 UDF 配置入口目前缺少 Hive 运行依赖。
 
 ## 模块边界
 
-依赖关系(左依赖右):
+主要内部依赖关系（省略重复直依赖与通用日志/测试依赖；实际以各模块 pom 为准）:
 
 ```
-app -> thrift -> {spark, parser, duckdb, catalog}
+app -> {thrift, udf-runtime, parser, ir, spark, analyzer, rewrite, catalog, duckdb}
+thrift -> {spark, parser, duckdb, catalog, analyzer, rewrite, udf-api}
 spark -> {parser, ir}
 analyzer -> {ir, catalog}
-rewrite -> ir
+rewrite -> {ir, udf-api}
 duckdb -> {ir, catalog}
 catalog -> ir
+udf-api -> ir
+udf-runtime -> udf-api (+ Hive API provided, YAML)
 parser -> (antlr runtime only)
 ir -> (nothing)
 ```
 
 - `localsql-parser` - ANTLR4 语法 + `SparkSqlParser` 入口。**只有 parse-tree,不做任何逻辑。**
-- `localsql-ir` - 公共 IR。`Relation`(relation/)和 `Expression`(expression/)是类 sealed 层级;`Statement`(statement/)是顶层语句(Query/Insert/CreateTable/CreateView);`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源,任何后端不得绕过 IR 直接读 parse-tree。
+- `localsql-ir` - 公共 IR。`Relation` 和 `Expression` 当前是 abstract class，不是 sealed 层级；`Statement` 表示顶层语句；`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源，任何后端不得绕过 IR 直接读 parse-tree。
 - `localsql-spark` - `SparkAstBuilder` 把 ParseTree 转成 IR。`SparkExpressionBuilder` 和 `SparkDataTypeBuilder` 是 package-private 辅助类。
-- `localsql-catalog` - **只存逻辑元数据**(`Catalog` / `Column` / `Table` / `Database`)+ 持久化抽象(`CatalogStore`)。**禁止**:执行 SQL、访问 JDBC、生成 DuckDB SQL、存 runtime 执行状态。当前 MVP 是内存 `LinkedHashMap`,后续会换成 DuckDB-backed store,**不改调用方**。
-- `localsql-duckdb` - `DuckDbSqlGenerator`(IR -> SQL 串,无状态序列化器)+ `DuckDbExecutor`(JDBC 操作进程内 DuckDB)+ `DuckDbCatalogStore`(实现 `CatalogStore`,把元数据落到 4 张 DuckDB 表)。DuckDB 负责**物理执行**,不是逻辑元数据。
-- `localsql-thrift` - `ThriftServer` 编排完整流水线,真实提供 HiveServer2 `TCLIService` Thrift RPC(端口 10000,`TThreadPoolServer`)。`LocalSqlThriftService` 实现了全部 23 个 `TCLIService.Iface` 方法;`src/test` 里有 smoke test 覆盖 OpenSession->ExecuteStatement->FetchResults 和 GetTables/GetColumns。
-- `localsql-app` - `Main` 装载样例数据,打包为 `runtime.jar`。
+- `localsql-catalog` - 目标是纯逻辑元数据 + 持久化抽象。当前为 `LinkedHashMap` 缓存，配置 `CatalogStore` 后已有持久化；`CatalogStore.RuntimeInfo` 与 `CatalogService.renameTable` 修改 SQL 是待移除的边界偏离，不能照此扩展。
+- `localsql-duckdb` - Generator、JDBC Executor、`DuckDbCatalogStore` 和内置 Java 函数注册。当前 Generator 仍包含表达式重写；目标迁移至 Rewrite 后只序列化 IR。
+- `localsql-udf-api` - UDF 定义、注册表、批数据与 Gateway 接口，不包含 Hive 执行实现。
+- `localsql-udf-runtime` - 进程内 Hive UDF/GenericUDF/GenericUDTF 适配。独立 Gateway JVM 尚未实现，不能把 classloader 当作进程隔离或可靠超时机制。
+- `localsql-thrift` - `SqlPipeline` 编排 SQL；`ThriftServer` 和 `LocalSqlThriftService` 提供 HiveServer2 RPC。已有 smoke test，但接口方法存在不等于类型、状态、取消与资源回收行为正确。
+- `localsql-app` - `Main`、DDL 导入、函数配置加载，打包为 `runtime.jar`。
 
 ## ANTLR codegen - 关键坑
 
@@ -87,6 +96,8 @@ ir -> (nothing)
 3. DQL(`QueryStatement`):`SemanticAnalyzer.analyze(rel)` -> `RewriteEngine.rewrite(rel)` -> `DuckDbSqlGenerator.generate` -> `DuckDbExecutor.execute`
 4. DML/DDL 由 `SqlPipeline` 按类型编排(见下节)
 
+补充：SHOW/DESCRIBE/USE 等管理语句由 `AdminStatementHandler` 先行处理；配置 Java UDF 后，查询可能走 UDF/UDTF 分阶段执行路径。修改缓存或会话行为时必须覆盖这些入口，不能只测试 `SqlPipeline.execute`。
+
 ### DML/DDL 编排(SqlPipeline)
 
 - `Insert`:analyzer 校验目标表存在 + 列清单 ⊆ 表列;rewrite query;生成 `INSERT INTO tbl [(cols)] <query>`;`executeUpdate` 返回受影响行数,结果集为单列 `count`。
@@ -97,11 +108,13 @@ ir -> (nothing)
 - `CreateTable` PARTITIONED BY:纯 DDL 时分区字段带类型 -> AST builder 追加到列定义末尾(Spark 分区列在最后),裸引用 -> 校验已存在不改变 schema;`PARTITIONED BY + AS query`(CTAS)与 `CLUSTERED BY/SKEWED BY` 在 DuckDB 无对应概念,接受为无操作提示(直接按查询结果建表)。DuckDB 无分区概念,分区列就是普通列。
 - `CreateView`:analyzer 校验 + rewrite query;生成 `CREATE [OR REPLACE] VIEW v AS <query>`;注册 tableType=`VIEW`。OR REPLACE 时先 `CatalogService.dropTable`(清 store 4 张表)+ `DROP VIEW IF EXISTS` 再建。
 - `DropTable`:校验存在 + 类型匹配(DROP TABLE 不能删 VIEW,反之亦然);`IF EXISTS` 缺失时报错、存在则 no-op;`CatalogService.dropTable` 清 store + `DROP TABLE/VIEW IF EXISTS` 清 DuckDB 物理对象。
-- `CreateDatabase`/`DropDatabase`/`AlterDatabase`:纯 Catalog 操作(数据库仅逻辑命名空间,无独立 DuckDB SCHEMA);`DROP DATABASE` 带 `CASCADE` 时级联删物理表 + 元数据,无 `CASCADE` 且非空则报错;`default` 库不可删。
+- `CreateDatabase`/`AlterDatabase`:当前仅更新内存，数据库级属性与空库尚未持久化。数据库是逻辑命名空间，无独立 DuckDB SCHEMA；`DropDatabase CASCADE` 编排物理表与元数据删除，无 `CASCADE` 且非空则报错；`default` 库不可删。
 - `RenameTable`(`ALTER TABLE/VIEW RENAME TO`):校验跨库不支持;`DuckDbSqlGenerator` 生成 `ALTER TABLE/VIEW ... RENAME TO ...`;`CatalogService.renameTable` 更新 4 张表 + `runtime_table`。
 - `AddColumns`/`DropColumns`/`RenameColumn`/`AlterColumn`/`ReplaceColumns`:校验列存在性;生成对应 DuckDB `ALTER TABLE ... ADD/DROP/RENAME/ALTER COLUMN` 语句,执行后 `DESCRIBE` + `refreshTable` 更新 Catalog;`REPLACE COLUMNS` 按新 schema 增删改列(保留重叠列数据),刷新后回填 comment/nullability。
 
 **语义注意**:`INSERT INTO t VALUES (1,'a')` 的每一行在语法上是 `#rowConstructor`(`struct(...)`),AST builder 的 `visitInlineTable` 必须把它**展开成列**(`StructExpr.fields()` 当行内容),否则每行只算 1 列(DuckDB 报 "n columns but 1 values")。
+
+**失败恢复缺口**：部分 DDL 通过 `inTransaction` 把物理操作与 store 写入包在同一 DuckDB 事务中，但内存 Catalog 不会回滚。失败 CTAS/替换视图后可能产生幽灵表或丢失缓存项；同步执行锁不能替代缓存恢复。
 
 ## SQL 生成约定(不要破坏)
 
@@ -111,16 +124,16 @@ ir -> (nothing)
 
 `emitJoin` **不**加 `SELECT * FROM` 前缀 - 之前是 bug。`FROM` 子句必须走 `emitChildSource`,永远不要裸用 `emit`。
 
-`DuckDbSqlGenerator` 是**无状态**的。**禁止**:
+`DuckDbSqlGenerator` 的**目标**是无执行状态的序列化器。当前持有不可变函数配置，但还承担函数降级与表达式重写，须按开发计划迁移。**禁止新增**:
 - 查 Catalog
 - 解析名称(标识符解析是 Analyzer 的活)
 - 重写表达式
 
-它的唯一职责是 IR -> SQL 序列化。Generator 默认 IR 已被 Analyzer 解析过。
+目标职责是 IR -> SQL 序列化。当前 Analyzer 尚未保证输入全部已解析；需要逐步建立已解析 IR 校验闸门，不能在 Generator 中用裸表名或默认类型掩盖未解析节点。
 
 ## Analyzer 职责(名字解析的唯一归属)
 
-Analyzer 负责:
+Analyzer 的目标职责:
 - **标识符解析** - `SELECT name FROM user` 里 `name` 到底是 `user.name` 还是 `dept.name`,由 Analyzer 解析,Generator 不查 Catalog。
 - **类型推导** - 给 `AttributeReference` 设 DataType(用 `IrNode.setDataType`)。
 - **函数解析** - 函数签名/重载。
@@ -128,11 +141,17 @@ Analyzer 负责:
 
 Generator 永远不用查 Catalog。
 
+当前仅填充能查到的 TableScan.output 并做部分语句检查；找不到表不会报错，普通 Identifier 尚未绑定，AttributeReference 的未知类型会被默认设为 STRING。不能把这些行为当作完整解析的实现或继续依赖它们。
+
 ## 函数映射归属(避免双重映射)
 
-当前 MVP:**函数映射由 `DuckDbSqlGenerator.FN_MAP` 独占**(例如 `size` -> `array_length`,`explode` -> `unnest`)。
+现状：Rewrite 已接入且会 rename；Generator 的 `FN_MAP`、`emitMappedFunction`、自定义 rename/template 仍在做转换。二者并非独占关系，存在重复映射和覆盖顺序风险。
 
-`RewriteEngine` 也有 rename 逻辑,但在它**正式接入执行流水线之前**,不要去改它的 rename 表 - 否则会出现两个地方同时映射。接入后考虑把 `FN_MAP` 删掉,由 Rewrite 统一负责。
+M2 已落地 A3 元数据契约：analyzer 模块新增 `FunctionCatalog`(只读 SPI)、`FunctionInfo`(name/aliases/arity/kind)、`FunctionKind`(SCALAR/AGGREGATE/WINDOW/TABLE)、`BuiltInFunctionCatalog`(Spark 3.2 内置名单,别名 substr→substring、ceiling→ceil、power→pow、char_length→length)。`SemanticAnalyzer(catalog, functions, strictFunctions)` 在解析 `FunctionCall` 时查目录；strict 模式拒绝未知函数，lenient 模式(SqlPipeline 当前默认)透传。别名重定向是元数据层行为,不影响 Rewrite/Generator 的翻译归属。
+
+目标：Analyzer 绑定函数身份、签名、类型；Rewrite 独占函数降级与表达式转换；Generator 仅输出已降级 IR；Executor/Gateway 只注册或执行运行时函数。
+
+迁移按函数族进行，先补回归、把规则迁入 Rewrite、切换调用方，再删除对应 Generator 分支。最终移除 `FN_MAP` 与 Generator 的原始模板替换入口；过渡期每个函数只能有一个生效的转换归属。具体规则与配置兼容方案见开发计划 A1/A3。
 
 ## 已知 MVP 缺口
 
@@ -140,7 +159,9 @@ Generator 永远不用查 Catalog。
 - `Aggregate.aggregateExpressions` 被重载成整个 select list(分组列 + 聚合在一起)- 不是干净的 Spark 风格拆分
 - 命名窗口(`WINDOW w AS ...`)、聚合 `FILTER` 子句、`NATURAL JOIN`(需要同名列解析)抛 `UnsupportedOperationException`
 - 位运算/整数除法/`<=>`/`JOIN USING` 已正确映射(`INT_DIV` -> `//`、`BIT_XOR` -> `xor()`、`EQ_NULL_SAFE` -> `IS NOT DISTINCT FROM`)
-- Catalog 当前是内存 `LinkedHashMap`(MVP);后续换 DuckDB-backed store,**不改调用方**
+- Catalog 已有内存缓存 + DuckDB store；缺口是失败一致性、runtime 职责分离和数据库级持久化，不是尚未接入 store
+- Analyzer 严格名称解析已落地（M2/F1）：分层 Scope、错库/错表/缺列/歧义执行前拒绝、Star 展开、ORDER BY/HAVING 别名可见性（select 输出优先）、lambda 变量绑定、alias 屏蔽表名；类型传播仍不完整。DDL 缓存回滚（F2）与 UDF 兼容（F3）已修复；语法静默丢失（F4）、Thrift（F5）已修复；UDF 打包依赖缺口仍在
+- 导入异常清理会按裸表名删除物理表，可能误删其他库已有对象；该独立风险未纳入本轮六项主线，修复前禁止在不可丢弃的数据副本上验证导入
 
 ## TPC-DS 统一测试
 
@@ -148,13 +169,13 @@ Generator 永远不用查 Catalog。
 - `localsql-thrift/src/test/resources/tpcds-v2.7.0/` - 32 个查询,apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0`
 - `localsql-thrift/src/test/resources/tpcds/` - 103 个查询,apache/spark `master` 的 `sql/core/src/test/resources/tpcds`(完整 q1..q99 + a/b 变体)
 
-MVP 未支持特性的查询进 `UNSUPPORTED` 列表并跳过(当前为空,136/136 全部翻译成功),防止回归。窗口函数(`OVER` 含 `ROWS BETWEEN` frame)和 ROLLUP/CUBE/GROUPING SETS 已实现:`FunctionCall.windowSpec`(可变,挂 `WindowSpec`)、`Aggregate.groupingAnalytics`(`ROLLUP`/`CUBE`/`GROUPING SETS`,含 legacy `WITH ROLLUP` 形式)。命名窗口(`WINDOW w AS ...`)和聚合 `FILTER` 子句仍显式抛 `UnsupportedOperationException`。
+测试资源共 135 份 SQL；`TpcdsQueryPipelineTest` 另有 1 个汇总测试，因此该类为 136 项测试，不是 136 条查询。`UNSUPPORTED` 当前为空。窗口函数（含 frame）与 ROLLUP/CUBE/GROUPING SETS 已有实现；命名窗口和聚合 FILTER 仍显式拒绝。L1 已接入 `TpcdsCatalogFixture`（24 表 v2.7.0 全 schema 元数据，内嵌在测试代码；customer 表额外补 v2.7 的 `c_last_review_date`），严格 Analyzer 在此 fixture 上绑定全部 135 个查询，不能回退到空 Catalog。
 
 ### 分层测试架构
 
 - **L1 翻译回归** - `TpcdsQueryPipelineTest`:parse -> analyze -> rewrite -> generate,不执行
 - **L3 结果一致性(手工 golden)** - `TpcdsGoldenResultTest`:走真实 Thrift 端点执行,结果与 Spark 语义的手工校准期望对比
-- **L3 结果一致性(差分 oracle)** - `TpcdsConsistencyTest`:**135/135 全过**。同一份数据(DuckDB `tpcds` 扩展 `dsdgen(sf=0.01)` 生成全 24 表)+ 同一条 SQL:期望侧 DuckDB 原生执行原文(反引号归一化为双引号),实际侧走 Thrift 管线,双向 `EXCEPT ALL` 严格多重集对比。任何翻译语义漂移都会暴露
+- **L3 结果一致性（DuckDB 差分）** - `TpcdsConsistencyTest`：同一份数据（`dsdgen(sf=0.01)` 生成 24 表）、同一条 SQL，期望侧 DuckDB 原生执行，实际侧 Thrift 管线。字符串化后用双向 `EXCEPT ALL` 比较多重集；不验证结果类型、行顺序，也不是 Spark oracle。原文不能执行的查询只验证 Thrift 成功，不能计为语义一致通过。
 
 L3 组件(全部 DuckDB 自举):
 - `ThriftQueryRunner` - Thrift 客户端封装,启动 in-process server 并执行查询取回行
@@ -179,68 +200,40 @@ L3 组件(全部 DuckDB 自举):
 
 - optimizer / cost model / statistics
 - materialized view
-- transaction / ACID / snapshot
+- 用户级 transaction / ACID / snapshot（不排除修复现有内部事务的原子性）
 - distributed execution
-- DDL 高级操作(ALTER / DROP TABLE/VIEW、CREATE/ALTER/DROP DATABASE)未实现
 - 权限/认证
 
-## 在途工作:DuckDB 元数据 + Analyzer / RewriteEngine 接入
+## 当前持久化布局与下一阶段
 
-**目标**:把测试数据存到 DuckDB,让 DuckDB 模拟出 Hive 元数据(4 张表),让外部通过 Thrift 能查到表 DDL;同时把 Analyzer 和 RewriteEngine 真正接入运行链路。
+现有 4 张内部表（已实现，不是待接入设计）：
 
-### 元数据设计(用户已确认的 4 张 DuckDB 表)
+- `catalog_table`：table_id、catalog/database/schema/table 名、类型、注释、properties 兼容列、metadata_json。
+- `catalog_column`：table_id、ordinal、列名、类型、nullable、注释、default_value、expression。
+- `catalog_property`：table_id、property_key、property_value；表属性实际从这里加载。
+- `runtime_table`：table_id、duck_table_name、create_sql、last_refresh；这是物理运行信息，目标从 CatalogStore 接口分离。
 
-```
-catalog_table      (table_id, catalog_name, database_name, schema_name,
-                    table_name, table_type, comment, properties, metadata_json)
-catalog_column     (table_id, ordinal, column_name, data_type, nullable,
-                    comment, default_value, expression)
-catalog_property   (table_id, property_key, property_value)
-runtime_table      (table_id, duck_table_name, create_sql, last_refresh)
-```
+`metadata_json` 是可选原始元数据快照，不保证所有入口都会填充。`--load` 直接打开已有 DuckDB 文件并从 store 加载 Catalog；当前没有启动时统一重放 `create_sql` 的流程，不能宣称 DDL 重放能恢复数据或全部依赖对象。
 
-`metadata_json` 用来存完整原始元数据快照,后续要加新字段不用改表结构。`runtime_table` 存 DuckDB 实际注册的 DDL,重启时 `SELECT create_sql FROM runtime_table` 重放即可恢复。
+已完成的基础接入：
 
-### 设计决策
+- `DuckDbCatalogStore` 已实现；`CatalogService(store)` 启动时加载表元数据。
+- `TableScan.setOutput` 与 Analyzer 填充输出已存在，不需要再次实现接入。
+- `SqlPipeline` 已统一调用 Analyzer/Rewrite，Thrift 与直接执行入口复用它。
+- Main 已支持 typed 样例、DDL 文件导入、持久化库加载、UDF 与函数映射配置。
 
-1. **`Catalog` 模块保持纯(不依赖 DuckDB)** - 用 `CatalogStore` 接口做持久化抽象,在 `localsql-duckdb` 模块里实现 `DuckDbCatalogStore`。
-2. **`Catalog` 当前是内存缓存**(`LinkedHashMap`),`CatalogService` 持有 `CatalogStore` 时,启动从 store load,写入同时落 store + cache。
-3. **TableScan.output 必须可变** - 当前 `TableScan` 的 `output` 字段是 `final` + `List.copyOf()`,Analyzer 没法把查到的列塞回去。改成可变 + 加 `setOutput` 方法。
-4. **Analyzer 修复** - `visitTableScan` 当前查 Catalog 后**丢弃**了结果(`out` list 没赋回),要改成真的 `r.setOutput(out)`。同时给 `AttributeReference` 设 DataType(用 `IrNode.setDataType`)。
-5. **RewriteEngine 接入** - 它已经会 `rename` 函数名(`size` -> `array_length` 等),接进去就行;`FN_MAP` 后续可考虑删掉(避免双重映射)。
-6. **`thrift` pom 需加** `localsql-analyzer` 和 `localsql-rewrite` 两个依赖。
-7. **ThriftServer / LocalSqlThriftService 的 ExecuteStatement 都要接入** - 两处当前都直接 parse -> generate,要插入 analyze + rewrite。
-8. **Main 重写** - 现在 `Main` 同时手动调 `catalogService.registerSampleTable`(Catalog)+ `executor.registerSampleTable`(DuckDB 数据),数据重复。改成:`DuckDbCatalogStore` 初始化 -> 注册表时同时写元数据表 + 建 DuckDB 数据表 + 写 `runtime_table`。
-9. **SmokeTest 同步更新** - `ThriftServerSmokeTest` 现在直接用 `CatalogService` + `DuckDbExecutor`,改成用 `DuckDbCatalogStore`。
+下一阶段按 [开发计划](docs/development-plan.md) 执行：A1 Generator → Rewrite、A2 CatalogService 边界、A3 函数转换统一，以及 F1–F6 六项正确性修复。A1 前两批已落地：`FunctionNameRewriter`（rewrite 模块）持有 62 个 1:1 改名对（Spark 源名→DuckDB 名，如 instr→strpos、size→array_length、mean→avg）；`ExpressionLowering`（rewrite 模块）把 40 个参数重排/包装函数降级为纯 IR（if→CASE WHEN、isnull→IS NULL、datediff→date_diff 重排、to_date→CAST/strptime、count_if→count(CASE)、collect_set→list(DISTINCT)、current_catalog→字面量等），关系树经 RewriteEngine 重建返回新树，`SqlPipeline` 已改为使用返回值（A1 验收：调用方必须用返回值）。Generator 的 `FN_MAP` 已删除这 62+1 对、`emitMappedFunction` 已删除对应 34 个 case；`map_from_arrays` 因 DuckDB `case "map"` 参数重排冲突留待 map 族一起迁移。A1 第三批已迁：CAST 类型函数（string/tinyint/.../decimal(x,p,s)→Cast IR）、sort_array、sequence、date_trunc（unit 字面量翻译）、sha2、reflect/java_method（REFLECT_MAP 移入 Rewrite）、array_repeat。仍留 Generator 的特判族：lambda 高阶函数（transform/zip_with/map_zip_with/map_filter/exists/forall/aggregate/array_except/array_join/array_remove）、字面量模板族（date_format/from_json/named_struct/next_day/substring_index/format_number）、位运算/溢出（shift/getbit/bit_*/try_add，需 IR 加 SHIFT/try_cast 支持）、时区（from/to_utc_timestamp，AT TIME ZONE 语法）、bround/conv/parse_url（连接级 Java UDF）。新增数据库元数据表与存储版本迁移是拟议方案，尚未实现；正式迁移前必须确认旧库兼容与备份策略。
 
-### 进度
+## 验证基线（2026-09-11）
 
-| 状态 | 文件 | 说明 |
-|------|------|------|
-| ✅ | `localsql-catalog/.../Catalog.java` | `Table` / `Column` record 富化:加 `tableId`、`tableType`、`properties`、`metadataJson`、`ordinal`、`defaultValue`、`expression`;保留旧构造器做向后兼容;加 `parseDataType` / `toStorageType` 工具方法 |
-| ✅ | `localsql-catalog/.../CatalogStore.java` | 新建。`init()` / `saveTable()` / `loadTable()` / `loadTables()` / `saveRuntimeInfo()` / `loadAllRuntimeInfo()` |
-| ✅ | `localsql-catalog/.../CatalogService.java` | 加 `(CatalogStore)` 构造器,启动时 `loadFromStore`;`registerTable` 落 store + cache;保留 `registerSampleTable` 向后兼容 |
-| ✅ | `localsql-duckdb/.../DuckDbCatalogStore.java` | 已建。实现 `CatalogStore`,`init()` 建 4 张表(`catalog_table`/`catalog_column`/`catalog_property`/`runtime_table`),`saveTable`/`loadTable`/`loadTables`/`saveRuntimeInfo`/`loadAllRuntimeInfo` 全部实现;用 `executor.execute`/`executeUpdate` 操作 |
-| ✅ | `localsql-ir/.../TableScan.java` | `output` 去掉 `final`,改为可变 `ArrayList`,加 `setOutput(List<AttributeReference>)` 方法 |
-| ✅ | `localsql-analyzer/.../SemanticAnalyzer.java` | `visitTableScan` 真正 `r.setOutput(out)`;按 column.type() 给 AttributeReference `setDataType`(qualifier 优先用 alias) |
-| ✅ | `localsql-thrift/pom.xml` | 加了 `localsql-analyzer` 和 `localsql-rewrite` 两个 dependency |
-| ✅ | `localsql-thrift/.../ThriftServer.java` | `executeSparkSql` 在 `buildStatement` 之后、`generator.generate` 之前调 `analyzer.analyze(rel)` + `rewriter.rewrite(rel)`;构造器内部 new `SemanticAnalyzer` + `RewriteEngine` |
-| ✅ | `localsql-thrift/.../LocalSqlThriftService.java` | `ExecuteStatement` 同样接入 analyzer + rewrite |
-| ✅ | `localsql-app/.../Main.java` | 用 `DuckDbCatalogStore` + `DuckDbExecutor`,`registerTable` 一次完成元数据 + 数据 + runtime_table 写入;data 里的 `age` / `amount` / `id` 改成正确类型(不再全 VARCHAR) |
-| ✅ | `localsql-thrift/.../ThriftServerSmokeTest.java` | 用 `DuckDbCatalogStore` |
-| ✅ | 跑 `mvn test` 全部通过 | **已验证**。`mvn clean test` 2/2 通过;`mvn clean package -DskipTests` 通过;`runtime.jar` demo 跑出正确结果 |
-
-### 下次从这里继续
-
-DuckDB 元数据 + Analyzer/RewriteEngine 接入**已全部完成**(见上表 ✅)。WHERE/ORDER BY/LIMIT、HAVING、子查询别名已有端到端回归覆盖。下一步方向:窗口函数、实现 DDL、或接更多 Thrift 元数据接口。
-
-`CatalogStore` 接口已定,`DuckDbCatalogStore` 实现时直接 `implements CatalogStore` 即可。`init()` 里发 `CREATE TABLE IF NOT EXISTS catalog_table ...` 等 4 条 DDL。`loadTable(database, tableName)` 用 `SELECT * FROM catalog_table JOIN catalog_column USING (table_id) WHERE database_name = ? AND table_name = ? ORDER BY ordinal` 然后手动组 `Catalog.Table`。
-
-`DuckDbExecutor` 已有 `executeQuery(String) -> QueryResult` 和 `executeUpdate(String) -> int`,直接复用。
+- Java 21 下 `mvn -o package -DskipTests` 成功。
+- 排除 `TpcdsConsistencyTest`/`TpcdsGoldenResultTest`（需真实端口与 tpcds 扩展）后 `mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest' -Dsurefire.failIfNoSpecifiedTests=false` 全量 554 项通过。
+- 全量命令在本沙箱可完成 bind；TPC-DS 翻译 136 项（135 SQL + 汇总）含 24 表 fixture 绑定全绿，真实端口差分仍未跑。
+- M2 验收覆盖：F1AnalyzerBindingTest 20 项（USE/限定名/LIKE/CTE/子查询/self join/别名/JOIN USING 正反例 + 输出 schema）、FunctionCatalogContractTest 11 项（A3 契约）、SemanticAnalyzerContractTest 4 项（strict 闸门）。
 
 ## 约定
 
 - 没有明确要求时不加代码函数注释，仅添加类注释
-- IR 节点类:一个文件一个 public 顶层类(Java 对 record / sealed member 的硬性要求 - `DataType.java` 只放 sealed interface,具体类型各自单独文件放在 `ir/type/`)
+- IR 节点类：一个文件一个 public 顶层类；`DataType.java` 只放类型接口，具体类型单独放在 `ir/type/`
 - `FunctionCall.name` 是可变的(通过 `rename()`),专门为 rewrite 层原地改名字设计
-- `Main` 样例数据用 VARCHAR - DuckDB 会做强转
+- `Main` 样例数据使用真实数值/字符串类型；不要退回全部 VARCHAR 掩盖类型问题

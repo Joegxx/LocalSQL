@@ -96,10 +96,12 @@ class UdtfPipelineTest {
     }
 
     @Test
-    void rejectsQualifiedOuterReferences() {
-        UnsupportedOperationException e = assertThrows(UnsupportedOperationException.class,
-                () -> server.executeSparkSql(
-                        "SELECT t2.tok FROM svt LATERAL VIEW test_split(tags, ',') t2 AS tok"));
-        assertTrue(e.getMessage().contains("Qualified references"), () -> "unexpected: " + e.getMessage());
+    void qualifiedViewAliasResolves() throws Exception {
+        // The LATERAL VIEW alias (t2) is a valid qualifier for the expanded
+        // columns under Spark semantics, and the pipeline now binds it.
+        var r = server.executeSparkSql(
+                "SELECT t2.tok FROM svt LATERAL VIEW test_split(tags, ',') t2 AS tok WHERE t2.tok = 'a'");
+        assertEquals(1, r.rows().size());
+        assertEquals("a", r.rows().get(0).get(0));
     }
 }

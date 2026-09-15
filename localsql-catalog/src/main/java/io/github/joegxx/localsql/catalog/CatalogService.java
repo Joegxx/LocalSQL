@@ -1,7 +1,6 @@
 package io.github.joegxx.localsql.catalog;
 
 import io.github.joegxx.localsql.ir.type.DataType;
-import io.github.joegxx.localsql.ir.type.IntegralType;
 import io.github.joegxx.localsql.ir.type.StringType;
 
 import java.util.ArrayList;
@@ -10,6 +9,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Logical catalog facade: databases, tables, columns and properties.
+ * All mutations funnel through this class so callers cannot bypass the
+ * store (when present) or mutate internal state through leaked references.
+ * Physical runtime bindings live in {@link RuntimeStore}, executed and
+ * written by the orchestration layer — never here.
+ */
 public final class CatalogService {
 
     private final Catalog catalog = new Catalog();
@@ -29,8 +35,39 @@ public final class CatalogService {
 
     public CatalogStore store() { return store; }
 
+    /**
+     * A frozen snapshot of the current committed state. DDL orchestration
+     * snapshots before mutating, restores on failure and keeps the live
+     * catalog committed-only.
+     */
+    public Catalog snapshot() {
+        return catalog.copy();
+    }
+
+    /** Atomically replace the live catalog with the given snapshot (commit). */
+    public void commitSnapshot(Catalog snapshot) {
+        catalog.restoreFrom(snapshot);
+    }
+
+    /** Discard in-memory changes and reload the last state persisted in the store. */
+    public void reloadFromStore() throws Exception {
+        if (store == null) {
+            catalog.restoreFrom(new Catalog());
+            return;
+        }
+        catalog.restoreFrom(new Catalog());
+        loadFromStore();
+    }
+
     private void loadFromStore() throws Exception {
         if (store == null) return;
+        List<Catalog.Database> databases = store.loadDatabases();
+        for (Catalog.Database db : databases) {
+            catalog.createDatabase(db);
+        }
+        if (catalog.getDatabase("default").isEmpty()) {
+            catalog.createDatabase(new Catalog.Database("default", null, "default database"));
+        }
         List<Catalog.Table> tables = store.loadTables(null);
         for (Catalog.Table t : tables) {
             String database = t.database();
@@ -78,6 +115,15 @@ public final class CatalogService {
         return catalog.getTable(database, tableName);
     }
 
+    /**
+     * Update a table's logical metadata in memory and in the store.
+     * Callers build the whole replacement record; nothing is patched here.
+     */
+    public void updateTable(Catalog.Table table) throws Exception {
+        catalog.updateTable(table);
+        if (store != null) store.saveTable(table);
+    }
+
     /** Drop a table: remove from memory and delete from the persistent store. */
     public void dropTable(String database, String tableName) throws Exception {
         Catalog.Table removed = catalog.removeTable(database, tableName);
@@ -87,11 +133,21 @@ public final class CatalogService {
     }
 
     public void createDatabase(String name, String comment, String location) {
-        catalog.createDatabase(new Catalog.Database(name, location, comment));
+        createDatabase(name, comment, location, Map.of());
     }
 
     public void createDatabase(String name, String comment, String location, Map<String, String> properties) {
-        catalog.createDatabase(new Catalog.Database(name, location, comment, properties == null ? Map.of() : Map.copyOf(properties)));
+        Catalog.Database db = new Catalog.Database(name, location, comment,
+                properties == null ? Map.of() : properties);
+        catalog.createDatabase(db);
+        if (store != null) {
+            try {
+                store.saveDatabase(db);
+            } catch (Exception e) {
+                catalog.removeDatabase(name);
+                throw new IllegalStateException("Failed to persist database " + name + ": " + e.getMessage(), e);
+            }
+        }
     }
 
     public void alterDatabase(String name, Map<String, String> properties, String location) {
@@ -99,9 +155,16 @@ public final class CatalogService {
         Map<String, String> merged = new LinkedHashMap<>(old.properties());
         if (properties != null) merged.putAll(properties);
         String newLocation = location != null ? location : old.location();
-        // keep description
-        Catalog.Database updated = new Catalog.Database(old.name(), newLocation, old.description(), Map.copyOf(merged));
+        Catalog.Database updated = new Catalog.Database(old.name(), newLocation, old.description(), merged);
         catalog.createDatabase(updated);
+        if (store != null) {
+            try {
+                store.saveDatabase(updated);
+            } catch (Exception e) {
+                catalog.createDatabase(old);
+                throw new IllegalStateException("Failed to persist database " + name + " change: " + e.getMessage(), e);
+            }
+        }
     }
 
     public boolean dropDatabase(String name, boolean cascade) throws Exception {
@@ -118,9 +181,15 @@ public final class CatalogService {
             dropTable(t.database(), t.tableName());
         }
         catalog.removeDatabase(name);
+        if (store != null) store.deleteDatabase(name);
         return true;
     }
 
+    /**
+     * Logical rename only: memory + store records move to the new name. The
+     * caller (orchestration layer) owns the physical RENAME and the runtime
+     * definition update — this class never edits SQL strings.
+     */
     public void renameTable(String fromDb, String fromTable, String toDb, String toTable) throws Exception {
         Catalog.Table old = catalog.getTable(fromDb, fromTable).orElse(null);
         if (old == null) throw new IllegalArgumentException("Table does not exist: " + fromDb + "." + fromTable);
@@ -130,26 +199,12 @@ public final class CatalogService {
                 old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
         catalog.renameTable(fromDb, fromTable, toDb, toTable);
         if (store != null) {
-            store.saveTable(renamed);
-            var rt = store.loadRuntimeInfo(old.tableId());
-            if (rt.isPresent()) {
-                String oldSql = rt.get().createSql();
-                String patched = oldSql;
-                if (oldSql != null) {
-                    // Patch CREATE TABLE/VIEW prefix so replay recreates the new name.
-                    // Handles both quoted and unquoted forms.
-                    String quotedFrom = "\"" + fromTable + "\"";
-                    String quotedTo = "\"" + toTable + "\"";
-                    if (oldSql.contains(quotedFrom)) {
-                        patched = oldSql.replaceFirst(java.util.regex.Pattern.quote(quotedFrom), java.util.regex.Matcher.quoteReplacement(quotedTo));
-                    } else {
-                        patched = oldSql.replaceFirst("(?i)(CREATE\\s+(?:TABLE|VIEW)\\s+)" + java.util.regex.Pattern.quote(fromTable), "$1" + java.util.regex.Matcher.quoteReplacement(toTable));
-                        if (patched.equals(oldSql)) {
-                            patched = oldSql.replaceFirst("\\b" + java.util.regex.Pattern.quote(fromTable) + "\\b", java.util.regex.Matcher.quoteReplacement(toTable));
-                        }
-                    }
-                }
-                store.saveRuntimeInfo(old.tableId(), toTable, patched);
+            try {
+                store.saveTable(renamed);
+            } catch (Exception e) {
+                catalog.renameTable(toDb, toTable, fromDb, fromTable);
+                throw new IllegalStateException("Failed to persist rename of " + fromDb + "." + fromTable
+                        + ": " + e.getMessage(), e);
             }
         }
     }
@@ -160,7 +215,15 @@ public final class CatalogService {
         Catalog.Table updated = new Catalog.Table(old.tableId(), old.name(), old.tableType(), toCatalogColumns(newCols),
                 old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
         catalog.updateTable(updated);
-        if (store != null) store.saveTable(updated);
+        if (store != null) {
+            try {
+                store.saveTable(updated);
+            } catch (Exception e) {
+                catalog.updateTable(old);
+                throw new IllegalStateException("Failed to persist column refresh for " + database + "."
+                        + tableName + ": " + e.getMessage(), e);
+            }
+        }
     }
 
     private static List<Catalog.Column> toCatalogColumns(List<ColumnDef> defs) {

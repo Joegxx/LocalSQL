@@ -41,7 +41,7 @@ final class SqlPipeline {
     private final SparkSqlParser parser = new SparkSqlParser();
     private final SparkAstBuilder astBuilder = new SparkAstBuilder();
     private final SemanticAnalyzer analyzer;
-    private final RewriteEngine rewriter = new RewriteEngine();
+    private final RewriteEngine rewriter;
     private final UdfSupport udfSupport;
     private final UdfProjectionSplitter udfSplitter;
     private final UdtfGenerateSplitter udtfSplitter;
@@ -67,11 +67,13 @@ final class SqlPipeline {
                 DuckDbSqlGenerator generator) {
         this.catalogService = catalogService;
         this.executor = executor;
-        this.analyzer = new SemanticAnalyzer(catalogService.catalog());
+        this.analyzer = new SemanticAnalyzer(catalogService.catalog(),
+                io.github.joegxx.localsql.analyzer.BuiltInFunctionCatalog.instance(), false);
         this.udfSupport = udfSupport;
         this.udfSplitter = udfSupport == null ? null : new UdfProjectionSplitter(udfSupport.registry());
         this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
         this.generator = generator == null ? new DuckDbSqlGenerator() : generator;
+        this.rewriter = new RewriteEngine(reservedFunctionNames());
     }
 
     /**
@@ -91,9 +93,8 @@ final class SqlPipeline {
                 ? "default" : currentDatabase;
         Statement stmt = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
         if (stmt instanceof QueryStatement q) {
-            Relation rel = q.query();
-            analyzer.analyze(rel, sessionDatabase);
-            rewriter.rewrite(rel);
+            Relation rel = analyzer.analyze(q.query(), sessionDatabase);
+            rel = rewriter.rewrite(rel);
             if (udtfSplitter != null) {
                 UdtfGenerateSplitter.UdtfPlan udtfPlan = udtfSplitter.trySplit(rel);
                 if (udtfPlan != null) return executeWithUdtf(udtfPlan);
@@ -107,22 +108,50 @@ final class SqlPipeline {
             return executor.execute(duckSql);
         }
         if (stmt instanceof Insert i) return executeInsert(i);
-        if (stmt instanceof CreateTable ct) return executeCreateTable(ct);
-        if (stmt instanceof CreateView cv) return executeCreateView(cv);
-        if (stmt instanceof DropTable dr) return executeDrop(dr);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateDatabase cd) return executeCreateDatabase(cd);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropDatabase dd) return executeDropDatabase(dd);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterDatabase ad) return executeAlterDatabase(ad);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameTable rt) return executeRenameTable(rt);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.SetTableProperties stp) return executeSetTableProperties(stp);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.UnsetTableProperties utp) return executeUnsetTableProperties(utp);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AddColumns ac) return executeAddColumns(ac);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropColumns dc) return executeDropColumns(dc);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameColumn rc) return executeRenameColumn(rc);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterColumn alc) return executeAlterColumn(alc);
-        if (stmt instanceof io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) return executeReplaceColumns(rpc);
+        if (stmt instanceof CreateTable ct) return inCatalogTransaction(() -> executeCreateTable(ct));
+        if (stmt instanceof CreateView cv) return inCatalogTransaction(() -> executeCreateView(cv));
+        if (stmt instanceof DropTable dr) return inCatalogTransaction(() -> executeDrop(dr));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.CreateDatabase cd) return inCatalogTransaction(() -> executeCreateDatabase(cd));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropDatabase dd) return inCatalogTransaction(() -> executeDropDatabase(dd));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterDatabase ad) return inCatalogTransaction(() -> executeAlterDatabase(ad));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameTable rt) return inCatalogTransaction(() -> executeRenameTable(rt));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.SetTableProperties stp) return inCatalogTransaction(() -> executeSetTableProperties(stp));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.UnsetTableProperties utp) return inCatalogTransaction(() -> executeUnsetTableProperties(utp));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AddColumns ac) return inCatalogTransaction(() -> executeAddColumns(ac));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.DropColumns dc) return inCatalogTransaction(() -> executeDropColumns(dc));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.RenameColumn rc) return inCatalogTransaction(() -> executeRenameColumn(rc));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.AlterColumn alc) return inCatalogTransaction(() -> executeAlterColumn(alc));
+        if (stmt instanceof io.github.joegxx.localsql.ir.statement.ReplaceColumns rpc) return inCatalogTransaction(() -> executeReplaceColumns(rpc));
         throw new UnsupportedOperationException(
                 "Unsupported statement: " + stmt.getClass().getSimpleName());
+    }
+
+    @FunctionalInterface
+    private interface SqlWork2 {
+        DuckDbExecutor.QueryResult run() throws Exception;
+    }
+
+    /**
+     * Wrap a DDL statement so the in-memory catalog cannot drift from the
+     * physical store: snapshot the committed catalog, run the statement, and
+     * on any failure restore the snapshot. The physical transaction (see
+     * {@link #inTransaction}) rolls DuckDB objects back; this restores the
+     * catalog cache so both layers agree after a failure.
+     */
+    private DuckDbExecutor.QueryResult inCatalogTransaction(SqlWork2 work) throws SQLException {
+        Catalog snapshot = catalogService.snapshot();
+        try {
+            return work.run();
+        } catch (SQLException e) {
+            catalogService.commitSnapshot(snapshot);
+            throw e;
+        } catch (RuntimeException e) {
+            catalogService.commitSnapshot(snapshot);
+            throw e;
+        } catch (Exception e) {
+            catalogService.commitSnapshot(snapshot);
+            throw new SQLException(e.getMessage(), e);
+        }
     }
 
     @FunctionalInterface
@@ -137,6 +166,21 @@ final class SqlPipeline {
      * rebuilt around a scan of it, so outer filters/ORDER BY/LIMIT keep
      * their normal semantics.
      */
+    /**
+     * Function source names excluded from rewrite-phase renaming: UDF names
+     * (resolved by the UDF splitters against the registry) and custom
+     * function-map renames/templates (generator-owned conversion, A1.3).
+     */
+    private java.util.Set<String> reservedFunctionNames() {
+        java.util.Set<String> reserved = new java.util.HashSet<>(generator.customFunctionNames());
+        if (udfSupport != null) {
+            for (var def : udfSupport.registry().definitions()) {
+                reserved.add(def.name().toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        return reserved;
+    }
+
     private DuckDbExecutor.QueryResult executeWithUdtf(UdtfGenerateSplitter.UdtfPlan plan) throws SQLException {
         String stage1Sql = generator.generate(plan.stage1());
         LOG.info("UDTF stage-1 SQL: {}", stage1Sql);
@@ -351,8 +395,8 @@ final class SqlPipeline {
         return empty();
     }
 
-    private DuckDbExecutor.QueryResult executeInsert(Insert i) throws SQLException {
-        analyzer.analyze(i, sessionDatabase);
+    private DuckDbExecutor.QueryResult executeInsert(Insert stmt) throws SQLException {
+        Insert i = (Insert) analyzer.analyze(stmt, sessionDatabase);
         rewriter.rewrite(i.query());
         String table = bare(i.tableName());
         boolean tx = i.overwrite();
@@ -372,8 +416,8 @@ final class SqlPipeline {
         }
     }
 
-    private DuckDbExecutor.QueryResult executeCreateTable(CreateTable ct) throws SQLException {
-        analyzer.analyze(ct, sessionDatabase);
+    private DuckDbExecutor.QueryResult executeCreateTable(CreateTable rawCt) throws SQLException {
+        CreateTable ct = (CreateTable) analyzer.analyze(rawCt, sessionDatabase);
         String db = databaseOf(ct.tableName());
         // Unquoted logical name: this feeds catalog metadata, not SQL text.
         String table = ct.tableName().get(ct.tableName().size() - 1);
@@ -443,8 +487,8 @@ final class SqlPipeline {
         return inserted[0];
     }
 
-    private DuckDbExecutor.QueryResult executeCreateView(CreateView cv) throws SQLException {
-        analyzer.analyze(cv, sessionDatabase);
+    private DuckDbExecutor.QueryResult executeCreateView(CreateView rawView) throws SQLException {
+        CreateView cv = (CreateView) analyzer.analyze(rawView, sessionDatabase);
         String db = databaseOf(cv.tableName());
         String name = cv.tableName().get(cv.tableName().size() - 1);
         Catalog.Table existing = catalogService.getTable(db, name).orElse(null);
@@ -542,11 +586,47 @@ final class SqlPipeline {
             inTransaction(() -> {
                 executor.run(sql);
                 catalogService.renameTable(fromDb, fromTable, toDb, toTable);
+                // After a physical rename DuckDB's view definitions already
+                // reference the new name. Persist the replay DDL under the new
+                // name — loaded from the store, not regex-patched here.
+                if (catalogService.store() != null && existing.tableId() > 0) {
+                    catalogService.store().loadRuntimeInfo(existing.tableId()).ifPresent(info -> {
+                        try {
+                            String def = replayDdlAfterRename(info.createSql(), fromTable, toTable, isView);
+                            catalogService.store().saveRuntimeInfo(existing.tableId(), toTable, def);
+                        } catch (Exception ex) {
+                            throw new RuntimeException("Failed to update runtime definition for "
+                                    + toTable + ": " + ex.getMessage(), ex);
+                        }
+                    });
+                }
             });
         } catch (SQLException e) {
             throw new SQLException("Failed to rename catalog entry: " + e.getMessage(), e);
         }
         return empty();
+    }
+
+    /**
+     * Rename the top-level object inside a stored replay DDL. Views replay
+     * as CREATE VIEW <name> AS <select>; the SELECT body must NOT be touched
+     * (it legitimately contains the old name only when referencing other
+     * objects). For tables the DDL is CREATE TABLE <name> (...); only the
+     * first occurrence after the CREATE keyword is replaced.
+     */
+    private static String replayDdlAfterRename(String createSql, String fromTable, String toTable, boolean isView) {
+        if (createSql == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?is)^(CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW|CREATE\\s+TABLE)\\s+" +
+                        "(?:IF\\s+NOT\\s+EXISTS\\s+)?([`\"]?)([^`\".\\s]+)\\2")
+                .matcher(createSql);
+        if (m.find() && m.group(3).equalsIgnoreCase(fromTable)) {
+            String newDef = createSql.substring(0, m.start(3)) + toTable + createSql.substring(m.end(3));
+            // Views replayed by name may also self-reference in their body via
+            // other objects — out of scope; table column defaults etc. remain.
+            return newDef;
+        }
+        return createSql;
     }
 
     private DuckDbExecutor.QueryResult executeSetTableProperties(io.github.joegxx.localsql.ir.statement.SetTableProperties stp) throws SQLException {

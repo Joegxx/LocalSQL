@@ -510,8 +510,12 @@ public final class SparkAstBuilder {
         FunctionCall gen = new FunctionCall(fn, args);
         List<String> outs = new ArrayList<>();
         if (lv.colName != null) for (var id : lv.colName) outs.add(SparkExpressionBuilder.unquote(id.getText()));
-        if (outs.isEmpty() && lv.tblName != null) outs.add(SparkExpressionBuilder.unquote(lv.tblName.getText()));
-        return new Generate(gen, outs, input);
+        String viewAlias = lv.tblName != null ? SparkExpressionBuilder.unquote(lv.tblName.getText()) : null;
+        if (outs.isEmpty() && viewAlias != null) {
+            // LATERAL VIEW f(x) v without AS: the view name doubles as the column name
+            outs.add(viewAlias);
+        }
+        return new Generate(gen, outs, viewAlias, input);
     }
 
     private Relation visitAggregate(AggregationClauseContext agg, Relation input, List<Expression> selectItems) {
@@ -673,6 +677,20 @@ public final class SparkAstBuilder {
     }
 
     private Relation visitQueryOrganization(QueryOrganizationContext org, Relation input) {
+        if (org.sort != null && !org.sort.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "SORT BY is not supported (DuckDB has no per-partition sort); use ORDER BY");
+        }
+        if (org.clusterBy != null && !org.clusterBy.isEmpty()) {
+            throw new UnsupportedOperationException("CLUSTER BY is not supported");
+        }
+        if (org.distributeBy != null && !org.distributeBy.isEmpty()) {
+            throw new UnsupportedOperationException("DISTRIBUTE BY is not supported");
+        }
+        if (org.windowClause() != null) {
+            throw new UnsupportedOperationException(
+                    "Named windows (WINDOW w AS ...) are not supported; write OVER (...) inline");
+        }
         if (org.order != null && !org.order.isEmpty()) {
             List<Sort.SortOrder> orders = new ArrayList<>();
             for (SortItemContext si : org.order) {
@@ -683,10 +701,16 @@ public final class SparkAstBuilder {
             }
             input = new Sort(input, orders);
         }
+        if (org.ALL() != null) {
+            throw new UnsupportedOperationException("LIMIT ALL is not supported");
+        }
         if (org.limit != null) {
             Expression lim = exprBuilder.visit(org.limit);
             if (lim instanceof Literal l && l.kind() == Literal.Kind.INTEGER) {
                 input = new Limit(input, (Long) l.value(), 0);
+            } else {
+                throw new UnsupportedOperationException(
+                        "LIMIT must be an integer literal, got: " + org.limit.getText());
             }
         }
         return input;

@@ -2,175 +2,75 @@
 
 中文 | **[English](./README.md)**
 
-> **让任何人，尤其是 AI，在不接触生产数据平台的情况下完成 90% 的 SQL 开发、调试和验证。**
+LocalSQL 是面向开发者和 AI Agent 的嵌入式 SQL Sandbox：解析 Spark SQL 3.2.0，经 Common IR 翻译后在进程内 DuckDB 执行，并提供 HiveServer2 兼容的 Thrift 接口。无需部署 Spark、Hadoop 或 Hive 服务。
 
-LocalSQL 是一个轻量级、嵌入式 SQL Sandbox。它解析 Spark SQL 3.2.0 语法，通过 DuckDB 进行进程内执行，并提供标准 HiveServer2 Thrift 接口供 JDBC 客户端和数据库 IDE 连接。无需部署 Spark、Hadoop 或 Hive。
+核心理念：生产环境用于执行，LocalSQL 用于本地实验。
 
-**核心理念：生产环境用于执行，LocalSQL 用于实验。**
+## 当前状态
 
-```text
-生产数据平台
-        │
-        │  Schema / Metadata / Samples
-        ▼
-┌───────────────────────────┐
-│     LocalSQL Sandbox      │
-│                           │
-│  生产环境元数据            │
-│  生产环境样本              │
-│  关系感知数据              │
-│  本地 SQL 执行            │
-│  AI 测试用例              │
-│  断言                     │
-│  生产风险分析              │
-└──────────────┬────────────┘
-               │
-               │ 已验证的 SQL
-               ▼
-       生产环境执行
-```
+更新日期：2026-09-10。查询执行、基础 DML/DDL、文件数据库与 Java UDF 接入路径已存在。**名称解析、失败恢复、UDF 打包运行和 Thrift 行为仍有正确性缺口，目前不能把 LocalSQL 当作 Spark 语义一致性验证器。**
 
----
+下一阶段优先修正确性和模块边界，范围、迁移顺序与验收标准见[开发计划](docs/development-plan.md)。计划是待实施方案，不代表代码修复已经完成。
 
-## 为什么需要 LocalSQL？
+### 已有实现路径
 
-传统 SQL 开发意味着直接对生产集群运行查询——每次迭代、每次调试、每次 AI 生成的尝试都如此。这会导致：
+- 基于 Spark 3.2.0 grammar 的解析，关键字大小写不敏感，支持反引号标识符。解析成功不代表执行语义已支持。
+- DQL：SELECT、DISTINCT、JOIN、WHERE、GROUP BY、HAVING、ORDER BY、整数字面量 LIMIT。
+- CTE、子查询、UNION/INTERSECT/EXCEPT、窗口函数、ROLLUP/CUBE/GROUPING SETS。
+- INSERT INTO/OVERWRITE；CREATE TABLE（CTAS/LIKE/PARTITIONED BY）；CREATE/DROP VIEW；CREATE/ALTER/DROP DATABASE；表列变更、重命名及表属性操作。
+- HiveServer2 连接、查询、结果获取与元数据接口，以及 `ThriftServer.executeSparkSql` 直接嵌入式执行入口。
+- 内存 Catalog，可选 DuckDB 表元数据持久化；物理文件数据库保存与加载。
+- 本地 DDL 文件导入、函数配置；Java UDF/GenericUDF/GenericUDTF 的进程内执行，不是独立隔离的 worker 服务。
+- TPC-DS 翻译和 DuckDB 差分测试，以及函数、DDL/DML、UDF 回归样例。
 
-- **不必要的计算成本** — 反复试错产生的额外费用
-- **生产风险** — 未经测试的查询直接访问真实数据
-- **缓慢的反馈循环** — 等待集群调度和资源分配
-- **AI 放大的问题** — AI Agent 对生产环境的盲目迭代会被成倍放大
+### 已知限制
 
-LocalSQL 将整个调试循环迁移到本地：
+- Analyzer 已接入，但作用域、名称、类型绑定未完成；不存在的数据库限定名可能落到其他逻辑库的已有物理表。
+- DDL 回滚不恢复内存 Catalog；空库与数据库级属性尚未持久化。
+- **DDL 导入失败清理可能删除其他逻辑库的同名物理表。修复前只使用可丢弃的数据库副本。**
+- 非字面量 LIMIT 表达式、SORT BY 可能被静默忽略；不支持特性的拒绝机制未完善。
+- 正式 `runtime.jar --udf-config ...` 会因缺少 Hive 运行类而失败；注册未使用的 UDF 也可能误拒绝普通 `SELECT *`。
+- Thrift GetTypeInfo、结果类型、Operation 状态、取消及 Session 清理仍需修复；接口方法齐全不代表协议兼容完整。
+- 函数转换分散在 Rewrite 与 Generator；CatalogService 仍在修改 runtime SQL，偏离了下述目标边界。
+- DELETE/UPDATE/MERGE、multi-INSERT、NATURAL JOIN、命名窗口、聚合 FILTER 不支持。脚本 TRANSFORM 查询不支持；部分高阶 Lambda 函数已实现，限制见[函数说明](docs/functions.md)。
+- 不做优化器、成本模型、分布式执行或权限认证，不提供用户级事务/ACID 保证；部分 DDL/DML 已使用内部事务。
 
-```text
-AI / 开发者
-      │
-      ▼
- LocalSQL Sandbox
-      │
-      ├── 解析
-      ├── 验证
-      ├── 本地执行
-      ├── 测试用例
-      ├── 断言正确性
-      └── 分析生产风险
-      │
-      ▼
- 生产环境（仅已验证的 SQL）
-```
-
----
-
-## 功能特性
-
-### 当前版本 (MVP)
-
-- ✅ **Spark SQL 3.2.0 语法** — 完整的 ANTLR 语法解析支持
-- ✅ **DQL 查询** — SELECT、JOIN、GROUP BY、HAVING、ORDER BY、LIMIT
-- ✅ **高级 SQL** — CTE、UNION、子查询、窗口函数、ROLLUP/CUBE/GROUPING SETS
-- ✅ **HiveServer2 Thrift** — 支持 DBeaver、DataGrip 或任意 Hive JDBC 客户端连接
-- ✅ **Common IR** — 解析器与执行后端之间的清晰抽象层
-- ✅ **语义分析器** — 名称解析、类型推导、Catalog 查询
-- ✅ **重写引擎** — 函数名翻译（如 `size` → `array_length`）
-- ✅ **DuckDB 执行** — 快速进程内 SQL 引擎，单文件数据库
-- ✅ **135/135 TPC-DS 查询** — 与 DuckDB 原生执行的差分一致性测试
-
-### 路线图
-
-#### Phase 1 — 本地 SQL Sandbox
-- ⬜ Sandbox 数据库打包
-- ⬜ 生产环境 schema 导入
-- ⬜ 样本数据生成
-- ⬜ 本地 SQL CLI
-
-#### Phase 2 — 生产数据集镜像
-- ⬜ 生产环境元数据提取
-- ⬜ 保持表间关系的采样
-- ⬜ 数据脱敏
-- ⬜ 列统计信息和基数
-- ⬜ 分区元数据
-- ⬜ 可复现的数据集版本
-
-#### Phase 3 — AI SQL 测试
-- ⬜ 测试用例 API
-- ⬜ 合成测试数据生成
-- ⬜ 边界情况生成
-- ⬜ 断言框架
-- ⬜ 结果比对
-- ⬜ SQL 回归测试
-- ⬜ AI Agent 接口
-
-#### Phase 4 — 生产风险分析
-- ⬜ 全表扫描检测
-- ⬜ 分区过滤检测
-- ⬜ Join 爆炸检测
-- ⬜ 基数分析
-- ⬜ 生产环境行数感知
-- ⬜ 查询复杂度分析
-- ⬜ 可配置的风险策略
-
-#### Phase 5 — 生产提交网关
-- ⬜ 验证报告
-- ⬜ Sandbox 版本管理
-- ⬜ 查询审批工作流
-- ⬜ 生产执行网关
-- ⬜ 执行限制
-- ⬜ 审计记录
-
-#### Phase 6 — 多引擎支持
-- ⬜ Spark SQL 4.x 语法支持
-- ⬜ Doris SQL 方言
-- ⬜ Snowflake SQL 方言
-- ⬜ BigQuery SQL 方言
-- ⬜ ClickHouse SQL 方言
-- ⬜ Trino/Presto SQL 方言
-- ⬜ 可插拔解析器架构
-- ⬜ 方言特定的函数映射
-- ⬜ 跨方言查询翻译
-
----
+已有路径和通过的样例不保证所有 SQL 组合或 Spark 边界语义正确；本地样本也不能证明生产规模下的行为。
 
 ## 快速开始
 
-### 环境要求
+### 环境与构建
 
-- JDK 21
-- Maven 3.9+
+使用 JDK 21、Maven 3.9+。同时检查下面两个版本命令，Maven 可能使用与 `java` 不同的 JDK。
 
 ```bash
-java -version    # 应显示 21.x
+java -version
 mvn -version
-```
-
-### 构建
-
-```bash
 mvn clean package -DskipTests
 ```
 
-产物：`localsql-app/target/runtime.jar`
-
-### 运行
+产物：`localsql-app/target/runtime.jar`。
 
 ```bash
-# 在端口 10000 启动 HiveServer2 Thrift 服务
+# 默认 10000 端口；可用位置参数覆盖端口
 java -jar localsql-app/target/runtime.jar
-
-# 自定义端口
 java -jar localsql-app/target/runtime.jar 10001
+
+# 打开已有文件数据库；名称解析仍受当前缺陷限制
+java -jar localsql-app/target/runtime.jar --load sandbox.duckdb --schema default
 ```
 
-### 连接
+Demo 创建带真实类型的 `users` 和 `orders` 样例表；进程持续运行，停止后退出。
 
-**JDBC URL：**
-```
+### 连接与查询
+
+在 DBeaver、DataGrip 或其他兼容客户端中选择 Hive JDBC 数据源：
+
+```text
 jdbc:hive2://localhost:10000/default
 ```
 
-支持 DBeaver、DataGrip 或任意兼容 HiveServer2 的客户端。MVP 版本无需认证。
-
-**示例查询：**
+MVP 不启用认证。元数据、类型和生命周期仍受已知限制约束，不代表任意客户端功能均已验证。
 
 ```sql
 SELECT u.name, count(*) AS cnt
@@ -180,242 +80,85 @@ GROUP BY u.name
 ORDER BY cnt DESC;
 ```
 
-**预期结果：**
-```
-alice  2
-bob    1
-```
+样例数据返回 `alice, 2` 和 `bob, 1`。
 
----
+`Main` 另有 `--import-ddl`、`--out`、`--manifest`、`--failures`、`--udf-config` 和 `--function-map` 参数；这些是现有入口，不代表导入/UDF 缺陷已修复。详细操作见[使用指南](docs/usage.md)。
 
 ## 架构
 
-LocalSQL 保持轻量架构，专注于清晰的层次分离：
+普通查询路径为 ParseTree → Common IR → Analyzer → Rewrite → DuckDB SQL → Executor。Analyzer 与 Rewrite 已接入；`SqlPipeline` 编排 DDL/DML 和可选 UDF 分阶段执行；SHOW/DESCRIBE/USE 先经管理语句处理器。
 
-```text
-Spark SQL
-   ↓
-ANTLR ParseTree
-   ↓
-Common IR（唯一真相源）
-   ↓
-语义分析器（Analyzer）
-   ↓
-重写引擎（RewriteEngine）
-   ↓
-DuckDB SQL
-   ↓
-DuckDB 执行器（Executor）
-   ↓
-查询结果
-```
+### 目标边界
 
-### 设计原则
+1. 模块依赖明确，后端不直接读取 Spark/ANTLR tree，IR 是唯一查询表示。
+2. Parser 只产 ParseTree，Spark AST Builder 负责转换为 IR。
+3. Analyzer 独占作用域、名称、类型、函数绑定及 Catalog 查询。
+4. Rewrite 独占表达式/函数降级，Generator 只序列化已解析、已降级 IR。
+5. Executor 只执行 SQL 并返回结果，不读取 IR。
+6. Catalog 只存逻辑元数据，不包含 JDBC 连接、物理 SQL 或 runtime 状态。
+7. Runtime 编排协调事务、物理名字绑定与 UDF 阶段。
 
-1. **模块独立** — 严格的层边界，禁止跨层依赖
-2. **IR 是唯一真相源** — 后端消费 IR，绝不直接读 ParseTree
-3. **Parser 只负责解析** — 产生 ParseTree，不做任何逻辑处理
-4. **Analyzer 只负责语义分析** — 名称解析、类型推导、Catalog 查询
-5. **Generator 只负责序列化** — IR → SQL 字符串，无状态，不访问 Catalog
-6. **Executor 只负责执行** — 运行 SQL，返回结果，不触碰 IR
-7. **Catalog 只存储元数据** — databases/tables/columns，不执行 SQL
-8. **元数据与运行时分离** — Catalog 是逻辑的，DuckDB 是物理的
-
-**多引擎扩展性：** Common IR 的设计使 LocalSQL 能够支持多种 SQL 方言（Spark 3.x/4.x、Doris、Snowflake、BigQuery、ClickHouse、Trino），只需添加新的解析器将其转换为相同的 IR。每种方言的解析器是独立的；分析器、重写器和 DuckDB 后端保持不变。
+Analyzer、Generator、CatalogService 的现有偏离是待修复问题，不能作为新代码照搬的例外。新方言可能需要新增 IR 和语义规则，不是只替换 Parser。
 
 ### 模块
 
-| 模块 | 职责 |
-|------|------|
-| `localsql-parser` | ANTLR 语法 + 生成 Spark SQL ParseTree |
-| `localsql-ir` | 与解析器和后端无关的 Common IR |
-| `localsql-spark` | Spark ParseTree → Common IR 转换 |
-| `localsql-analyzer` | 名称解析、类型推导、Catalog 查询 |
-| `localsql-rewrite` | IR 重写与函数名翻译 |
-| `localsql-catalog` | 逻辑数据库、表、列管理、CatalogStore API |
-| `localsql-duckdb` | DuckDB SQL 生成、执行、CatalogStore 实现 |
-| `localsql-thrift` | HiveServer2 Thrift 服务与查询编排 |
-| `localsql-app` | 应用入口、示例数据、可执行 JAR |
-
----
+| 模块 | 当前职责 |
+|---|---|
+| `localsql-parser` | ANTLR grammar 与 Spark SQL ParseTree |
+| `localsql-ir` | 公共关系、表达式、语句和类型表示 |
+| `localsql-spark` | Spark ParseTree → IR |
+| `localsql-analyzer` | 表输出填充、部分语句检查；完整绑定待实现 |
+| `localsql-rewrite` | 部分函数改名与 UDF/UDTF 查询拆分 |
+| `localsql-catalog` | 逻辑元数据、缓存、CatalogStore；runtime 职责待分离 |
+| `localsql-duckdb` | SQL 生成、JDBC 执行、元数据 store、内置 Java 函数 |
+| `localsql-udf-api` | UDF 定义、注册表、批数据/Gateway 契约 |
+| `localsql-udf-runtime` | 进程内 Hive UDF 适配；产物运行依赖待修复 |
+| `localsql-thrift` | SQL 编排与 HiveServer2 RPC 服务 |
+| `localsql-app` | 入口、样例、DDL 导入、配置和可执行 JAR |
 
 ## 测试
 
 ```bash
-# 全部测试（284 个）
+# 全量：需要允许端口监听；TPC-DS 执行还需要对应扩展
 mvn clean test
 
-# TPC-DS 一致性测试（135 个查询，需联网下载 DuckDB tpcds 扩展）
-mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest
+# 135 份 SQL + 1 个汇总测试，不执行查询
+mvn -pl localsql-thrift -am test \
+  -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
 
-# 翻译回归测试（136 个查询，不执行）
-mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest
+# DuckDB 原生执行与 Thrift 管线的差分
+mvn -pl localsql-thrift -am test \
+  -Dtest=TpcdsConsistencyTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-### 测试架构
+- `TpcdsQueryPipelineTest`：翻译回归，包含 Analyzer/Rewrite 调用；严格绑定启用前需补齐其 Catalog fixture。
+- `TpcdsGoldenResultTest`：真实 Thrift 执行与手工校准的期望结果比较。
+- `TpcdsConsistencyTest`：DuckDB 原生执行与 Thrift 结果字符串化后比较多重集；oracle 不可用的查询只检查执行成功。不验证结果类型、行顺序或 Spark 特有语义。
 
-| 层级 | 测试类 | 内容 |
-|------|--------|------|
-| L1 翻译 | `TpcdsQueryPipelineTest` | 136 个 TPC-DS 查询 parse→generate，不执行 |
-| L3 手工 Golden | `TpcdsGoldenResultTest` | 通过真实 Thrift 执行，与手工验证的 Spark 语义对比 |
-| L3 差分 Oracle | `TpcdsConsistencyTest` | 相同数据 + 相同 SQL：DuckDB 原生 vs. Thrift 管线，双向 `EXCEPT ALL` 严格对比，**135/135 通过** |
+**审查基线（2026-09-10）：** Java 21 打包成功；排除 7 个依赖端口监听的测试类后 455 项测试通过；全量测试因沙箱禁止 bind 未完成，不能宣称全量通过。测试数量是带日期的快照，不是覆盖率或一致性保证；复现命令与排除清单见开发计划。
 
----
+## 开发方向
 
-## 文档
+近期以[开发计划](docs/development-plan.md)为准：
 
-- **[使用指南](docs/usage.md)** — 详细设置、JDBC 连接、SQL 特性、故障排查
-- **[AGENTS.md](AGENTS.md)** — 架构规则、模块边界、开发指南
+- Generator 中的语义转换迁入 Rewrite，统一函数绑定与转换。
+- CatalogService 与 runtime SQL 分离，元数据变更支持失败恢复。
+- 修复 Analyzer、DDL 回滚、UDF 产物、语法静默丢弃、Thrift 行为、数据库持久化。
+- 增加失败注入、结果类型、顺序、重启及实际发行产物测试。
 
----
+长期方向包括样本数据导入/生成、本地批量 SQL 回归 CLI/API、可复现数据集与其他方言。AI 自动生成测试、生产风险分析、审批与生产提交仍是设想，不是已交付功能；多引擎和优化器不作为下一阶段主线。
 
-## 支持的 SQL 特性
+## 文档与贡献
 
-通过 TPC-DS 差分一致性测试验证（135/135 个查询）：
+- [English](README.md)
+- [使用指南](docs/usage.md)
+- [开发计划](docs/development-plan.md)：范围、修复方案和验收标准
+- [函数说明](docs/functions.md)
+- [UDF 实现/设计说明](docs/udf-plan.md)
+- [AGENTS.md](AGENTS.md)：架构约束与协作指南
 
-- **基本查询**：`SELECT` / `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT`
-- **Join**：`INNER` / `LEFT` / `RIGHT` / `FULL OUTER` / `CROSS` / `SEMI` / `ANTI`，以及 `JOIN ... USING (col)`
-- **集合操作**：`UNION [ALL]` / `INTERSECT` / `EXCEPT`
-- **CTE**：`WITH a AS (...), b AS (...) SELECT ...`
-- **子查询**：标量子查询、`EXISTS` / `NOT EXISTS`、`IN (子查询)`、派生表（含别名）
-- **窗口函数**：`OVER (PARTITION BY ... ORDER BY ...)` 及 `ROWS|RANGE BETWEEN` frame
-- **分组扩展**：`ROLLUP` / `CUBE` / `GROUPING SETS`（含 legacy `WITH ROLLUP`）
-- **表达式**：`CASE WHEN`、`IN` 列表、`BETWEEN`、`LIKE` / `RLIKE`、`IS [NOT] NULL`
-- **操作符**：`+ - * / %`、整数除法 `DIV`（→ `//`）、位运算 `& | ^`、字符串 `||`、空安全比较 `<=>`（`IS NOT DISTINCT FROM`）
-- **CAST**：包括 `DECIMAL(p,s)`
-- **字面量**：整数、小数、科学计数、字符串、日期（`DATE '2020-01-01'`）、`INTERVAL 30 days`
-- **函数**：`count/sum/avg/min/max`、`coalesce`、`substring`、`concat`、`row_number/rank/dense_rank`、`size`（→ `array_length`）、`explode`（→ `unnest`）
-- **标识符**：反引号引用（`` `order count` ``）、大小写不敏感、DuckDB 保留字自动引号化
-
-### 暂不支持（Phase 2 规划）
-
-- DDL（`CREATE` / `ALTER` / `DROP`）
-- `NATURAL JOIN`
-- 命名窗口（`WINDOW w AS ...`）
-- 聚合 `FILTER (WHERE ...)` 子句
-- Lambda 表达式 / `TRANSFORM`
-
----
-
-## AI 原生 SQL 工作流
-
-LocalSQL 专为 AI Agent 的安全迭代而设计：
-
-```text
-用户需求
-     │
-     ▼
-   AI Agent
-     │
-     ▼
-生成 SQL
-     │
-     ▼
-检查 Schema
-     │
-     ▼
-在 LocalSQL 中运行
-     │
-     ▼
-生成测试用例
-     │
-     ▼
-执行测试用例
-     │
-     ▼
-断言验证
-     │
-     ▼
-风险分析
-     │
-     ├──── 失败 ────► 修复 SQL ────┐
-     │                             │
-     │                             └──► 重新运行
-     │
-     ▼
-   通过
-     │
-     ▼
-生产提交
-```
-
-AI 可以在本地无限次迭代，而不消耗生产计算资源或危及生产稳定性。
-
----
-
-## 为什么选择 DuckDB？
-
-- **单文件** — `company-sandbox.duckdb` 即为完整数据库
-- **进程内** — 无需独立服务器
-- **快速启动** — 立即执行查询
-- **强大的 SQL** — 全面的分析型 SQL 能力
-- **易于分发** — 可作为文件共享 Sandbox 数据集
-
----
-
-## 非目标
-
-LocalSQL 无意成为：
-
-- 分布式计算引擎
-- 生产数据仓库
-- Spark / StarRocks / Trino 的替代品
-- 通用 OLTP 数据库
-- 查询优化器或基于代价的执行计划器
-
-LocalSQL 的目标：
-
-> **在开发者/AI 与生产 SQL 提交之间提供安全、轻量、本地的实验环境。**
-
----
-
-## 当前限制
-
-- 仅支持 DQL；DDL 在 Phase 2 实现
-- 无优化器、统计信息或代价模型
-- 无事务、ACID 或权限控制
-- 无分布式执行
-- Sandbox 结果 ≠ 生产结果（设计如此 — Sandbox 验证逻辑，不验证规模）
-
----
-
-## 贡献
-
-欢迎贡献。提交前请：
-
-1. 阅读 [AGENTS.md](AGENTS.md) 了解架构规则
-2. 运行完整测试套件：`mvn clean test`
-3. 确保 TPC-DS 一致性测试通过：`mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest`
-4. 遵循现有代码风格和模块边界约束
-
----
+提交前遵循 AGENTS.md，补回归测试并使用 Java 21 验证。在允许端口监听的环境运行全量/Thrift 测试，明确列出未验证项。计划项只有在实现和验收完成后才能标记为已完成。
 
 ## 许可证
 
 Apache License 2.0
-
----
-
-## 哲学
-
-```text
-生产环境用于执行。
-LocalSQL 用于实验。
-```
-
-或者换个说法：
-
-```text
-让 AI 在本地犯错，
-而不是在生产环境犯错。
-```
-
-目标是转变 SQL 开发模式：
-
-```text
-传统模式：编写 → 生产执行 → 观察 → 修复 → 重复
-
-LocalSQL 模式：编写 → 本地执行 → 测试 → 断言 → 风险分析 → 验证 → 生产
-```
-
-只有经过验证的 SQL 才能进入生产环境。

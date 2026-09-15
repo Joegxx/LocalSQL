@@ -1,5 +1,17 @@
 # UDF and Function Compatibility Plan
 
+## Implementation status (September 10, 2026)
+
+This document contains both implementation notes and historical design proposals. The current repair scope and acceptance criteria are maintained in the [development plan](./development-plan.md), which takes precedence for scheduling.
+
+- `localsql-udf-api` and `localsql-udf-runtime` exist; execution is in-process. There is no `localsql-udf-gateway` worker module or process isolation today.
+- Configuration loading, scalar/GenericUDF execution and GenericUDTF splitting have tests. The packaged `runtime.jar --udf-config ...` currently fails with missing Hive `ObjectInspector` classes because Hive dependencies are provided only on test/compile paths.
+- Registering an unused UDF can incorrectly reject an ordinary `SELECT *`; query placement support is incomplete.
+- Deadline checks occur between rows and do not interrupt a blocked `evaluate` call. Do not treat the configured timeout as hard process isolation.
+- Function conversion still occurs in both Rewrite and Generator. The next milestone moves semantic lowering into Rewrite, with function binding owned by Analyzer.
+
+Sections describing worker processes, complete isolation, broad placement support and safety guarantees are target designs, not delivered capabilities. Existing test-count notes in the rollout history are historical snapshots, not current totals.
+
 ## Goal
 
 LocalSQL will support four function sources without breaking its layer
@@ -32,8 +44,8 @@ Parser -> IR -> Analyzer -> Rewrite -> DuckDB Generator -> Executor
   bindings.
 - `Rewrite` maps built-ins and inserts an explicit UDF boundary.
 - `Generator` serializes IR and never loads or executes Java classes.
-- `Executor` coordinates batches but does not depend on Hive ParseTree.
-- The Gateway loads and executes Java UDFs in a separate process.
+- Runtime orchestration coordinates stages and batches; Executor executes SQL without depending on IR or Hive ParseTree.
+- A separate Gateway process is a future isolation option; current execution is in-process.
 
 ## Modules
 
@@ -113,7 +125,7 @@ including dynamic output schema, `LATERAL VIEW`, `OUTER`, `explode`,
 
 ## Rollout phases
 
-### Configuration (implemented)
+### Configuration (loader implemented; packaged execution currently broken)
 
 `runtime.jar --load sandbox.duckdb --schema ods_fuaisv --udf-config udfs.yaml`:
 
@@ -168,7 +180,7 @@ functions:
 ```
 
 `FunctionMapLoader` (app) classifies values containing `{N}` as templates,
-everything else as renames; custom entries override built-ins. The generator
+everything else as renames; custom entries are intended to override built-ins, but early Rewrite renames can bypass original-name overrides. The generator
 is constructed with the overlay via `ThriftServer(catalog, executor, db,
 udfSupport, generator)`.
 
@@ -210,8 +222,9 @@ udfSupport, generator)`.
   values null when a key is missing). from_json: malformed JSON returns
   NULL like Spark (guarded by json_valid); to_json(NULL) native
 - percentile/percentile_approx/approx_percentile -> quantile_cont
-- zip_with, sort_array (comparator), map_zip_with remain unsupported
-  (need lambda variable substitution into DuckDB list_zip struct fields)
+- Selected zip/map higher-order functions now have implementation branches; consult
+  [function notes](./functions.md) and tests for current restrictions. They must
+  not be classified as universally supported or universally unsupported.
 
 ### Phase 1: contracts and registry
 
@@ -333,11 +346,11 @@ function gets a translation, semantic notes, Spark example and regression
 case. Functions introduced after the parser version are still subject to the
 local grammar and IR support.
 
-## Safety and failure behavior
+## Target safety and failure behavior (not fully implemented)
 
 - UDF jars are never copied into or shaded into `runtime.jar`.
 - Reflection and `java_method` remain disabled unless explicitly allowlisted.
-- Gateway requests have batch limits and timeouts.
+- Gateway requests should have batch limits and enforceable timeouts; current row-boundary checks are insufficient for blocking UDFs.
 - UDF failures identify request, function, class and jar without killing the
   main SQL runtime.
 - Unsupported placement or type conversion fails explicitly; it must not

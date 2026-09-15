@@ -29,6 +29,7 @@ public final class Aggregate extends Relation {
     private final List<Expression> aggregateExpressions;
     private final Expression havingCondition;
     private final List<GroupingAnalytics> groupingAnalytics;
+    private List<AttributeReference> output;
 
     public Aggregate(Relation child, List<Expression> groupingExpressions, List<Expression> aggregateExpressions) {
         this(child, groupingExpressions, aggregateExpressions, null, List.of());
@@ -56,7 +57,12 @@ public final class Aggregate extends Relation {
     public List<GroupingAnalytics> groupingAnalytics() { return groupingAnalytics; }
 
     @Override
-    public List<AttributeReference> output() { return child.output(); }
+    public List<AttributeReference> output() {
+        return output != null ? output : child.output();
+    }
+
+    /** Set by the analyzer: one attribute per select item. */
+    public void setOutput(List<AttributeReference> output) { this.output = List.copyOf(output); }
 
     @Override
     public String toString() {

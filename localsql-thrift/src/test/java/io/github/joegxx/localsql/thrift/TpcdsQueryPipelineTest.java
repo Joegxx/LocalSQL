@@ -48,8 +48,22 @@ class TpcdsQueryPipelineTest {
     private static final SparkAstBuilder builder = new SparkAstBuilder();
     private static final DuckDbSqlGenerator generator = new DuckDbSqlGenerator();
     private static final RewriteEngine rewriter = new RewriteEngine();
-    private static final SemanticAnalyzer analyzer =
-            new SemanticAnalyzer(new CatalogService().catalog());
+    private static final SemanticAnalyzer analyzer = newAnalyzer();
+
+    /**
+     * Strict name resolution needs a real catalog: the fixture registers the
+     * full TPC-DS v2.7.0 schema (metadata only, no data) so every column
+     * reference in the suite binds against the standard schema.
+     */
+    private static SemanticAnalyzer newAnalyzer() {
+        try {
+            CatalogService catalog = new CatalogService();
+            TpcdsCatalogFixture.register(catalog);
+            return new SemanticAnalyzer(catalog.catalog());
+        } catch (Exception e) {
+            throw new IllegalStateException("TPC-DS catalog fixture failed to register", e);
+        }
+    }
 
     static List<String> queryFiles() throws IOException {
         List<String> files = new ArrayList<>();

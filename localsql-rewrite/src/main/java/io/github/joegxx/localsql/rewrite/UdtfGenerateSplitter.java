@@ -96,6 +96,9 @@ public final class UdtfGenerateSplitter {
                 return null;
             }
         }
+        // ORDER BY may reference the bound source columns; the temp table
+        // exposes bare names only, so qualifiers must go.
+        if (sort != null) sort = unqualifySort(sort);
 
         if (!(generate.generator() instanceof FunctionCall call) || call.windowSpec() != null) {
             requireNoUdtf(top, "LATERAL VIEW generator must be a registered Java UDTF function call");
@@ -137,9 +140,9 @@ public final class UdtfGenerateSplitter {
         }
         Relation stage1 = new Project(generate.child(), stage1Items);
         return new UdtfPlan(stage1, definition, argIndexes,
-                List.copyOf(generate.generatorOutputNames()), List.copyOf(postFilters),
+                List.copyOf(generate.generatorOutputNames()), List.copyOf(unqualifyOuterItems(postFilters)),
                 sort, limit, List.copyOf(sourceNames),
-                List.copyOf(project.projectList()), project.distinct());
+                unqualifyOuterItems(project.projectList()), project.distinct());
     }
 
     /** Rebuilds the original query shape around the materialized UDTF table. */
@@ -178,12 +181,87 @@ public final class UdtfGenerateSplitter {
                         "With a Java UDTF, SELECT items must be plain column references "
                                 + "(optionally aliased); got: " + item);
             }
-            if (inner instanceof AttributeReference ref && !ref.qualifier().isEmpty()) {
-                throw new UnsupportedOperationException(
-                        "Qualified references (" + ref + ") are not supported with Java UDTF yet; "
-                                + "use unqualified column names");
+        }
+    }
+
+    /**
+     * Rewrites the outer projection for the materialized temp table: the
+     * analyzer binds source columns with their table qualifier, but the temp
+     * table scan exposes bare column names, so qualifiers are dropped here
+     * (output column names stay unchanged).
+     */
+    private List<Expression> unqualifyOuterItems(List<Expression> items) {
+        List<Expression> out = new ArrayList<>();
+        for (Expression item : items) {
+            if (item instanceof Alias a) {
+                out.add(new Alias(unqualifyExpression(a.child()), a.name(), a.qualifier()));
+            } else {
+                out.add(unqualifyExpression(item));
             }
         }
+        return out;
+    }
+
+    /**
+     * Recursively drops column qualifiers inside an expression. The UDTF
+     * split materializes source columns into a temp table whose scan has no
+     * qualifiers, so every bound reference must be rewritten to a bare name.
+     * Column names are unique across the source output plus the view columns
+     * (duplicates are rejected in trySplit), so dropping the qualifier keeps
+     * the reference unambiguous.
+     */
+    private Expression unqualifyExpression(Expression e) {
+        if (e instanceof AttributeReference ref) {
+            return new AttributeReference(ref.name(), List.of());
+        }
+        if (e instanceof Identifier id) {
+            return new AttributeReference(id.name(), List.of());
+        }
+        if (e instanceof Alias a) {
+            return new Alias(unqualifyExpression(a.child()), a.name(), a.qualifier());
+        }
+        if (e instanceof io.github.joegxx.localsql.ir.expression.BinaryExpression b) {
+            return new io.github.joegxx.localsql.ir.expression.BinaryExpression(
+                    unqualifyExpression(b.left()), b.op(), unqualifyExpression(b.right()));
+        }
+        if (e instanceof io.github.joegxx.localsql.ir.expression.UnaryExpression u) {
+            return new io.github.joegxx.localsql.ir.expression.UnaryExpression(
+                    u.op(), unqualifyExpression(u.child()));
+        }
+        if (e instanceof FunctionCall f) {
+            List<Expression> args = new ArrayList<>();
+            for (Expression a : f.arguments()) args.add(unqualifyExpression(a));
+            FunctionCall rebuilt = new FunctionCall(f.name(), args, f.distinct());
+            rebuilt.setWindowSpec(f.windowSpec());
+            return rebuilt;
+        }
+        if (e instanceof io.github.joegxx.localsql.ir.expression.CaseWhen c) {
+            List<io.github.joegxx.localsql.ir.expression.CaseWhen.WhenBranch> branches = new ArrayList<>();
+            for (var b : c.branches()) {
+                branches.add(new io.github.joegxx.localsql.ir.expression.CaseWhen.WhenBranch(
+                        unqualifyExpression(b.condition()), unqualifyExpression(b.value())));
+            }
+            return new io.github.joegxx.localsql.ir.expression.CaseWhen(branches,
+                    c.elseValue() == null ? null : unqualifyExpression(c.elseValue()));
+        }
+        if (e instanceof io.github.joegxx.localsql.ir.expression.Cast c) {
+            return new io.github.joegxx.localsql.ir.expression.Cast(unqualifyExpression(c.child()), c.target());
+        }
+        if (e instanceof io.github.joegxx.localsql.ir.expression.InList il) {
+            List<Expression> list = new ArrayList<>();
+            for (Expression item : il.list()) list.add(unqualifyExpression(item));
+            return new io.github.joegxx.localsql.ir.expression.InList(unqualifyExpression(il.value()), list, il.negated());
+        }
+        return e;
+    }
+
+    private Sort unqualifySort(Sort sort) {
+        List<Sort.SortOrder> orders = new ArrayList<>();
+        for (Sort.SortOrder o : sort.order()) {
+            orders.add(new Sort.SortOrder(
+                    unqualifyExpression(o.expr()), o.ascending(), o.nullsLast()));
+        }
+        return new Sort(sort.child(), orders);
     }
 
     private void requireNoUdtf(Relation rel, String placement) {

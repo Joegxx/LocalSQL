@@ -1,6 +1,10 @@
 # 函数支持一览
 
-按 Spark SQL 3.5.x 名称列出已实现的函数,括号内是翻译到的 DuckDB 目标。生成器函数映射(`DuckDbSqlGenerator.FN_MAP` + 参数重构 `emitMappedFunction` + 连接级 Java UDF)由 `SparkFunctionMappingTest` 参数化回归保护(262 个表达式用例);有语义差异或 DuckDB 限制的条目单独标注。
+按 Spark SQL 函数名称列出当前实现路径，部分清单参考 3.5.x；Parser 仍基于 3.2.0，不代表完整支持更高版本。括号内是 DuckDB 目标。2026-09-10 审查中 `SparkFunctionMappingTest` 的 274 项测试通过，但这些样例不证明函数所有输入都与 Spark 等价；已有差异在各条目标注。
+
+**转换归属：** 当前 Rewrite 的 rename、Generator 的 `FN_MAP` / `emitMappedFunction` / 自定义模板及连接级 Java 函数共同参与。目标为 Analyzer 绑定函数，Rewrite 独占转换，Generator 仅序列化；迁移范围、优先级和配置兼容见[开发计划 A1/A3](./development-plan.md)。清单中的转换是现有行为，不是建议继续往 Generator 添加逻辑。
+
+连接级内置 Java 函数与用户通过 `--udf-config` 加载的 Hive UDF 是不同路径；后者的正式产物目前存在缺依赖问题，详见[UDF 状态说明](./udf-plan.md)。
 
 - [字符串](#字符串)
 - [数值](#数值)

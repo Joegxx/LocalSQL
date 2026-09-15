@@ -25,6 +25,11 @@ public final class Catalog {
         public Table(List<String> name, List<Column> columns, String location, String format) {
             this(0, name, "TABLE", columns, location, format, null, new LinkedHashMap<>(), null);
         }
+        public Table {
+            name = List.copyOf(name);
+            columns = columns == null ? List.of() : List.copyOf(columns);
+            properties = properties == null ? Map.of() : Map.copyOf(properties);
+        }
         public String qualifiedName() { return String.join(".", name); }
         /** [t]->default; [db,t]/[catalog,db,t]->db; [catalog,db,schema,t]->db. */
         public String database() {
@@ -43,6 +48,7 @@ public final class Catalog {
         }
         public Database {
             if (properties == null) properties = Map.of();
+            else properties = Map.copyOf(properties);
         }
     }
 
@@ -54,7 +60,33 @@ public final class Catalog {
         createDatabase(new Database("default", null, "default database"));
     }
 
-    public void createDatabase(Database db) { databases.put(db.name().toLowerCase(), db); }
+    private Catalog(boolean unused) {}
+
+    /** A deep snapshot of databases, tables and the id counter, for optimistic edits. */
+    public Catalog copy() {
+        Catalog snapshot = new Catalog(true);
+        for (Map.Entry<String, Database> e : databases.entrySet()) {
+            snapshot.databases.put(e.getKey(), e.getValue());
+        }
+        for (Map.Entry<String, Table> e : tables.entrySet()) {
+            snapshot.tables.put(e.getKey(), e.getValue());
+        }
+        snapshot.nextTableId = nextTableId;
+        return snapshot;
+    }
+
+    /** Replace this catalog's entire content with the given snapshot's content. */
+    public void restoreFrom(Catalog snapshot) {
+        databases.clear();
+        databases.putAll(snapshot.databases);
+        tables.clear();
+        tables.putAll(snapshot.tables);
+        nextTableId = snapshot.nextTableId;
+    }
+
+    public void createDatabase(Database db) {
+        databases.put(db.name().toLowerCase(), db);
+    }
 
     public Database removeDatabase(String name) { return databases.remove(name.toLowerCase()); }
 
@@ -79,9 +111,11 @@ public final class Catalog {
     public List<Table> listTables(String database) {
         if (database == null || database.isEmpty()) return new ArrayList<>(tables.values());
         String prefix = database.toLowerCase() + ".";
-        return tables.values().stream()
-                .filter(t -> t.qualifiedName().toLowerCase().startsWith(prefix))
-                .toList();
+        List<Table> out = new ArrayList<>();
+        for (Table t : tables.values()) {
+            if (t.qualifiedName().toLowerCase().startsWith(prefix)) out.add(t);
+        }
+        return out;
     }
 
     public Optional<Table> getTable(List<String> name) {
@@ -155,8 +189,58 @@ public final class Catalog {
             case "BINARY", "BLOB" -> new io.github.joegxx.localsql.ir.type.BinaryType();
             case "DATE" -> new io.github.joegxx.localsql.ir.type.DateType();
             case "TIMESTAMP" -> new io.github.joegxx.localsql.ir.type.TimestampType();
-            default -> new StringType();
+            case "MAP", "STRUCT" -> parseComplexType(t);
+            default -> t.startsWith("MAP") || t.startsWith("STRUCT") ? parseComplexType(t) : new StringType();
         };
+    }
+
+    private static DataType parseComplexType(String t) {
+        // MAP(k,v) / MAP<K,V> / STRUCT<...> — reconstructed from the storage
+        // string so column-level fidelity survives a store round-trip.
+        int open = t.indexOf('(');
+        if (open < 0) open = t.indexOf('<');
+        if (open >= 0 && t.endsWith(">") || (open >= 0 && t.endsWith(")"))) {
+            String body = t.substring(open + 1, t.length() - 1);
+            if (t.startsWith("MAP")) {
+                String[] kv = splitTopLevel(body);
+                if (kv.length == 2) {
+                    return new io.github.joegxx.localsql.ir.type.MapType(
+                            parseDataType(kv[0]), parseDataType(kv[1]), true);
+                }
+                return new io.github.joegxx.localsql.ir.type.MapType(new StringType(), new StringType(), true);
+            }
+            if (t.startsWith("STRUCT")) {
+                List<io.github.joegxx.localsql.ir.type.StructField> fields = new ArrayList<>();
+                for (String part : splitTopLevel(body)) {
+                    int colon = part.indexOf(':');
+                    if (colon > 0) {
+                        fields.add(new io.github.joegxx.localsql.ir.type.StructField(
+                                part.substring(0, colon).trim(), parseDataType(part.substring(colon + 1)), true));
+                    }
+                }
+                return new io.github.joegxx.localsql.ir.type.StructType(fields);
+            }
+        }
+        return new StringType();
+    }
+
+    private static String[] splitTopLevel(String body) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        StringBuilder cur = new StringBuilder();
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (c == '(' || c == '<') depth++;
+            else if (c == ')' || c == '>') depth--;
+            if (c == ',' && depth == 0) {
+                parts.add(cur.toString());
+                cur.setLength(0);
+            } else {
+                cur.append(c);
+            }
+        }
+        if (!cur.isEmpty()) parts.add(cur.toString());
+        return parts.toArray(new String[0]);
     }
 
     private static final java.util.regex.Pattern DECIMAL_TYPE =
@@ -175,6 +259,17 @@ public final class Catalog {
         }
         if (type instanceof io.github.joegxx.localsql.ir.type.ArrayType a) {
             return toStorageType(a.elementType()) + "[]";
+        }
+        if (type instanceof io.github.joegxx.localsql.ir.type.MapType m) {
+            return "MAP(" + toStorageType(m.keyType()) + "," + toStorageType(m.valueType()) + ")";
+        }
+        if (type instanceof io.github.joegxx.localsql.ir.type.StructType s) {
+            StringBuilder sb = new StringBuilder("STRUCT<");
+            for (int i = 0; i < s.fields().size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(s.fields().get(i).name()).append(":").append(toStorageType(s.fields().get(i).dataType()));
+            }
+            return sb.append(">").toString();
         }
         return switch (type.typeName()) {
             case "BOOLEAN" -> "BOOLEAN";

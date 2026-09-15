@@ -1,47 +1,30 @@
 package io.github.joegxx.localsql.rewrite;
 
-import io.github.joegxx.localsql.ir.expression.*;
-import io.github.joegxx.localsql.ir.relation.*;
-import io.github.joegxx.localsql.ir.visitor.IrVisitor;
+import io.github.joegxx.localsql.ir.relation.Relation;
 
-import java.util.List;
+import java.util.Set;
 
 public final class RewriteEngine {
 
-    public Relation rewrite(Relation rel) {
-        RewriteVisitor v = new RewriteVisitor();
-        v.visitRelation(rel, null);
-        return rel;
+    private final FunctionNameRewriter functionNames;
+    private final ExpressionLowering expressionLowering = new ExpressionLowering();
+
+    public RewriteEngine() { this(Set.of()); }
+
+    /**
+     * @param reservedFunctionNames source names that must not be renamed by
+     *                              the rewrite pass: custom UDF mappings and
+     *                              custom function-map templates keep their
+     *                              generator-owned conversion (A1.3: only
+     *                              one conversion per function applies).
+     */
+    public RewriteEngine(Set<String> reservedFunctionNames) {
+        this.functionNames = new FunctionNameRewriter(reservedFunctionNames);
     }
 
-    private static final class RewriteVisitor extends IrVisitor<Void, Void> {
-
-        @Override
-        public Void visitFunctionCall(FunctionCall e, Void ctx) {
-            String name = e.name().toLowerCase();
-            switch (name) {
-                case "size" -> rename(e, "array_length");
-                case "explode" -> rename(e, "unnest");
-                case "posexplode" -> rename(e, "unnest");
-                case "instr" -> {}
-                case "substr", "substring" -> {}
-                case "length" -> {}
-                case "concat" -> {}
-                case "coalesce" -> {}
-                case "if" -> {}
-                case "date_format" -> {}
-                case "to_date" -> {}
-                case "unix_timestamp" -> {}
-                case "from_unixtime" -> {}
-                case "get_json_object" -> {}
-                case "json_extract" -> {}
-                default -> {}
-            }
-            return super.visitFunctionCall(e, ctx);
-        }
-
-        private void rename(FunctionCall e, String newName) {
-            e.rename(newName);
-        }
+    /** Returns the rewritten tree; callers must use the return value. */
+    public Relation rewrite(Relation rel) {
+        functionNames.rewrite(rel);
+        return expressionLowering.rewrite(rel);
     }
 }

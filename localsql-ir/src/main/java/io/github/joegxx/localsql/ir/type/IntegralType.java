@@ -10,6 +10,8 @@ public record IntegralType(int bits, boolean signed) implements DataType {
             case 8 -> "TINYINT";
             case 16 -> "SMALLINT";
             case 32 -> "INT";
+            case 64 -> signed ? "BIGINT" : "UBIGINT";
+            case 128 -> "HUGEINT";
             default -> "BIGINT";
         };
     }

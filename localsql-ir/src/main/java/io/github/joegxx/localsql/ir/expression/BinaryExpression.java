@@ -10,6 +10,7 @@ public final class BinaryExpression extends Expression {
         AND("AND"), OR("OR"),
         STRING_CONCAT("||"),
         BIT_AND("&"), BIT_OR("|"), BIT_XOR("xor"),
+        SHIFT_LEFT("<<"), SHIFT_RIGHT(">>"),
         // Spark null-safe equality <=>, SQL standard IS NOT DISTINCT FROM
         EQ_NULL_SAFE("IS NOT DISTINCT FROM");
 

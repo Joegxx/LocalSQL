@@ -167,7 +167,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                 {"TIMESTAMP", 11, 29, null, "'", 1, 2, true, 3, null, 0, false},
                 {"DECIMAL", 3, 38, 38, null, 1, 2, false, 3, null, 10, true}
         };
-        for (Object[] t : types) rows.add(List.of(t));
+        for (Object[] t : types) rows.add(nullableRow(t));
         TOperationHandle h = newHandle(TOperationType.GET_TYPE_INFO, true);
         operations.put(guid(h), new OperationState(h,
                 List.of("TYPE_NAME", "DATA_TYPE", "PRECISION", "LITERAL_PREFIX", "LITERAL_SUFFIX",

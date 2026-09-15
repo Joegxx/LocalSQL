@@ -10,19 +10,29 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * CatalogStore backed by 4 DuckDB tables:
+ * CatalogStore backed by DuckDB tables:
  *   catalog_table   (table_id, catalog_name, database_name, schema_name, table_name,
  *                    table_type, comment, properties, metadata_json)
  *   catalog_column  (table_id, ordinal, column_name, data_type, nullable,
  *                    comment, default_value, expression)
  *   catalog_property(table_id, property_key, property_value)
  *   runtime_table   (table_id, duck_table_name, create_sql, last_refresh)
+ *   catalog_database(name, display_name, description, location)
+ *   catalog_property_kv(name, property_key, property_value)  -- database properties
+ *   catalog_schema_version(version)
  *
  * DuckDB is the physical persistence for logical metadata. This class only
  * serializes/deserializes Catalog records; it does not execute user SQL or
  * store runtime execution state.
+ *
+ * Migration: a pre-database-table store has no catalog_database rows. On
+ * init, databases are derived from catalog_table's distinct database_name
+ * and persisted (as bare names, without the lost description/location).
  */
 public final class DuckDbCatalogStore implements CatalogStore {
+
+    /** Bump when the on-disk schema changes in a way old binaries cannot read. */
+    static final int SCHEMA_VERSION = 1;
 
     private final DuckDbExecutor executor;
 
@@ -68,6 +78,61 @@ public final class DuckDbCatalogStore implements CatalogStore {
                     create_sql VARCHAR,
                     last_refresh VARCHAR
                 )""");
+        executeUpdate("""
+                CREATE TABLE IF NOT EXISTS catalog_database (
+                    database_name VARCHAR PRIMARY KEY,
+                    display_name VARCHAR,
+                    description VARCHAR,
+                    location VARCHAR
+                )""");
+        executeUpdate("""
+                CREATE TABLE IF NOT EXISTS catalog_db_property (
+                    database_name VARCHAR,
+                    property_key VARCHAR,
+                    property_value VARCHAR
+                )""");
+        executeUpdate("CREATE TABLE IF NOT EXISTS catalog_schema_version (version INTEGER)");
+        initOrMigrateSchemaVersion();
+    }
+
+    /**
+     * Old stores have an empty version table; they predate catalog_database,
+     * so databases are derived from catalog_table and written back. Future
+     * versions must reject stores written by newer binaries.
+     */
+    private void initOrMigrateSchemaVersion() throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM catalog_schema_version");
+        int version = rs.rows().isEmpty() ? 0 : ((Number) rs.rows().get(0).get(0)).intValue();
+        if (version > SCHEMA_VERSION) {
+            throw new IllegalStateException(
+                    "Catalog store schema version " + version + " is newer than supported version "
+                            + SCHEMA_VERSION + "; refusing to open (a downgrade needs a backup restore)");
+        }
+        if (version == 0) {
+            if (catalogDatabaseTableIsEmpty()) {
+                deriveDatabasesFromTables();
+            }
+            executeUpdate("INSERT INTO catalog_schema_version VALUES (" + SCHEMA_VERSION + ")");
+        }
+    }
+
+    private boolean catalogDatabaseTableIsEmpty() throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute("SELECT count(*) FROM catalog_database");
+        return rs.rows().isEmpty() || ((Number) rs.rows().get(0).get(0)).longValue() == 0;
+    }
+
+    private void deriveDatabasesFromTables() throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT DISTINCT database_name FROM catalog_table");
+        for (List<Object> row : rs.rows()) {
+            String name = asString(row.get(0));
+            if (name == null || name.isBlank()) continue;
+            saveDatabase(new Catalog.Database(name, null, name + " database"));
+        }
+        if (catalogDatabaseTableIsEmpty()) {
+            saveDatabase(new Catalog.Database("default", null, "default database"));
+        }
     }
 
     @Override
@@ -152,6 +217,57 @@ public final class DuckDbCatalogStore implements CatalogStore {
                 ? ""
                 : "WHERE t.database_name = '" + sqlEscape(database) + "'";
         return loadTablesByIds(where);
+    }
+
+    // ---- database-level metadata ----
+
+    @Override
+    public void saveDatabase(Catalog.Database database) throws Exception {
+        String name = database.name();
+        executeUpdate("DELETE FROM catalog_database WHERE database_name = '" + sqlEscape(name) + "'");
+        executeUpdate(String.format(
+                "INSERT INTO catalog_database VALUES ('%s', '%s', %s, %s)",
+                sqlEscape(name),
+                sqlEscape(name),
+                database.description() == null ? "NULL" : "'" + sqlEscape(database.description()) + "'",
+                database.location() == null ? "NULL" : "'" + sqlEscape(database.location()) + "'"));
+        executeUpdate("DELETE FROM catalog_db_property WHERE database_name = '" + sqlEscape(name) + "'");
+        for (var entry : database.properties().entrySet()) {
+            executeUpdate(String.format(
+                    "INSERT INTO catalog_db_property VALUES ('%s', '%s', '%s')",
+                    sqlEscape(name), sqlEscape(entry.getKey()), sqlEscape(entry.getValue())));
+        }
+    }
+
+    @Override
+    public void deleteDatabase(String name) throws Exception {
+        executeUpdate("DELETE FROM catalog_database WHERE database_name = '" + sqlEscape(name) + "'");
+        executeUpdate("DELETE FROM catalog_db_property WHERE database_name = '" + sqlEscape(name) + "'");
+    }
+
+    @Override
+    public List<Catalog.Database> loadDatabases() throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT database_name, description, location FROM catalog_database");
+        List<Catalog.Database> out = new ArrayList<>();
+        for (List<Object> row : rs.rows()) {
+            String name = asString(row.get(0));
+            if (name == null) continue;
+            out.add(new Catalog.Database(name, asString(row.get(2)), asString(row.get(1)),
+                    loadDatabaseProperties(name)));
+        }
+        return out;
+    }
+
+    private java.util.Map<String, String> loadDatabaseProperties(String name) throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT property_key, property_value FROM catalog_db_property WHERE database_name = '"
+                        + sqlEscape(name) + "'");
+        java.util.Map<String, String> out = new LinkedHashMap<>();
+        for (List<Object> row : rs.rows()) {
+            out.put(asString(row.get(0)), asString(row.get(1)));
+        }
+        return out;
     }
 
     @Override

@@ -2,178 +2,75 @@
 
 **[中文文档](./README.zh-CN.md)** | English
 
-> **1.A lightweight SQL Sandbox enabling developers and AI agents to complete 90% of SQL development, debugging, and verification locally — without touching production data platforms.**
-> **让任何人，尤其是 AI，在不触碰生产数据平台的情况下完成 90% 的 SQL 开发、调试和验证。**
-> **2.Lightweight Local Virtual Spark/Hive Thrift Service.轻量级本地虚拟spark/hive thrift服务**
+LocalSQL is an embedded SQL sandbox for developers and AI agents. It parses Spark SQL 3.2.0 syntax, translates queries through Common IR, executes them in-process with DuckDB, and exposes a HiveServer2-compatible Thrift interface. No Spark, Hadoop or Hive service deployment is required.
 
-LocalSQL is an embedded SQL runtime that lets you write and test production SQL locally using Spark SQL 3.2.0 syntax, executed in-process via DuckDB. It exposes a standard HiveServer2 Thrift interface for JDBC clients and database IDEs, requiring no Spark, Hadoop, or Hive deployment.
+Production is for execution. LocalSQL is for local experimentation.
 
-**Core Philosophy:** Production is for execution. LocalSQL is for experimentation.
+## Current status
 
-```text
-Production Data Platform
-        │
-        │  Schema / Metadata / Samples
-        ▼
-┌───────────────────────────┐
-│     LocalSQL Sandbox      │
-│                           │
-│  Production Metadata      │
-│  Production Samples       │
-│  Relationship-aware Data  │
-│  Local SQL Execution      │
-│  AI Test Cases            │
-│  Assertions               │
-│  Production Risk Analysis │
-└──────────────┬────────────┘
-               │
-               │ Verified SQL
-               ▼
-       Production Execution
-```
+Updated September 10, 2026. Basic query execution, DML/DDL, file-backed databases and Java UDF integration paths exist. **Name resolution, failure recovery, packaged UDF execution and Thrift behavior have known correctness gaps. LocalSQL is not yet a Spark semantic-equivalence validator.**
 
----
+The next milestone is correctness and module-boundary cleanup. See the [development plan](docs/development-plan.md) for scoped fixes, migration order and acceptance criteria. The plan describes future work, not completed fixes.
 
-## Why LocalSQL?
+### Implemented paths
 
-Traditional SQL development means running queries directly against production clusters — every iteration, every debugging cycle, every AI-generated attempt. This creates:
+- Spark 3.2.0 grammar-based parsing, case-insensitive keywords and backtick identifiers. Parsing a construct does not imply its execution semantics are supported.
+- DQL: SELECT, DISTINCT, JOIN, WHERE, GROUP BY, HAVING, ORDER BY and integer-literal LIMIT.
+- CTEs, subqueries, UNION/INTERSECT/EXCEPT, window functions and ROLLUP/CUBE/GROUPING SETS.
+- INSERT INTO/OVERWRITE; CREATE TABLE including CTAS/LIKE/PARTITIONED BY; CREATE/DROP VIEW; CREATE/ALTER/DROP DATABASE; table column changes, rename and properties.
+- HiveServer2 connection, query, result-fetch and metadata paths, plus direct embedded execution through `ThriftServer.executeSparkSql`.
+- In-memory Catalog with optional DuckDB-backed table metadata; physical file-database load/save paths.
+- Local DDL-file import and function configuration. Java UDF/GenericUDF/GenericUDTF execution is in-process, not an isolated worker service.
+- TPC-DS translation and DuckDB differential suites, function tests, DDL/DML and UDF regression examples.
 
-- **Unnecessary compute costs** from repeated trial-and-error
-- **Production risk** from untested queries hitting real data
-- **Slow feedback loops** waiting for cluster scheduling
-- **AI amplified problems** when agents iterate blindly against production
+### Known limitations
 
-LocalSQL moves the entire debug cycle local:
+- Analyzer is integrated but does not complete scope-aware name/type binding. A nonexistent database qualifier can resolve to an existing physical table in another logical database.
+- DDL rollback does not restore the in-memory Catalog. Empty databases and database-level properties are not persisted.
+- **DDL import failure cleanup can delete an existing same-named physical table from another logical database. Use disposable database copies until fixed.**
+- Non-literal LIMIT expressions and SORT BY can be silently ignored; unsupported-feature rejection is incomplete.
+- Packaged `runtime.jar --udf-config ...` fails on missing Hive runtime classes. Registering an unused UDF can also incorrectly reject ordinary `SELECT *` queries.
+- Thrift GetTypeInfo, result type metadata, operation states, cancellation and session cleanup require correction. Interface method coverage does not establish protocol compatibility.
+- Function conversion is split between Rewrite and Generator; CatalogService still modifies runtime SQL. These are deviations from the intended boundaries below.
+- DELETE/UPDATE/MERGE, multi-INSERT, NATURAL JOIN, named windows and aggregate FILTER are unsupported. Script TRANSFORM queries are unsupported; selected higher-order lambda functions are implemented, subject to the [function notes](docs/functions.md).
+- No optimizer, cost model, distributed execution, authorization or user-facing transaction/ACID guarantees. Internal transactions exist for selected DDL/DML operations.
 
-```text
-AI / Developer
-      │
-      ▼
- LocalSQL Sandbox
-      │
-      ├── Parse
-      ├── Validate
-      ├── Execute locally
-      ├── Test with cases
-      ├── Assert correctness
-      └── Analyze production risk
-      │
-      ▼
- Production (only verified SQL)
-```
+Supported paths and passing samples do not guarantee every SQL combination or Spark edge case. Local samples also do not establish production-scale behavior.
 
----
+## Quick start
 
-## Features
+### Requirements and build
 
-### Current (MVP)
-
-- ✅ **Spark SQL 3.2.0 syntax** — full ANTLR grammar support
-- ✅ **DQL queries** — SELECT, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT
-- ✅ **Advanced SQL** — CTE, UNION, subqueries, window functions, ROLLUP/CUBE/GROUPING SETS
-- ✅ **DML/DDL** — INSERT INTO/OVERWRITE, CREATE TABLE (incl. CTAS / LIKE / PARTITIONED BY), CREATE [OR REPLACE] VIEW, DROP TABLE/VIEW, CREATE/DROP/ALTER DATABASE, ALTER TABLE (ADD/DROP/RENAME COLUMN, ALTER COLUMN TYPE/NOT NULL, REPLACE COLUMNS, RENAME TO, SET/UNSET TBLPROPERTIES)
-- ✅ **HiveServer2 Thrift** — connect with DBeaver, DataGrip, or any Hive JDBC client
-- ✅ **Common IR** — clean abstraction layer between parsers and execution backends
-- ✅ **Semantic analyzer** — name resolution, type inference, catalog lookup
-- ✅ **Rewrite engine** — function translation (e.g., `size` → `array_length`)
-- ✅ **DuckDB execution** — fast in-process SQL engine, single-file database
-- ✅ **135/135 TPC-DS queries** — differential consistency testing against DuckDB native execution
-
-### Roadmap
-
-#### Phase 1 — Local SQL Sandbox
-- ⬜ Sandbox database packaging
-- ⬜ Production schema import
-- ⬜ Sample data generation
-- ⬜ Local SQL CLI
-
-#### Phase 2 — Production Dataset Mirror
-- ⬜ Production metadata extraction
-- ⬜ Table sampling with relationship preservation
-- ⬜ Data masking
-- ⬜ Column statistics and cardinality
-- ⬜ Partition metadata
-- ⬜ Reproducible dataset versioning
-
-#### Phase 3 — AI SQL Testing
-- ⬜ Test case API
-- ⬜ Synthetic test data generation
-- ⬜ Edge-case generation
-- ⬜ Assertions framework
-- ⬜ Result comparison
-- ⬜ SQL regression tests
-- ⬜ AI agent interface
-
-#### Phase 4 — Production Risk Analysis
-- ⬜ Full-scan detection
-- ⬜ Partition filter detection
-- ⬜ Join explosion detection
-- ⬜ Cardinality analysis
-- ⬜ Production row-count awareness
-- ⬜ Query complexity analysis
-- ⬜ Configurable risk policies
-
-#### Phase 5 — Production Submission Gateway
-- ⬜ Verification report
-- ⬜ Sandbox versioning
-- ⬜ Query approval workflow
-- ⬜ Production execution gateway
-- ⬜ Execution limits
-- ⬜ Audit records
-
-#### Phase 6 — Multi-Engine Support
-- ⬜ Spark SQL 4.x syntax support
-- ⬜ Doris SQL dialect
-- ⬜ Snowflake SQL dialect
-- ⬜ BigQuery SQL dialect
-- ⬜ ClickHouse SQL dialect
-- ⬜ Trino/Presto SQL dialect
-- ⬜ Pluggable parser architecture
-- ⬜ Dialect-specific function mapping
-- ⬜ Cross-dialect query translation
-
----
-
-## Quick Start
-
-### Requirements
-
-- JDK 21
-- Maven 3.9+
+Use JDK 21 and Maven 3.9+. Check both commands: Maven can use a different JDK from `java`.
 
 ```bash
-java -version    # should show 21.x
+java -version
 mvn -version
-```
-
-### Build
-
-```bash
 mvn clean package -DskipTests
 ```
 
-Produces: `localsql-app/target/runtime.jar`
-
-### Run
+The executable artifact is `localsql-app/target/runtime.jar`.
 
 ```bash
-# Start HiveServer2 Thrift on port 10000
+# Start the demo on port 10000; an optional positional argument changes the port
 java -jar localsql-app/target/runtime.jar
-
-# Custom port
 java -jar localsql-app/target/runtime.jar 10001
+
+# Open an existing file database; current name-resolution limitations still apply
+java -jar localsql-app/target/runtime.jar --load sandbox.duckdb --schema default
 ```
 
-### Connect
+The demo creates typed `users` and `orders` sample tables. The process remains running until stopped.
 
-**JDBC URL:**
-```
+### Connect and query
+
+Use a Hive JDBC data source in DBeaver/DataGrip or another compatible client:
+
+```text
 jdbc:hive2://localhost:10000/default
 ```
 
-Use with DBeaver, DataGrip, or any HiveServer2-compatible client. No authentication required in MVP.
-
-**Example query:**
+MVP authentication is not enforced. Metadata, type and lifecycle limitations are listed above; not every client feature is verified.
 
 ```sql
 SELECT u.name, count(*) AS cnt
@@ -183,248 +80,85 @@ GROUP BY u.name
 ORDER BY cnt DESC;
 ```
 
-**Expected result:**
-```
-alice  2
-bob    1
-```
+The sample data returns `alice, 2` and `bob, 1`.
 
----
+`Main` also accepts `--import-ddl`, `--out`, `--manifest`, `--failures`, `--udf-config` and `--function-map`. These are existing entry points, not guarantees that the import/UDF defects are fixed. See the [usage guide](docs/usage.md).
 
 ## Architecture
 
-LocalSQL maintains a lightweight, non-Calcite architecture focused on clean separation:
+The normal query path is ParseTree → Common IR → Analyzer → Rewrite → DuckDB SQL → Executor. Analyzer and Rewrite are already integrated. `SqlPipeline` handles DDL/DML and optional UDF execution stages; SHOW/DESCRIBE/USE are handled before the regular pipeline.
 
-```text
-Spark SQL
-   ↓
-ANTLR ParseTree
-   ↓
-Common IR (single source of truth)
-   ↓
-Semantic Analyzer
-   ↓
-Rewrite Engine
-   ↓
-DuckDB SQL
-   ↓
-DuckDB Executor
-   ↓
-Query Result
-```
+### Intended boundaries
 
-### Design Principles
+1. Modules have explicit dependency boundaries; backends never read Spark/ANTLR trees directly.
+2. Parser produces ParseTree; the Spark AST builder produces IR.
+3. Analyzer owns names, scopes, types, function binding and Catalog lookup.
+4. Rewrite owns expression/function lowering; Generator only serializes resolved, lowered IR.
+5. Executor executes SQL and returns results without inspecting IR.
+6. Catalog stores logical metadata, not JDBC connections, physical SQL or runtime state.
+7. Runtime orchestration coordinates transactions, physical bindings and UDF stages.
 
-1. **Module independence** — strict layer boundaries, no cross-layer leaks
-2. **IR is the single source of truth** — backends consume IR, never ParseTree
-3. **Parser only parses** — produces parse trees, no logic
-4. **Analyzer only resolves** — name resolution, type inference, catalog queries
-5. **Generator only serializes** — IR → SQL string, stateless, no catalog access
-6. **Executor only executes** — runs SQL, returns results, doesn't touch IR
-7. **Catalog only stores metadata** — databases/tables/columns, no SQL execution
-8. **Metadata vs Runtime separation** — Catalog is logical, DuckDB is physical
-
-**Multi-engine extensibility:** The Common IR design allows LocalSQL to support multiple SQL dialects (Spark 3.x/4.x, Doris, Snowflake, BigQuery, ClickHouse, Trino) by adding new parsers that convert to the same IR. Each dialect's parser is independent; the analyzer, rewriter, and DuckDB backend remain unchanged.
+The Analyzer, Generator and CatalogService deviations described above are open work, not exceptions to adopt in new code. New dialects may require additional IR and semantic rules; they are not simply parser replacements.
 
 ### Modules
 
-| Module | Responsibility |
-|--------|----------------|
-| `localsql-parser` | ANTLR grammar + Spark SQL ParseTree |
-| `localsql-ir` | Common IR independent of parsers and backends |
-| `localsql-spark` | Spark ParseTree → Common IR conversion |
-| `localsql-analyzer` | Name resolution, type inference, catalog lookup |
-| `localsql-rewrite` | IR rewrites and function-name translation |
-| `localsql-catalog` | Logical databases, tables, columns, CatalogStore API |
-| `localsql-duckdb` | DuckDB SQL generation, execution, CatalogStore implementation |
-| `localsql-thrift` | HiveServer2 Thrift service and query orchestration |
-| `localsql-app` | Application entry point, sample data, executable JAR |
-
----
+| Module | Current responsibility |
+|---|---|
+| `localsql-parser` | ANTLR grammar and Spark SQL ParseTree |
+| `localsql-ir` | Common query, expression, statement and type representation |
+| `localsql-spark` | Spark ParseTree → IR |
+| `localsql-analyzer` | Table-output population and statement checks; complete binding pending |
+| `localsql-rewrite` | Selected function renames and UDF/UDTF query splitting |
+| `localsql-catalog` | Logical metadata, cache and CatalogStore API; runtime separation pending |
+| `localsql-duckdb` | SQL generation, JDBC execution, metadata store and built-in Java functions |
+| `localsql-udf-api` | UDF definitions, registry and batch/gateway contracts |
+| `localsql-udf-runtime` | In-process Hive UDF adapters; packaged runtime dependencies need repair |
+| `localsql-thrift` | SQL orchestration and HiveServer2 RPC service |
+| `localsql-app` | Entry point, sample data, DDL import, configuration and executable JAR |
 
 ## Testing
 
 ```bash
-# All tests (284 total)
+# Full suite: needs local port binding; TPC-DS execution also needs its extension
 mvn clean test
 
-# TPC-DS consistency (135 queries, requires network for DuckDB tpcds extension)
-mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest
+# 135 SQL resources + one summary test, without executing the queries
+mvn -pl localsql-thrift -am test \
+  -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
 
-# Translation regression (136 queries, no execution)
-mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest
+# DuckDB native vs. Thrift pipeline execution
+mvn -pl localsql-thrift -am test \
+  -Dtest=TpcdsConsistencyTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-### Test Architecture
+- `TpcdsQueryPipelineTest`: translation regression, including Analyzer/Rewrite calls; its Catalog fixture must be completed when binding becomes strict.
+- `TpcdsGoldenResultTest`: real Thrift execution against manually calibrated expected results.
+- `TpcdsConsistencyTest`: DuckDB native execution vs. the Thrift pipeline, stringified and compared as multisets. Oracle-unavailable cases check execution only. This does not validate result types, row ordering or Spark-specific semantics.
 
-| Layer | Test Class | Content |
-|-------|------------|---------|
-| L1 Translation | `TpcdsQueryPipelineTest` | 136 TPC-DS queries parse→generate, no execution |
-| L3 Manual Golden | `TpcdsGoldenResultTest` | Execute via real Thrift, compare with hand-verified Spark semantics |
-| L3 Differential Oracle | `TpcdsConsistencyTest` | Same data + same SQL: DuckDB native vs. Thrift pipeline, bidirectional `EXCEPT ALL` strict comparison, **135/135 passing** |
+**Review baseline, September 10, 2026:** Java 21 packaging succeeded. After excluding seven socket-dependent classes, 455 tests passed. The full suite was blocked by sandbox port-binding restrictions and was not verified as passing. These counts are a dated snapshot, not a coverage or equivalence guarantee. Commands and exclusions are recorded in the development plan.
 
----
+## Development direction
 
-## Documentation
+The immediate work is described in [docs/development-plan.md](docs/development-plan.md):
 
-- **[Usage Guide](docs/usage.md)** — detailed setup, JDBC connection, SQL features, troubleshooting
-- **[AGENTS.md](AGENTS.md)** — architecture rules, module boundaries, development guidelines
+- Move semantic lowering from Generator to Rewrite; unify function binding/conversion.
+- Separate CatalogService from runtime SQL and make metadata changes recoverable.
+- Correct Analyzer binding, DDL rollback, UDF artifacts, unsupported syntax, Thrift behavior and database persistence.
+- Add failure-injection, schema, ordered-result, restart and packaged-artifact tests.
 
----
+Longer-term directions include sample-data import/generation, a local batch SQL regression CLI/API, reproducible datasets and additional dialects. Automatic AI test generation, production risk analysis, approval and production submission remain proposals, not delivered features. Multi-engine expansion and optimizer work are not the next milestone.
 
-## Supported SQL Features
+## Documentation and contributing
 
-Validated through TPC-DS differential consistency testing (135/135 queries):
+- [中文说明](README.zh-CN.md)
+- [Usage guide](docs/usage.md)
+- [Development plan](docs/development-plan.md) — Chinese; scope, proposals and acceptance criteria
+- [Function notes](docs/functions.md)
+- [UDF implementation/design notes](docs/udf-plan.md)
+- [AGENTS.md](AGENTS.md) — architecture constraints and collaboration guidance
 
-- **Basic queries**: `SELECT` / `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT`
-- **Joins**: `INNER` / `LEFT` / `RIGHT` / `FULL OUTER` / `CROSS` / `SEMI` / `ANTI`, plus `JOIN ... USING (col)`
-- **Set operations**: `UNION [ALL]` / `INTERSECT` / `EXCEPT`
-- **CTEs**: `WITH a AS (...), b AS (...) SELECT ...`
-- **Subqueries**: scalar, `EXISTS` / `NOT EXISTS`, `IN (subquery)`, derived tables with aliases
-- **Window functions**: `OVER (PARTITION BY ... ORDER BY ...)` with `ROWS|RANGE BETWEEN` frames
-- **Grouping extensions**: `ROLLUP` / `CUBE` / `GROUPING SETS` (including legacy `WITH ROLLUP`)
-- **Expressions**: `CASE WHEN`, `IN` lists, `BETWEEN`, `LIKE` / `RLIKE`, `IS [NOT] NULL`
-- **Operators**: `+ - * / %`, integer division `DIV` (→ `//`), bitwise `& | ^`, string `||`, null-safe `<=>` (`IS NOT DISTINCT FROM`)
-- **CAST**: including `DECIMAL(p,s)`
-- **Literals**: integers, decimals, scientific notation, strings, dates (`DATE '2020-01-01'`), `INTERVAL 30 days`
-- **Functions**: `count/sum/avg/min/max`, `coalesce`, `substring`, `concat`, `row_number/rank/dense_rank`, `size` (→ `array_length`), `explode` (→ `unnest`)
-- **Identifiers**: backtick-quoted (`` `order count` ``), case-insensitive, DuckDB reserved words auto-quoted
-
-### Explicitly Unsupported (Phase 2)
-
-- DELETE / UPDATE / MERGE, multi-INSERT
-- `NATURAL JOIN`
-- Named windows (`WINDOW w AS ...`)
-- Aggregate `FILTER (WHERE ...)` clause
-- Lambda expressions / `TRANSFORM`
-
----
-
-## AI-Native SQL Workflow
-
-LocalSQL is designed for AI agents to iterate safely:
-
-```text
-User Request
-     │
-     ▼
-   AI Agent
-     │
-     ▼
-Generate SQL
-     │
-     ▼
-Inspect Schema
-     │
-     ▼
-Run in LocalSQL
-     │
-     ▼
-Generate Test Cases
-     │
-     ▼
-Execute Test Cases
-     │
-     ▼
-Assertions
-     │
-     ▼
-Risk Analysis
-     │
-     ├──── FAIL ────► Fix SQL ────┐
-     │                             │
-     │                             └──► Run Again
-     │
-     ▼
-   PASS
-     │
-     ▼
-Production Submission
-```
-
-AI can iterate unlimited times locally without consuming production compute or risking production stability.
-
----
-
-## Why DuckDB?
-
-- **Single-file** — `company-sandbox.duckdb` is the entire database
-- **In-process** — no server dependencies
-- **Fast startup** — immediate query execution
-- **Strong SQL** — comprehensive analytics capabilities
-- **Distribution-friendly** — share sandbox datasets as files
-
----
-
-## Non-Goals
-
-
-LocalSQL does NOT aim to be:
-
-- A distributed compute engine
-- A production data warehouse
-- A Spark / StarRocks / Trino replacement
-- A general-purpose OLTP database
-- A query optimizer or cost-based planner
-
-LocalSQL's goal:
-
-> **Provide a safe, lightweight, local experimentation environment between developers/AI and production SQL submission.**
-
----
-
-## Current Limitations
-
-- DQL + DML/DDL: INSERT, CREATE TABLE/VIEW/DATABASE, ALTER TABLE/DATABASE, DROP TABLE/VIEW/DATABASE, RENAME
-- No optimizer, statistics, or cost model
-- No transactions, ACID, or authorization
-- No distributed execution
-- Sandbox results ≠ production results (by design — sandbox tests logic, not scale)
-
----
-
-## Contributing
-
-Contributions welcome. Before submitting:
-
-1. Read [AGENTS.md](AGENTS.md) for architecture rules
-2. Run full test suite: `mvn clean test`
-3. Ensure TPC-DS consistency tests pass: `mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest`
-4. Follow existing code style and module boundaries
-
----
+Before submitting a change, follow AGENTS.md, add regression tests and run the relevant suite with Java 21. Run the full/Thrift suites where the environment permits them; explicitly report unverified tests. Do not mark a planned capability as implemented until its code and acceptance tests are complete.
 
 ## License
 
 Apache License 2.0
-
----
-
-## Philosophy
-
-```text
-Production is for execution.
-LocalSQL is for experimentation.
-```
-
-Or put another way:
-
-```text
-Let AI make mistakes locally,
-not in production.
-```
-
-The goal is to shift SQL development from:
-
-```text
-Write → Execute in Production → Observe → Fix → Repeat
-```
-
-To:
-
-```text
-Write → Execute Locally → Test → Assert → Analyze Risk → Verify → Production
-```
-
-Only verified SQL reaches production.
-

@@ -91,6 +91,64 @@ class DdlImporterTest {
         }
     }
 
+    @Test
+    void preprocessKeepsIdentifiersContainingCharOrVarchar() throws Exception {
+        Path dir = Files.createTempDirectory("ddl");
+        writeFile(dir.resolve("fees.sql"), """
+                CREATE TABLE db_fees.fee_charge (
+                  `charge_code` varchar(20),
+                  `character_note` string,
+                  `charge_total` double,
+                  `note` string COMMENT 'charge detail')
+                """);
+
+        try (DuckDbExecutor executor = new DuckDbExecutor()) {
+            CatalogService catalog = new CatalogService(new DuckDbCatalogStore(executor));
+            ThriftServer server = new ThriftServer(catalog, executor);
+
+            DdlImporter.Stats s = DdlImporter.importAll(server, executor, dir, "default", null, null);
+            assertEquals(1, s.ok(), "failures: " + s.failures());
+            assertEquals(0, s.failed());
+
+            var feeCharge = catalog.getTable("db_fees", "fee_charge").orElseThrow();
+            assertEquals(4, feeCharge.columns().size());
+            var chargeCode = catalog.catalog().column(feeCharge, "charge_code");
+            var chargeTotal = catalog.catalog().column(feeCharge, "charge_total");
+            var characterNote = catalog.catalog().column(feeCharge, "character_note");
+            assertTrue(chargeCode.type() instanceof io.github.joegxx.localsql.ir.type.StringType,
+                    "charge_code should be string, got: " + chargeCode.type());
+            assertTrue(chargeTotal.type() instanceof io.github.joegxx.localsql.ir.type.FractionalType,
+                    "charge_total should keep double, got: " + chargeTotal.type());
+            assertEquals("character_note", characterNote.name(),
+                    "identifier containing 'char' must survive preprocessing");
+        }
+    }
+
+    @Test
+    void failureCleanupKeepsPreExistingPhysicalTableOfOtherDatabase() throws Exception {
+        Path dir = Files.createTempDirectory("ddl");
+        // both failing entries share the bare physical name "shared" with a
+        // pre-existing table of another logical database
+        writeFile(dir.resolve("badA.sql"), "CREATE TABLE db_a.shared (`x` int");
+        writeFile(dir.resolve("badC.sql"), "CREATE TABLE db_c.shared (`z` int");
+
+        try (DuckDbExecutor executor = new DuckDbExecutor()) {
+            CatalogService catalog = new CatalogService(new DuckDbCatalogStore(executor));
+            ThriftServer server = new ThriftServer(catalog, executor);
+            server.executeSparkSql("CREATE DATABASE db_b");
+            // pre-existing logical+physical table with the same bare name
+            server.executeSparkSql("CREATE TABLE db_b.shared (`y` int)");
+
+            DdlImporter.importAll(server, executor, dir, "default", null, null);
+
+            // failed entries must not have deleted the pre-existing table
+            assertTrue(catalog.getTable("db_b", "shared").isPresent(),
+                    "pre-existing db_b.shared must survive failed imports");
+            var rows = server.executeSparkSql("SELECT count(*) AS n FROM db_b.shared").rows();
+            assertEquals(1, rows.size(), "physical table must stay queryable");
+        }
+    }
+
     private static int count(ThriftServer server, String sql) throws Exception {
         Object v = server.executeSparkSql(sql).rows().get(0).get(0);
         return ((Number) v).intValue();

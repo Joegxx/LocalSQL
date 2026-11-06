@@ -117,9 +117,10 @@ class ThriftServerSmokeTest {
             assertNotNull(cols, "expected columnar results");
             assertEquals(2, cols.size(), "column count in fetched rows");
             List<String> names = cols.get(0).getStringVal().getValues();
-            List<String> cnts = cols.get(1).getStringVal().getValues();
+            // count(*) reports BIGINT: values ride the i64 channel
+            List<Long> cnts = cols.get(1).getI64Val().getValues();
             assertTrue(names.contains("alice"), "alice should appear: " + names);
-            assertEquals("2", cnts.get(names.indexOf("alice")), "alice cnt should be 2");
+            assertEquals(2L, cnts.get(names.indexOf("alice")), "alice cnt should be 2");
 
             TCloseOperationResp close = client.CloseOperation(new TCloseOperationReq(op));
             assertEquals(TStatusCode.SUCCESS_STATUS, close.getStatus().getStatusCode());

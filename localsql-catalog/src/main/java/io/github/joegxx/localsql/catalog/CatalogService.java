@@ -84,21 +84,39 @@ public final class CatalogService {
                                        List<ColumnDef> columnDefs, String location, String format,
                                        String comment, Map<String, String> properties,
                                        String metadataJson) throws Exception {
+        return registerTable(database, tableName, tableType, columnDefs, location, format,
+                comment, properties, metadataJson, "main");
+    }
+
+    /**
+     * @param physicalSchema DuckDB schema holding the physical object: main
+     *                      for the default database / legacy layout, the
+     *                      database name for per-database schemas.
+     */
+    public Catalog.Table registerTable(String database, String tableName, String tableType,
+                                        List<ColumnDef> columnDefs, String location, String format,
+                                        String comment, Map<String, String> properties,
+                                        String metadataJson, String physicalSchema) throws Exception {
         List<Catalog.Column> cols = new ArrayList<>();
         int ordinal = 0;
         for (ColumnDef cd : columnDefs) {
             cols.add(new Catalog.Column(cd.name(), cd.type(), cd.nullable(), cd.comment(),
                     ordinal++, cd.defaultValue(), cd.expression()));
         }
+        if (catalog.getTable(database, tableName).isPresent()) {
+            throw new IllegalStateException("Table already registered: " + database + "." + tableName
+                    + "; use updateTable to replace an existing definition");
+        }
+        String schema = physicalSchema == null || physicalSchema.isBlank() ? "main" : physicalSchema;
         Catalog.Table table = new Catalog.Table(0, List.of(database, tableName), tableType,
                 cols, location, format, comment,
                 properties == null ? new LinkedHashMap<>() : properties,
-                metadataJson);
+                metadataJson, schema);
         if (store != null) {
             long id = store.saveTable(table);
             table = new Catalog.Table(id, table.name(), table.tableType(), table.columns(),
                     table.location(), table.format(), table.comment(),
-                    table.properties(), table.metadataJson());
+                    table.properties(), table.metadataJson(), table.physicalSchema());
         }
         catalog.createTable(table);
         return table;
@@ -196,7 +214,8 @@ public final class CatalogService {
         Catalog.Table existing = catalog.getTable(toDb, toTable).orElse(null);
         if (existing != null) throw new IllegalArgumentException("Target table already exists: " + toDb + "." + toTable);
         Catalog.Table renamed = new Catalog.Table(old.tableId(), List.of(toDb, toTable), old.tableType(), old.columns(),
-                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
+                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson(),
+                old.physicalSchema());
         catalog.renameTable(fromDb, fromTable, toDb, toTable);
         if (store != null) {
             try {
@@ -213,7 +232,8 @@ public final class CatalogService {
         Catalog.Table old = catalog.getTable(database, tableName)
                 .orElseThrow(() -> new IllegalArgumentException("Table does not exist: " + database + "." + tableName));
         Catalog.Table updated = new Catalog.Table(old.tableId(), old.name(), old.tableType(), toCatalogColumns(newCols),
-                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson());
+                old.location(), old.format(), old.comment(), old.properties(), old.metadataJson(),
+                old.physicalSchema());
         catalog.updateTable(updated);
         if (store != null) {
             try {

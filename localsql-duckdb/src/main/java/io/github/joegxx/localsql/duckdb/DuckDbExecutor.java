@@ -29,15 +29,60 @@ public final class DuckDbExecutor implements AutoCloseable {
         try (Statement stmt = connection.createStatement()) {
             ResultSet rs = stmt.executeQuery(sql);
             ResultSetMetaData meta = rs.getMetaData();
-            List<String> columns = new ArrayList<>();
-            for (int i = 1; i <= meta.getColumnCount(); i++) columns.add(meta.getColumnLabel(i));
+            int count = meta.getColumnCount();
+            List<ColMeta> cols = new ArrayList<>(count);
+            for (int i = 1; i <= count; i++) {
+                cols.add(new ColMeta(meta.getColumnLabel(i), meta.getColumnType(i), meta.getColumnTypeName(i),
+                        meta.isNullable(i) != ResultSetMetaData.columnNoNulls, meta.getPrecision(i), meta.getScale(i)));
+            }
             List<List<Object>> rows = new ArrayList<>();
             while (rs.next()) {
-                List<Object> row = new ArrayList<>();
-                for (int i = 1; i <= meta.getColumnCount(); i++) row.add(rs.getObject(i));
+                List<Object> row = new ArrayList<>(count);
+                for (int i = 1; i <= count; i++) row.add(rs.getObject(i));
                 rows.add(row);
             }
-            return new QueryResult(columns, rows);
+            return new QueryResult(cols, rows);
+        }
+    }
+
+    /**
+     * Column description of a query result: the JDBC sqlType plus the native
+     * DuckDB type name, nullability, precision and scale, so metadata
+     * consumers (HiveServer2 GetResultSetMetadata) report real types instead
+     * of flattening everything to STRING. Values in the same column are
+     * serialized through the matching Thrift channel.
+     */
+    public record ColMeta(String name, int sqlType, String typeName,
+                          boolean nullable, int precision, int scale) {
+
+        /**
+         * All-STRING column for hand-built results (admin statements, legacy
+         * shape). LONGVARCHAR keeps the HiveServer2 metadata STRING_TYPE and
+         * the string fetch channel.
+         */
+        public static ColMeta string(String name) {
+            return new ColMeta(name, java.sql.Types.LONGVARCHAR, "STRING", true, 0, 0);
+        }
+    }
+
+    /**
+     * Query result with per-column metadata. The Collection constructor keeps
+     * the legacy all-STRING shape for hand-built results (admin statements,
+     * DDL counts, fixtures): plain name strings become STRING columns,
+     * prebuilt ColMeta entries pass through.
+     */
+    public record QueryResult(List<ColMeta> colMetas, List<List<Object>> rows) {
+
+        @SuppressWarnings("unchecked")
+        public QueryResult(java.util.Collection<?> columnsOrMetas, List<List<Object>> rows) {
+            this(columnsOrMetas.stream()
+                            .map(c -> c instanceof ColMeta m ? m : ColMeta.string((String) c))
+                            .toList(),
+                    rows);
+        }
+
+        public List<String> columns() {
+            return colMetas.stream().map(ColMeta::name).toList();
         }
     }
 
@@ -104,6 +149,4 @@ public final class DuckDbExecutor implements AutoCloseable {
     public void close() throws SQLException {
         connection.close();
     }
-
-    public record QueryResult(List<String> columns, List<List<Object>> rows) {}
 }

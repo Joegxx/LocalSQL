@@ -171,7 +171,7 @@ public class IrVisitor<R, C> {
         R res = defaultResult(r, ctx);
         res = aggregateResult(res, visitRelation(r.child(), ctx));
         for (Expression e : r.groupingExpressions()) res = aggregateResult(res, visit(e, ctx));
-        for (Expression e : r.aggregateExpressions()) res = aggregateResult(res, visit(e, ctx));
+        for (Expression e : r.resultExpressions()) res = aggregateResult(res, visit(e, ctx));
         for (Aggregate.GroupingAnalytics ga : r.groupingAnalytics()) {
             for (List<Expression> set : ga.sets()) {
                 for (Expression e : set) res = aggregateResult(res, visit(e, ctx));

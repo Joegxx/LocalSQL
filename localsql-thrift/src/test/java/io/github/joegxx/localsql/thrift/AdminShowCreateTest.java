@@ -8,6 +8,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class AdminShowCreateTest {
@@ -34,6 +36,26 @@ class AdminShowCreateTest {
 
     private DuckDbExecutor.QueryResult exec(String sql) throws Exception {
         return server.executeSparkSql(sql);
+    }
+
+    @Test
+    void describeSchemaExtended() throws Exception {
+        exec("CREATE DATABASE propsdb WITH DBPROPERTIES ('k'='v')");
+        // the Spark 3.2 shape clients probe with (DBeaver: describe schema extended `db`)
+        var r = exec("describe schema extended `propsdb`");
+        assertEquals(1, r.rows().size());
+        assertEquals(List.of("database_name", "description", "location", "properties"), r.columns());
+        assertEquals("propsdb", r.rows().get(0).get(0));
+        assertTrue(String.valueOf(r.rows().get(0).get(3)).contains("(k,v)"), () -> "properties row: " + r.rows());
+        // keyword order reversed is accepted too
+        var r2 = exec("DESCRIBE EXTENDED DATABASE propsdb");
+        assertEquals(r.columns(), r2.columns());
+        // non-extended omits the properties column
+        var r3 = exec("DESCRIBE SCHEMA propsdb");
+        assertEquals(List.of("database_name", "description", "location"), r3.columns());
+        // default db works; unknown database fails clearly
+        assertEquals("default", exec("DESCRIBE DATABASE default").rows().get(0).get(0));
+        assertThrows(Exception.class, () -> exec("DESCRIBE DATABASE nodb"));
     }
 
     @Test

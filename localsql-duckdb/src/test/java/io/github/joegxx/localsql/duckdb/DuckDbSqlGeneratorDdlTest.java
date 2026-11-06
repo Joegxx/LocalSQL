@@ -20,8 +20,9 @@ class DuckDbSqlGeneratorDdlTest {
 
     private final DuckDbSqlGenerator g = new DuckDbSqlGenerator();
 
+    /** Resolved scans carry the physical location: [schema, table] (main = default db). */
     private static TableScan scan(String table) {
-        return new TableScan(List.of("default", table), List.of());
+        return new TableScan(List.of("main", table), List.of());
     }
 
     @Test

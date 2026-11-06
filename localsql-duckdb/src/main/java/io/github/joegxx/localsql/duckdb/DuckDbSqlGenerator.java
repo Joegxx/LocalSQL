@@ -18,8 +18,13 @@ public final class DuckDbSqlGenerator {
     }
 
     public String generateInsert(io.github.joegxx.localsql.ir.statement.Insert i) {
+        return generateInsert(i, null);
+    }
+
+    /** @param schema physical DuckDB schema of the target (null/main: bare name). */
+    public String generateInsert(io.github.joegxx.localsql.ir.statement.Insert i, String schema) {
         StringBuilder sb = new StringBuilder("INSERT INTO ");
-        sb.append(bareName(i.tableName()));
+        sb.append(emitTarget(i.tableName(), schema));
         if (i.columns() != null) {
             sb.append(" (");
             for (int c = 0; c < i.columns().size(); c++) {
@@ -34,8 +39,13 @@ public final class DuckDbSqlGenerator {
     }
 
     public String generateCreateTable(io.github.joegxx.localsql.ir.statement.CreateTable t) {
+        return generateCreateTable(t, null);
+    }
+
+    /** @param schema physical DuckDB schema of the target (null/main: bare name). */
+    public String generateCreateTable(io.github.joegxx.localsql.ir.statement.CreateTable t, String schema) {
         StringBuilder sb = new StringBuilder("CREATE TABLE ");
-        sb.append(bareName(t.tableName()));
+        sb.append(emitTarget(t.tableName(), schema));
         sb.append(" (");
         List<io.github.joegxx.localsql.ir.statement.CreateTable.ColumnDef> cols = t.columns();
         for (int c = 0; c < cols.size(); c++) {
@@ -49,31 +59,52 @@ public final class DuckDbSqlGenerator {
     }
 
     public String generateCreateTableAs(io.github.joegxx.localsql.ir.statement.CreateTable t) {
+        return generateCreateTableAs(t, null);
+    }
+
+    /** @param schema physical DuckDB schema of the target (null/main: bare name). */
+    public String generateCreateTableAs(io.github.joegxx.localsql.ir.statement.CreateTable t, String schema) {
         StringBuilder sb = new StringBuilder("CREATE TABLE ");
-        sb.append(bareName(t.tableName()));
+        sb.append(emitTarget(t.tableName(), schema));
         sb.append(" AS ");
         emit(t.query(), sb);
         return sb.toString();
     }
 
     public String generateCreateView(io.github.joegxx.localsql.ir.statement.CreateView v) {
+        return generateCreateView(v, null);
+    }
+
+    /** @param schema physical DuckDB schema of the target (null/main: bare name). */
+    public String generateCreateView(io.github.joegxx.localsql.ir.statement.CreateView v, String schema) {
         StringBuilder sb = new StringBuilder("CREATE ");
         if (v.orReplace()) sb.append("OR REPLACE ");
         sb.append("VIEW ");
-        sb.append(bareName(v.tableName()));
+        sb.append(emitTarget(v.tableName(), schema));
         sb.append(" AS ");
         emit(v.query(), sb);
         return sb.toString();
     }
 
     public String generateRenameTable(io.github.joegxx.localsql.ir.statement.RenameTable rt, boolean isView) {
+        return generateRenameTable(rt, isView, null);
+    }
+
+    /** @param schema physical DuckDB schema of the source (null/main: bare); rename stays within it. */
+    public String generateRenameTable(io.github.joegxx.localsql.ir.statement.RenameTable rt, boolean isView,
+                                       String schema) {
         String keyword = isView ? "VIEW " : "TABLE ";
-        return "ALTER " + keyword + bareName(rt.from()) + " RENAME TO " + bareName(rt.to());
+        return "ALTER " + keyword + emitTarget(rt.from(), schema) + " RENAME TO " + bareName(rt.to());
     }
 
     public String generateAddColumn(List<String> tableName, io.github.joegxx.localsql.ir.statement.AddColumns.ColDef col) {
+        return generateAddColumn(tableName, col, null);
+    }
+
+    public String generateAddColumn(List<String> tableName, io.github.joegxx.localsql.ir.statement.AddColumns.ColDef col,
+                                    String schema) {
         StringBuilder sb = new StringBuilder("ALTER TABLE ");
-        sb.append(bareName(tableName)).append(" ADD COLUMN ").append(quote(col.name()))
+        sb.append(emitTarget(tableName, schema)).append(" ADD COLUMN ").append(quote(col.name()))
                 .append(" ").append(duckType(col.type()));
         if (!col.nullable()) sb.append(" NOT NULL");
         // position ignored for DuckDB (always appends); comment ignored as hint
@@ -81,24 +112,58 @@ public final class DuckDbSqlGenerator {
     }
 
     public String generateDropColumn(List<String> tableName, String col) {
-        return "ALTER TABLE " + bareName(tableName) + " DROP COLUMN " + quote(col);
+        return generateDropColumn(tableName, col, null);
+    }
+
+    public String generateDropColumn(List<String> tableName, String col, String schema) {
+        return "ALTER TABLE " + emitTarget(tableName, schema) + " DROP COLUMN " + quote(col);
     }
 
     public String generateRenameColumn(List<String> tableName, String from, String to) {
-        return "ALTER TABLE " + bareName(tableName) + " RENAME COLUMN " + quote(from) + " TO " + quote(to);
+        return generateRenameColumn(tableName, from, to, null);
+    }
+
+    public String generateRenameColumn(List<String> tableName, String from, String to, String schema) {
+        return "ALTER TABLE " + emitTarget(tableName, schema) + " RENAME COLUMN " + quote(from) + " TO " + quote(to);
     }
 
     public String generateAlterColumnType(List<String> tableName, String col, DataType newType) {
-        return "ALTER TABLE " + bareName(tableName) + " ALTER " + quote(col) + " TYPE " + duckType(newType);
+        return generateAlterColumnType(tableName, col, newType, null);
+    }
+
+    public String generateAlterColumnType(List<String> tableName, String col, DataType newType, String schema) {
+        return "ALTER TABLE " + emitTarget(tableName, schema) + " ALTER " + quote(col) + " TYPE " + duckType(newType);
     }
 
     public String generateAlterColumnSetNotNull(List<String> tableName, String col, boolean setNotNull) {
-        // DuckDB 1.5 supports ALTER COLUMN ... SET/DROP NOT NULL
-        return "ALTER TABLE " + bareName(tableName) + " ALTER " + quote(col) + (setNotNull ? " SET NOT NULL" : " DROP NOT NULL");
+        return generateAlterColumnSetNotNull(tableName, col, setNotNull, null);
     }
 
-    /** Physical tables all live in DuckDB's main schema: emit only the last part. */
+    public String generateAlterColumnSetNotNull(List<String> tableName, String col, boolean setNotNull,
+                                                String schema) {
+        // DuckDB 1.5 supports ALTER COLUMN ... SET/DROP NOT NULL
+        return "ALTER TABLE " + emitTarget(tableName, schema) + " ALTER " + quote(col) + (setNotNull ? " SET NOT NULL" : " DROP NOT NULL");
+    }
+
+    /** Emits only the last name part (bare form). */
     private String bareName(List<String> parts) {
+        return quote(parts.get(parts.size() - 1));
+    }
+
+    /**
+     * Emits a table reference with its physical schema prefix. A null, blank
+     * or {@code main} schema keeps the bare name, matching legacy layouts;
+     * anything else (a per-database schema) is emitted as {@code schema.table}.
+     */
+    static String emitTarget(List<String> parts, String schema) {
+        String bare = bareNameStatic(parts);
+        if (schema == null || schema.isBlank() || "main".equalsIgnoreCase(schema)) {
+            return bare;
+        }
+        return quote(schema) + "." + bare;
+    }
+
+    private static String bareNameStatic(List<String> parts) {
         return quote(parts.get(parts.size() - 1));
     }
 
@@ -145,11 +210,21 @@ public final class DuckDbSqlGenerator {
         if (p.child() instanceof Filter f && !(f.child() instanceof Values)) {
             // Inline the filter instead of wrapping it in a subquery: wrapping would
             // drop alias qualifiers (FROM t AS x inside a derived table makes x.x
-            // invisible to the outer select list).
+            // invisible to the outer select list). A Generate child must stay a
+            // comma-joined FROM item for the same reason.
             sb.append(" FROM ");
-            emitChildSource(f.child(), sb);
+            if (f.child() instanceof Generate g) {
+                emitGenerateSource(g, sb);
+            } else {
+                emitChildSource(f.child(), sb);
+            }
             sb.append(" WHERE ");
             emitExpr(f.condition(), sb);
+        } else if (p.child() instanceof Generate g) {
+            // Inline the lateral view as a FROM-item comma list; wrapping it
+            // in a derived table would strand the child's table qualifiers.
+            sb.append(" FROM ");
+            emitGenerateSource(g, sb);
         } else if (!(p.child() instanceof Values)) {
             sb.append(" FROM ");
             emitChildSource(p.child(), sb);
@@ -158,7 +233,13 @@ public final class DuckDbSqlGenerator {
 
     private void emitFilter(Filter f, StringBuilder sb) {
         sb.append("SELECT * FROM ");
-        emitChildSource(f.child(), sb);
+        if (f.child() instanceof Generate g) {
+            // comma-joined FROM items; a derived table would strand the
+            // child's table qualifiers (see emitProject)
+            emitGenerateSource(g, sb);
+        } else {
+            emitChildSource(f.child(), sb);
+        }
         sb.append(" WHERE ");
         emitExpr(f.condition(), sb);
     }
@@ -205,8 +286,8 @@ public final class DuckDbSqlGenerator {
     private void emitAggregate(Aggregate a, StringBuilder sb) {
         sb.append("SELECT ");
         List<Expression> out = new ArrayList<>();
-        if (a.aggregateExpressions() != null && !a.aggregateExpressions().isEmpty()) {
-            out.addAll(a.aggregateExpressions());
+        if (a.resultExpressions() != null && !a.resultExpressions().isEmpty()) {
+            out.addAll(a.resultExpressions());
         } else {
             out.addAll(a.groupingExpressions());
         }
@@ -222,7 +303,13 @@ public final class DuckDbSqlGenerator {
             src = f.child();
         }
         sb.append(" FROM ");
-        emitChildSource(src, sb);
+        if (src instanceof Generate g) {
+            // comma-joined FROM items; a derived table would strand the
+            // child's table qualifiers (see emitProject)
+            emitGenerateSource(g, sb);
+        } else {
+            emitChildSource(src, sb);
+        }
         if (inlinedFilter != null) {
             sb.append(" WHERE ");
             emitExpr(inlinedFilter, sb);
@@ -330,10 +417,17 @@ public final class DuckDbSqlGenerator {
     }
 
     private void emitTableScan(TableScan t, StringBuilder sb) {
-        // Logical name may be [catalog,] database, table (e.g. default.orders
-        // from IDEs or qualified SQL). Physical tables all live in DuckDB's
-        // main schema, so emit the bare table name.
-        String table = t.tableName().get(t.tableName().size() - 1);
+        // After analysis the name is [physicalSchema, table] (CTE references
+        // keep their original single-part name). Main-resident tables keep
+        // the bare form for backward compatibility with legacy stores.
+        List<String> parts = t.tableName();
+        String table = parts.get(parts.size() - 1);
+        if (parts.size() >= 2) {
+            String schema = parts.get(parts.size() - 2);
+            if (schema != null && !schema.isBlank() && !"main".equalsIgnoreCase(schema)) {
+                sb.append(quote(schema)).append('.');
+            }
+        }
         sb.append(quote(table));
         if (t.alias() != null) sb.append(" AS ").append(quote(t.alias()));
     }
@@ -360,10 +454,42 @@ public final class DuckDbSqlGenerator {
 
     private void emitGenerate(Generate g, StringBuilder sb) {
         sb.append("SELECT * FROM ");
-        emit(g.child(), sb);
+        emitGenerateSource(g, sb);
+    }
+
+    /**
+     * Emits the LATERAL VIEW as a FROM-item comma list:
+     * {@code <child source>, UNNEST(<generator>) AS <viewAlias>(<col>)}. The
+     * table-function alias form is required (a plain column alias makes
+     * DuckDB return the expanded rows as structs); the table alias is the
+     * LATERAL VIEW name so qualified references keep working, falling back
+     * to a fixed name when the view is anonymous. Inline form keeps the
+     * child's table qualifiers visible to the enclosing projection and
+     * preserves chained lateral views by recursing into a Generate child.
+     */
+    private void emitGenerateSource(Generate g, StringBuilder sb) {
+        if (g.child() instanceof Generate inner) {
+            // a derived table here would strand the earlier view's output
+            // names, so chained views stay in one comma list
+            emitGenerateSource(inner, sb);
+        } else {
+            emitChildSource(g.child(), sb);
+        }
         sb.append(", UNNEST(");
         emitExpr(g.generator(), sb);
-        sb.append(") AS ").append(quote(g.generatorOutputNames().isEmpty() ? "col" : g.generatorOutputNames().get(0)));
+        sb.append(")");
+        // posexplode: DuckDB appends the 1-based position column after the
+        // value, matching the stored physical output-name order
+        if (g.ordinalOutput()) sb.append(" WITH ORDINALITY");
+        sb.append(" AS ").append(quote(g.viewAlias() == null ? "gen" : g.viewAlias()));
+        sb.append("(");
+        if (g.generatorOutputNames().isEmpty()) {
+            sb.append(quote("gen_col"));
+        } else {
+            sb.append(g.generatorOutputNames().stream()
+                    .map(DuckDbSqlGenerator::quote).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        sb.append(")");
     }
 
     private void emitExpr(Expression e, StringBuilder sb) {
@@ -441,8 +567,12 @@ public final class DuckDbSqlGenerator {
         }
         else if (e instanceof StructExpr s) {
             sb.append("struct_pack(");
+            List<String> names = s.fieldNames();
             for (int i = 0; i < s.fields().size(); i++) {
                 if (i > 0) sb.append(", ");
+                if (names != null) {
+                    sb.append(quote(names.get(i))).append(" := ");
+                }
                 emitExpr(s.fields().get(i), sb);
             }
             sb.append(")");
@@ -470,164 +600,6 @@ public final class DuckDbSqlGenerator {
         }
     }
 
-    /**
-     * Direct name mappings: Spark/Hive function name -> DuckDB function.
-     * Semantics must match Spark (verified in SparkFunctionMappingTest);
-     * functions needing argument restructuring live in emitMappedFunction.
-     */
-    private static final Map<String, String> FN_MAP = Map.ofEntries(
-            // strings
-            Map.entry("length", "length"),
-            Map.entry("map_from_arrays", "map"),
-            Map.entry("substring", "substring"),
-            Map.entry("concat", "concat"),
-            Map.entry("concat_ws", "concat_ws"),
-            Map.entry("coalesce", "coalesce"),
-            Map.entry("cast", "cast"),
-            Map.entry("count", "count"),
-            Map.entry("sum", "sum"),
-            Map.entry("avg", "avg"),
-            Map.entry("min", "min"),
-            Map.entry("max", "max"),
-            Map.entry("upper", "upper"),
-            Map.entry("lower", "lower"),
-            Map.entry("reverse", "reverse"),
-            Map.entry("ascii", "ascii"),
-            Map.entry("chr", "chr"),
-            Map.entry("lpad", "lpad"),
-            Map.entry("rpad", "rpad"),
-            Map.entry("trim", "trim"),
-            Map.entry("ltrim", "ltrim"),
-            Map.entry("rtrim", "rtrim"),
-            Map.entry("btrim", "btrim"),
-            Map.entry("levenshtein", "levenshtein"),
-            Map.entry("soundex", "soundex"),
-            Map.entry("contains", "contains"),
-            Map.entry("repeat", "repeat"),
-            Map.entry("replace", "replace"),
-            Map.entry("regexp_extract", "regexp_extract"),
-            Map.entry("regexp_extract_all", "regexp_extract_all"),
-            // numbers
-            Map.entry("abs", "abs"),
-            Map.entry("ceil", "ceil"),
-            Map.entry("ceiling", "ceiling"),
-            Map.entry("floor", "floor"),
-            Map.entry("sqrt", "sqrt"),
-            Map.entry("cbrt", "cbrt"),
-            Map.entry("exp", "exp"),
-            Map.entry("ln", "ln"),
-            Map.entry("log2", "log2"),
-            Map.entry("log10", "log10"),
-            Map.entry("pow", "pow"),
-            Map.entry("sign", "sign"),
-            Map.entry("isnan", "isnan"),
-            Map.entry("isinf", "isinf"),
-            Map.entry("pi", "pi"),
-            Map.entry("acos", "acos"),
-            Map.entry("acosh", "acosh"),
-            Map.entry("asin", "asin"),
-            Map.entry("asinh", "asinh"),
-            Map.entry("atan", "atan"),
-            Map.entry("atan2", "atan2"),
-            Map.entry("atanh", "atanh"),
-            Map.entry("cos", "cos"),
-            Map.entry("cosh", "cosh"),
-            Map.entry("cot", "cot"),
-            Map.entry("sin", "sin"),
-            Map.entry("sinh", "sinh"),
-            Map.entry("tan", "tan"),
-            Map.entry("tanh", "tanh"),
-            Map.entry("degrees", "degrees"),
-            Map.entry("radians", "radians"),
-            Map.entry("round", "round"),
-            Map.entry("factorial", "factorial"),
-            Map.entry("bin", "bin"),
-            // strings (DuckDB-native names)
-            Map.entry("lcase", "lcase"),
-            Map.entry("ucase", "ucase"),
-            Map.entry("char_length", "char_length"),
-            Map.entry("character_length", "character_length"),
-            Map.entry("octet_length", "octet_length"),
-            Map.entry("left", "left"),
-            Map.entry("right", "right"),
-            Map.entry("translate", "translate"),
-            Map.entry("printf", "printf"),
-            // encoding / hash
-            Map.entry("hex", "hex"),
-            Map.entry("unhex", "unhex"),
-            Map.entry("md5", "md5"),
-            Map.entry("sha1", "sha1"),
-            // encoding (charset support: utf-8 only, like Spark's default)
-            Map.entry("encode", "encode"),
-            Map.entry("decode", "decode"),
-            // dates / misc (DuckDB-native names)
-            Map.entry("now", "now"),
-            Map.entry("random", "random"),
-            Map.entry("date_part", "date_part"),
-            Map.entry("make_date", "make_date"),
-            Map.entry("map_concat", "map_concat"),
-            Map.entry("map_entries", "map_entries"),
-            Map.entry("map_from_entries", "map_from_entries"),
-            Map.entry("to_json", "to_json"),
-            Map.entry("typeof", "typeof"),
-            Map.entry("uuid", "uuid"),
-            // dates
-            Map.entry("current_date", "current_date"),
-            Map.entry("current_timestamp", "current_timestamp"),
-            Map.entry("year", "year"),
-            Map.entry("month", "month"),
-            Map.entry("day", "day"),
-            Map.entry("quarter", "quarter"),
-            Map.entry("hour", "hour"),
-            Map.entry("minute", "minute"),
-            Map.entry("second", "second"),
-            Map.entry("dayofyear", "dayofyear"),
-            Map.entry("last_day", "last_day"),
-            Map.entry("json_extract", "json_extract"),
-            Map.entry("json_array_length", "json_array_length"),
-            // arrays / maps
-            Map.entry("array_join", "array_to_string"),
-            Map.entry("flatten", "flatten"),
-            Map.entry("map_keys", "map_keys"),
-            Map.entry("map_values", "map_values"),
-            // aggregates
-            Map.entry("any_value", "any_value"),
-            Map.entry("first", "first"),
-            Map.entry("median", "median"),
-            Map.entry("mode", "mode"),
-            Map.entry("corr", "corr"),
-            Map.entry("covar_pop", "covar_pop"),
-            Map.entry("covar_samp", "covar_samp"),
-            Map.entry("stddev_pop", "stddev_pop"),
-            Map.entry("stddev_samp", "stddev_samp"),
-            Map.entry("var_pop", "var_pop"),
-            Map.entry("var_samp", "var_samp"),
-            Map.entry("approx_count_distinct", "approx_count_distinct"),
-            Map.entry("bool_and", "bool_and"),
-            Map.entry("bool_or", "bool_or"),
-            // higher-order functions (lambda-capable in DuckDB)
-            // window
-            Map.entry("row_number", "row_number"),
-            Map.entry("rank", "rank"),
-            Map.entry("dense_rank", "dense_rank"),
-            Map.entry("percent_rank", "percent_rank"),
-            Map.entry("cume_dist", "cume_dist"),
-            Map.entry("ntile", "ntile"),
-            Map.entry("lag", "lag"),
-            Map.entry("lead", "lead"),
-            Map.entry("first_value", "first_value"),
-            Map.entry("last_value", "last_value"),
-            Map.entry("nth_value", "nth_value"),
-            // Spark 3.5 registry backfill: DuckDB-native renames
-            Map.entry("greatest", "greatest"),
-            Map.entry("least", "least"),
-            Map.entry("nullif", "nullif"),
-            Map.entry("last", "last"),
-            Map.entry("skewness", "skewness"),
-            Map.entry("kurtosis", "kurtosis"),
-            Map.entry("bit_length", "bit_length"),
-            Map.entry("bit_count", "bit_count")
-    );
 
     /** Custom rename overlay (from --function-map); overrides built-ins. */
     private final Map<String, String> customRenames;
@@ -701,527 +673,12 @@ public final class DuckDbSqlGenerator {
         return true;
     }
 
-    private boolean emitMappedFunction(String name, FunctionCall f, StringBuilder sb) {
-        List<io.github.joegxx.localsql.ir.expression.Expression> args = f.arguments();
-        switch (name) {
-            case "initcap" -> {
-                if (args.size() != 1) return false;
-                // registered as a Java UDF on the DuckDB connection (DuckDB has no initcap)
-                emitBuiltinUdfCall("initcap", args, List.of("VARCHAR"), sb);
-                return true;
-            }
-            case "nvl2" -> {
-                if (args.size() != 3) return false;
-                sb.append("(CASE WHEN ");
-                emitExpr(args.get(0), sb);
-                sb.append(" IS NOT NULL THEN ");
-                emitExpr(args.get(1), sb);
-                sb.append(" ELSE ");
-                emitExpr(args.get(2), sb);
-                sb.append(" END)");
-                return true;
-            }
-            case "equal_null" -> {
-                if (args.size() != 2) return false;
-                sb.append("(");
-                emitExpr(args.get(0), sb);
-                sb.append(" IS NOT DISTINCT FROM ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
-                return true;
-            }
-            case "mod", "pmod" -> {
-                if (args.size() != 2) return false;
-                // Spark returns NULL on zero divisor; pmod keeps a - floor(a/b)*b
-                sb.append("(CASE WHEN (");
-                emitExpr(args.get(1), sb);
-                sb.append(") = 0 THEN NULL ELSE ");
-                if (name.equals("mod")) {
-                    sb.append("(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" % ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(")");
-                } else {
-                    sb.append("((");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" % ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(") + ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(") % ");
-                    emitExpr(args.get(1), sb);
-                }
-                sb.append(" END)");
-                return true;
-            }
-            case "array_union" -> {
-                if (args.size() != 2) return false;
-                sb.append("list_distinct(list_concat(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append("))");
-                return true;
-            }
-            case "array_except" -> {
-                if (args.size() != 2) return false;
-                sb.append("list_distinct(list_filter(");
-                emitExpr(args.get(0), sb);
-                sb.append(", x -> NOT list_contains(");
-                emitExpr(args.get(1), sb);
-                sb.append(", x)))");
-                return true;
-            }
-            case "array_join" -> {
-                if (args.size() == 2) return false; // DuckDB array_to_string(list, delim) is a direct match
-                if (args.size() != 3) return false;
-                sb.append("array_to_string(list_transform(");
-                emitExpr(args.get(0), sb);
-                sb.append(", x -> COALESCE(CAST(x AS VARCHAR), ");
-                emitExpr(args.get(2), sb);
-                sb.append(")), ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
-                return true;
-            }
-            case "locate", "position" -> {
-                if (args.size() == 2) {
-                    // Spark locate(substr, str); DuckDB strpos(str, substr)
-                    sb.append("strpos(");
-                    emitExpr(args.get(1), sb);
-                    sb.append(", ");
-                    emitExpr(args.get(0), sb);
-                    sb.append(")");
-                    return true;
-                }
-                if (args.size() == 3) {
-                    sb.append("(CASE WHEN strpos(substr(");
-                    emitExpr(args.get(1), sb);
-                    sb.append(", ");
-                    emitExpr(args.get(2), sb);
-                    sb.append("), ");
-                    emitExpr(args.get(0), sb);
-                    sb.append(") = 0 THEN 0 ELSE strpos(substr(");
-                    emitExpr(args.get(1), sb);
-                    sb.append(", ");
-                    emitExpr(args.get(2), sb);
-                    sb.append("), ");
-                    emitExpr(args.get(0), sb);
-                    sb.append(") + ");
-                    emitExpr(args.get(2), sb);
-                    sb.append(" - 1 END)");
-                    return true;
-                }
-                return false;
-            }
-            case "map" -> {
-                if (args.isEmpty() || args.size() % 2 != 0) return false;
-                sb.append("map(list_value(");
-                for (int i = 0; i < args.size(); i += 2) {
-                    if (i > 0) sb.append(", ");
-                    emitExpr(args.get(i), sb);
-                }
-                sb.append("), list_value(");
-                for (int i = 1; i < args.size(); i += 2) {
-                    if (i > 1) sb.append(", ");
-                    emitExpr(args.get(i), sb);
-                }
-                sb.append("))");
-                return true;
-            }
-            case "octet_length" -> {
-                // DuckDB's octet_length only binds for BLOB; strings need an explicit cast
-                if (args.size() != 1) return false;
-                sb.append("octet_length(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS BLOB))");
-                return true;
-            }
-            case "substring_index" -> {
-                if (args.size() != 3) return false;
-                Object count = args.get(2) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
-                if (count == null) {
-                    throw new UnsupportedOperationException("substring_index requires a literal count");
-                }
-                long c = ((Number) count).longValue();
-                sb.append("CASE WHEN ");
-                emitExpr(args.get(2), sb);
-                sb.append(" = 0 THEN '' ELSE array_to_string(list_slice(string_split(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS VARCHAR), CAST(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS VARCHAR)), ");
-                sb.append(c > 0 ? "1, " + c : c + ", -1");
-                sb.append("), CAST(");
-                emitExpr(args.get(1), sb);
-                sb.append(" AS VARCHAR)) END");
-                return true;
-            }
-            case "format_number" -> {
-                if (args.size() != 2) return false;
-                Object d = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER ? l.value() : null;
-                if (d == null) {
-                    throw new UnsupportedOperationException("format_number requires a literal scale");
-                }
-                sb.append("printf('%,.").append(((Number) d).intValue()).append("f', ");
-                emitExpr(args.get(0), sb);
-                sb.append(")");
-                return true;
-            }
-            case "slice" -> {
-                if (args.size() != 3) return false;
-                sb.append("list_slice(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(", ((");
-                emitExpr(args.get(1), sb);
-                sb.append(") + (");
-                emitExpr(args.get(2), sb);
-                sb.append(")) - 1)");
-                return true;
-            }
-            case "array_remove" -> {
-                if (args.size() != 2) return false;
-                sb.append("list_filter(");
-                emitExpr(args.get(0), sb);
-                sb.append(", x -> x IS DISTINCT FROM ");
-                emitExpr(args.get(1), sb);
-                sb.append(")");
-                return true;
-            }
-            case "date_from_unix_date" -> {
-                if (args.size() != 1) return false;
-                sb.append("(DATE '1970-01-01' + CAST((");
-                emitExpr(args.get(0), sb);
-                sb.append(") AS INTEGER))");
-                return true;
-            }
-            case "unix_date" -> {
-                if (args.size() != 1) return false;
-                sb.append("date_diff('day', DATE '1970-01-01', CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS DATE))");
-                return true;
-            }
-            case "months_between" -> {
-                if (args.size() != 2) return false;
-                // Spark: (y1*12+m1) - (y2*12+m2) + ((day1 + timefrac1) - (day2 + timefrac2)) / 31
-                String template = "((EXTRACT(year FROM \u0001) * 12 + EXTRACT(month FROM \u0001))"
-                        + " - (EXTRACT(year FROM \u0002) * 12 + EXTRACT(month FROM \u0002))"
-                        + " + ((EXTRACT(day FROM \u0001) + (EXTRACT(hour FROM \u0001) * 3600"
-                        + " + EXTRACT(minute FROM \u0001) * 60 + EXTRACT(second FROM \u0001)) / 86400.0)"
-                        + " - (EXTRACT(day FROM \u0002) + (EXTRACT(hour FROM \u0002) * 3600"
-                        + " + EXTRACT(minute FROM \u0002) * 60 + EXTRACT(second FROM \u0002)) / 86400.0)) / 31.0)";
-                for (char c : template.toCharArray()) {
-                    if (c == '\u0001') {
-                        sb.append("CAST(");
-                        emitExpr(args.get(0), sb);
-                        sb.append(" AS TIMESTAMP)");
-                    } else if (c == '\u0002') {
-                        sb.append("CAST(");
-                        emitExpr(args.get(1), sb);
-                        sb.append(" AS TIMESTAMP)");
-                    } else {
-                        sb.append(c);
-                    }
-                }
-                return true;
-            }
-            case "next_day" -> {
-                if (args.size() != 2) return false;
-                Object dayName = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
-                if (dayName == null) {
-                    throw new UnsupportedOperationException("next_day requires a literal day name");
-                }
-                int target = dayIndex(String.valueOf(dayName));
-                if (target < 0) {
-                    throw new UnsupportedOperationException("next_day: unknown day name " + dayName);
-                }
-                sb.append("(CAST(");
-                emitExpr(args.get(0), sb);
-                sb.append(" AS DATE) + CAST(CASE WHEN ((").append(target).append(" - (weekday(");
-                emitExpr(args.get(0), sb);
-                sb.append(") - 1)) % 7 + 7) % 7 = 0 THEN 7 ELSE (((").append(target).append(" - (weekday(");
-                emitExpr(args.get(0), sb);
-                sb.append(") - 1)) % 7 + 7) % 7) END AS INTEGER))");
-                return true;
-            }
-            case "exists" -> {
-                if (args.size() != 2) return false;
-                sb.append("(len(list_filter(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(")) > 0)");
-                return true;
-            }
-            case "forall" -> {
-                if (args.size() != 2) return false;
-                sb.append("(len(list_filter(");
-                emitExpr(args.get(0), sb);
-                sb.append(", ");
-                emitExpr(args.get(1), sb);
-                sb.append(")) = len(");
-                emitExpr(args.get(0), sb);
-                sb.append("))");
-                return true;
-            }
-            case "aggregate" -> {
-                // aggregate(arr, zero, merge): prepend zero so DuckDB's reduce
-                // uses it as the accumulator seed. A finish lambda cannot be
-                // applied (DuckDB does not support invoking lambdas).
-                if (args.size() != 3) {
-                    throw new UnsupportedOperationException(
-                            "aggregate with a finish lambda is not supported yet; use aggregate(arr, zero, merge)");
-                }
-                sb.append("list_reduce(list_concat(list_value(");
-                emitExpr(args.get(1), sb);
-                sb.append("), ");
-                emitExpr(args.get(0), sb);
-                sb.append("), ");
-                emitExpr(args.get(2), sb);
-                sb.append(")");
-                return true;
-            }
-            case "transform_values", "transform_keys", "map_filter" -> {
-                if (args.size() != 2 || !(args.get(1) instanceof Lambda lam)
-                        || lam.variables().size() != 2) {
-                    throw new UnsupportedOperationException(name
-                            + " requires a two-variable lambda, got: " + (args.size() >= 2 ? args.get(1) : ""));
-                }
-                // lower the two-variable Spark lambda onto a single-variable
-                // DuckDB lambda over map_entries structs: k -> "e"."key", v -> "e"."value"
-                String k = lam.variables().get(0);
-                String v = lam.variables().get(1);
-                java.util.Map<String, Expression> subst = java.util.Map.of(
-                        k, new AttributeReference("key", List.of("e")),
-                        v, new AttributeReference("value", List.of("e")));
-                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
-                        .rewrite(lam.body(), subst);
-                sb.append("map_from_entries(");
-                if (name.equals("map_filter")) {
-                    sb.append("list_filter(map_entries(");
-                    emitExpr(args.get(0), sb);
-                    sb.append("), e -> ");
-                    emitExpr(body, sb);
-                    sb.append(")");
-                } else {
-                    sb.append("list_transform(map_entries(");
-                    emitExpr(args.get(0), sb);
-                    sb.append("), e -> {'key': ");
-                    if (name.equals("transform_keys")) {
-                        emitExpr(body, sb);
-                        sb.append(", 'value': e.value");
-                    } else {
-                        sb.append("e.key, 'value': ");
-                        emitExpr(body, sb);
-                    }
-                    sb.append("})");
-                }
-                sb.append(")");
-                return true;
-            }
-            case "date_format" -> {
-                if (args.size() != 2) return false;
-                Object fmt = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
-                if (fmt == null) {
-                    throw new UnsupportedOperationException(
-                            "date_format requires a literal format string (Java -> strftime translation)");
-                }
-                String pattern = String.valueOf(fmt);
-                int sss = pattern.indexOf("SSS");
-                if (sss >= 0) {
-                    if (pattern.indexOf("SSS", sss + 3) >= 0) {
-                        throw new UnsupportedOperationException("date_format: multiple SSS segments are not supported: " + pattern);
-                    }
-                    // SSS (millis) cannot live inside strftime (only %f micros); emit a concat
-                    String before = javaFormatToStrftime(pattern.substring(0, sss));
-                    String after = javaFormatToStrftime(pattern.substring(sss + 3));
-                    sb.append("concat(");
-                    boolean first = true;
-                    if (!before.isEmpty()) {
-                        emitStrftime(args.get(0), before, sb);
-                        first = false;
-                    }
-                    if (!first) sb.append(", ");
-                    sb.append("lpad(CAST((CAST(EXTRACT(microsecond FROM CAST(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" AS TIMESTAMP)) AS BIGINT) % 1000000) / 1000 AS VARCHAR), 3, '0')");
-                    if (!after.isEmpty()) {
-                        sb.append(", ");
-                        emitStrftime(args.get(0), after, sb);
-                    }
-                    sb.append(")");
-                    return true;
-                }
-                sb.append("strftime(");
-                emitExpr(args.get(0), sb);
-                sb.append(", '").append(javaFormatToStrftime(pattern).replace("'", "''")).append("')");
-                return true;
-            }
-            case "named_struct" -> {
-                if (args.isEmpty() || args.size() % 2 != 0) return false;
-                sb.append("struct_pack(");
-                for (int i = 0; i < args.size(); i += 2) {
-                    if (i > 0) sb.append(", ");
-                    Object fieldName = args.get(i) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                            && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
-                    if (fieldName == null) {
-                        throw new UnsupportedOperationException(
-                                "named_struct field names must be string literals; got: " + args.get(i));
-                    }
-                    sb.append(quote(String.valueOf(fieldName))).append(" := ");
-                    emitExpr(args.get(i + 1), sb);
-                }
-                sb.append(")");
-                return true;
-            }
-            case "from_json" -> {
-                if (args.size() < 2 || args.size() > 3) return false;
-                Object schema = args.get(1) instanceof io.github.joegxx.localsql.ir.expression.Literal l
-                        && l.kind() == io.github.joegxx.localsql.ir.expression.Literal.Kind.STRING ? l.value() : null;
-                if (schema == null) {
-                    throw new UnsupportedOperationException(
-                            "from_json requires a literal schema string (e.g. 'STRUCT<a INT, b STRING>' or 'a INT, b STRING')");
-                }
-                // Spark returns NULL on malformed JSON; DuckDB errors, so guard with json_valid
-                sb.append("CASE WHEN json_valid(");
-                emitExpr(args.get(0), sb);
-                sb.append(") THEN from_json(");
-                emitExpr(args.get(0), sb);
-                sb.append(", '").append(sparkSchemaToDuckJson(String.valueOf(schema)).replace("'", "''")).append("') ELSE NULL END");
-                return true;
-            }
-            case "map_zip_with" -> {
-                if (args.size() != 3 || !(args.get(2) instanceof Lambda lam)
-                        || lam.variables().size() != 3) {
-                    throw new UnsupportedOperationException(
-                            "map_zip_with requires (m1, m2, (k, v1, v2) -> expr)");
-                }
-                String k = lam.variables().get(0);
-                String v1 = lam.variables().get(1);
-                String v2 = lam.variables().get(2);
-                // union keys, look up each value, apply the lambda over them
-                java.util.Map<String, Expression> subst = java.util.Map.of(
-                        v1, mapValueLookup(args.get(0), k),
-                        v2, mapValueLookup(args.get(1), k));
-                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
-                        .rewrite(lam.body(), subst);
-                sb.append("map_from_entries(list_transform(list_distinct(list_concat(map_keys(");
-                emitExpr(args.get(0), sb);
-                sb.append("), map_keys(");
-                emitExpr(args.get(1), sb);
-                sb.append("))), ");
-                sb.append(quote(k)).append(" -> {'key': ").append(quote(k)).append(", 'value': ");
-                emitExpr(body, sb);
-                sb.append("}))");
-                return true;
-            }
-            case "bround" -> {
-                if (args.size() < 1 || args.size() > 2) return false;
-                // registered as a Java UDF on the DuckDB connection; binder needs
-                // explicit casts (no implicit DECIMAL/INTEGER -> DOUBLE for UDFs)
-                emitBuiltinUdfCall("bround", args, List.of("DOUBLE", "DOUBLE"), sb);
-                return true;
-            }
-            case "conv" -> {
-                if (args.size() != 3) return false;
-                emitBuiltinUdfCall("conv", args, List.of("VARCHAR", "VARCHAR", "VARCHAR"), sb);
-                return true;
-            }
-            case "parse_url" -> {
-                if (args.size() < 2 || args.size() > 3) return false;
-                // registered as a Java UDF on the DuckDB connection
-                List<String> types = args.size() == 3
-                        ? List.of("VARCHAR", "VARCHAR", "VARCHAR") : List.of("VARCHAR", "VARCHAR");
-                emitBuiltinUdfCall("parse_url", args, types, sb);
-                return true;
-            }
-            case "zip_with" -> {
-                if (args.size() != 3 || !(args.get(2) instanceof Lambda lam) || lam.variables().size() != 2) {
-                    throw new UnsupportedOperationException("zip_with requires (a, b, (x, y) -> expr)");
-                }
-                // DuckDB's list_zip produces structs with empty field names, so
-                // the lambda cannot reference them; instead iterate 1..max(len)
-                // by index and substitute each variable with a list_extract.
-                // list_extract out of range yields NULL, matching Spark's NULL
-                // padding for the shorter list.
-                String x = lam.variables().get(0);
-                String y = lam.variables().get(1);
-                java.util.Map<String, Expression> subst = java.util.Map.of(
-                        x, listExtractAt(args.get(0)),
-                        y, listExtractAt(args.get(1)));
-                Expression body = io.github.joegxx.localsql.ir.transform.IdentifierSubstituter
-                        .rewrite(lam.body(), subst);
-                sb.append("list_transform(range(1, greatest(len(");
-                emitExpr(args.get(0), sb);
-                sb.append("), len(");
-                emitExpr(args.get(1), sb);
-                sb.append(")) + 1), i -> ");
-                emitExpr(body, sb);
-                sb.append(")");
-                return true;
-            }
-            case "from_utc_timestamp", "to_utc_timestamp" -> {
-                if (args.size() != 2) return false;
-                // from_utc: naive ts is UTC -> render in tz
-                //   timezone(tz, CAST(ts AS TIMESTAMP) AT TIME ZONE 'UTC')
-                // to_utc: naive ts is tz-local -> render in UTC
-                //   timezone('UTC', CAST(ts AS TIMESTAMP) AT TIME ZONE tz)
-                if (name.equals("from_utc_timestamp")) {
-                    sb.append("timezone(");
-                    emitExpr(args.get(1), sb);
-                    sb.append(", CAST(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" AS TIMESTAMP) AT TIME ZONE 'UTC')");
-                } else {
-                    sb.append("timezone('UTC', CAST(");
-                    emitExpr(args.get(0), sb);
-                    sb.append(" AS TIMESTAMP) AT TIME ZONE ");
-                    emitExpr(args.get(1), sb);
-                    sb.append(")");
-                }
-                return true;
-            }
-            default -> {
-                return false;
-            }
-        }
-    }
-
-    /** list_extract(list, i) for the zip_with index-iteration rewrite. */
-    private Expression listExtractAt(Expression list) {
-        return new FunctionCall("list_extract",
-                List.of(list, new Identifier("i", false)));
-    }
 
     private static String literalString(Expression e) {
         if (e instanceof Literal l && l.kind() == Literal.Kind.STRING) return String.valueOf(l.value());
         return null;
     }
 
-    /** reflect/java_method whitelist: Spark-style class.method -> DuckDB scalar. */
-    private static final Map<String, String> REFLECT_MAP = Map.ofEntries(
-            Map.entry("java.lang.Math.max", "greatest"),
-            Map.entry("java.lang.Math.min", "least"),
-            Map.entry("java.lang.Math.abs", "abs"),
-            Map.entry("java.lang.Math.sqrt", "sqrt"),
-            Map.entry("java.lang.Math.pow", "pow"),
-            Map.entry("java.lang.Math.round", "round"),
-            Map.entry("java.lang.Math.floor", "floor"),
-            Map.entry("java.lang.Math.ceil", "ceil"),
-            Map.entry("java.lang.Math.log", "ln"),
-            Map.entry("java.lang.Math.log10", "log10"),
-            Map.entry("java.lang.Math.exp", "exp")
-    );
-
-    /** Emits fn(CAST(a1 AS t1), ...) for a connection-registered Java UDF. */
     private void emitBuiltinUdfCall(String fn, List<Expression> args, List<String> types, StringBuilder sb) {
         sb.append(fn).append('(');
         for (int i = 0; i < args.size(); i++) {
@@ -1269,9 +726,7 @@ public final class DuckDbSqlGenerator {
             sb.append(")");
             return;
         }
-        if (emitMappedFunction(name, f, sb)) return;
-        String mapped = FN_MAP.getOrDefault(name, name);
-        sb.append(mapped).append("(");
+        sb.append(name).append("(");
         if (f.distinct()) sb.append("DISTINCT ");
         for (int i = 0; i < f.arguments().size(); i++) {
             if (i > 0) sb.append(", ");
@@ -1287,171 +742,8 @@ public final class DuckDbSqlGenerator {
         sb.append(", '").append(strftimePattern.replace("'", "''")).append("')");
     }
 
-    /**
-     * Translates a Spark schema string literal into DuckDB's from_json JSON
-     * schema form: {'name': 'TYPE', ...}, where a TYPE is a primitive, a
-     * DECIMAL(p,s), a nested {'name': TYPE} object, or a [TYPE] array.
-     * Recursively supports STRUCT<> and ARRAY<> nesting.
-     */
-    static String sparkSchemaToDuckJson(String schema) {
-        SchemaParser p = new SchemaParser(schema);
-        return p.parseSchema();
-    }
 
-    /** Recursive Spark schema parser producing the DuckDB JSON schema string. */
-    private static final class SchemaParser {
-        private final String s;
-        private int i;
 
-        SchemaParser(String s) { this.s = s; }
-
-        String parseSchema() {
-            skipWs();
-            // STRUCT<...> or ARRAY<...> or DECIMAL(...): parse as a single type;
-            // otherwise treat the whole string as a bare field list
-            if (s.regionMatches(true, i, "STRUCT<", 0, 7)
-                    || s.regionMatches(true, i, "ARRAY<", 0, 6)) {
-                String t = parseType();
-                skipWs();
-                if (i != s.length()) {
-                    throw new UnsupportedOperationException("from_json trailing input after schema: " + s.substring(i));
-                }
-                return t;
-            }
-            String t = parseStructBody();
-            skipWs();
-            if (i != s.length()) {
-                throw new UnsupportedOperationException("from_json trailing input after schema: " + s.substring(i));
-            }
-            return t;
-        }
-
-        private String parseType() {
-            skipWs();
-            String word = readWord();
-            switch (word.toUpperCase(java.util.Locale.ROOT)) {
-                case "STRUCT" -> {
-                    expect('<');
-                    return parseStructBody();
-                }
-                case "ARRAY" -> {
-                    expect('<');
-                    String element = parseType();
-                    skipWs();
-                    expect('>');
-                    return "[" + element + "]";
-                }
-                case "MAP" ->
-                        throw new UnsupportedOperationException("from_json MAP types are not supported yet: " + s);
-                case "DECIMAL", "NUMERIC" -> {
-                    skipWs();
-                    expect('(');
-                    String precision = readDigits();
-                    expect(',');
-                    String scale = readDigits();
-                    expect(')');
-                    return "\"DECIMAL(" + precision + "," + scale + ")\"";
-                }
-                default -> {
-                    String duck = primitive(word);
-                    if (duck == null) {
-                        throw new UnsupportedOperationException("from_json unsupported type '" + word + "' in " + s);
-                    }
-                    return '"' + duck + '"';
-                }
-            }
-        }
-
-        /** Parses the body of a struct: name TYPE, name TYPE, ... up to '>' or EOF. */
-        private String parseStructBody() {
-            StringBuilder out = new StringBuilder("{");
-            boolean first = true;
-            while (true) {
-                skipWs();
-                if (peek() == '>') { i++; break; }
-                if (i >= s.length()) break;
-                if (!first) {
-                    expect(',');
-                    skipWs();
-                }
-                String name = readWord();
-                if (name.isEmpty()) throw new IllegalArgumentException("missing field name in " + s);
-                skipWs();
-                String type = parseType();
-                skipComment();
-                if (!first) out.append(", ");
-                out.append('"').append(name.replace("\"", "\\\"")).append("\": ").append(type);
-                first = false;
-            }
-            out.append('}');
-            return out.toString();
-        }
-
-        /** Skips a trailing COMMENT '...' token after a field type. */
-        private void skipComment() {
-            skipWs();
-            if (s.regionMatches(true, i, "COMMENT", 0, 7)) {
-                i += 7;
-                skipWs();
-                if (i < s.length() && s.charAt(i) == '\'') {
-                    int close = s.indexOf('\'', i + 1);
-                    i = close < 0 ? s.length() : close + 1;
-                }
-            }
-        }
-
-        private String primitive(String word) {
-            return switch (word.toUpperCase(java.util.Locale.ROOT)) {
-                case "INT", "INTEGER" -> "INTEGER";
-                case "BIGINT", "LONG" -> "BIGINT";
-                case "SMALLINT" -> "SMALLINT";
-                case "TINYINT", "BYTE" -> "TINYINT";
-                case "STRING", "VARCHAR" -> "VARCHAR";
-                case "DOUBLE" -> "DOUBLE";
-                case "FLOAT", "REAL" -> "FLOAT";
-                case "BOOLEAN", "BOOL" -> "BOOLEAN";
-                case "DATE" -> "DATE";
-                case "TIMESTAMP" -> "TIMESTAMP";
-                default -> null;
-            };
-        }
-
-        private void expect(char c) {
-            skipWs();
-            if (i >= s.length() || s.charAt(i) != c) {
-                throw new IllegalArgumentException("expected '" + c + "' at " + i + " in " + s);
-            }
-            i++;
-        }
-
-        private char peek() { return i < s.length() ? s.charAt(i) : 0; }
-
-        private void skipWs() {
-            while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
-        }
-
-        /** Reads an identifier/type keyword, stopping at non-word chars (< > ( , ). */
-        private String readWord() {
-            skipWs();
-            int start = i;
-            while (i < s.length() && (Character.isLetterOrDigit(s.charAt(i)) || s.charAt(i) == '_')) i++;
-            return s.substring(start, i);
-        }
-
-        private String readDigits() {
-            skipWs();
-            int start = i;
-            while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
-            return s.substring(start, i);
-        }
-    }
-
-    /** Builds list_extract(map_extract(map, key), 1) as an IR expression (map value lookup). */
-    private Expression mapValueLookup(Expression mapExpr, String keyName) {
-        return new FunctionCall("list_extract",
-                List.of(new FunctionCall("map_extract", List.of(mapExpr, new Identifier(keyName, false))),
-                        new Literal(1L, io.github.joegxx.localsql.ir.expression.Literal.Kind.INTEGER)));
-    }
 
     /** Emits the scale argument of bround/round(x, d): the arg or literal 0. */
     private void emitScale(List<Expression> args, StringBuilder sb) {
@@ -1459,78 +751,7 @@ public final class DuckDbSqlGenerator {
         else sb.append("0");
     }
 
-    /** Spark next_day accepts full names and abbreviations; 0=Monday..6=Sunday. */
-    private static int dayIndex(String name) {
-        return switch (name.toLowerCase()) {
-            case "mon", "monday" -> 0;
-            case "tue", "tues", "tuesday" -> 1;
-            case "wed", "wednesday" -> 2;
-            case "thu", "thurs", "thursday" -> 3;
-            case "fri", "friday" -> 4;
-            case "sat", "saturday" -> 5;
-            case "sun", "sunday" -> 6;
-            default -> -1;
-        };
-    }
 
-    /**
-     * Translates a Java SimpleDateFormat pattern (Spark's date_format) into a
-     * DuckDB strftime pattern for the common specifiers. Unrecognized tokens
-     * fail loudly rather than emitting a silently wrong pattern. Literal
-     * single-quoted blocks pass through; %% is an escaped percent.
-     */
-    static String javaFormatToStrftime(String fmt) {
-        StringBuilder out = new StringBuilder();
-        int i = 0;
-        while (i < fmt.length()) {
-            char c = fmt.charAt(i);
-            if (c == '\'') {
-                // quoted literal block
-                int close = fmt.indexOf('\'', i + 1);
-                if (close < 0) throw new IllegalArgumentException("unterminated quote in date_format: " + fmt);
-                for (char q : fmt.substring(i + 1, close).toCharArray()) {
-                    if (q == '%') out.append("%%");
-                    else out.append(q);
-                }
-                i = close + 1;
-                continue;
-            }
-            if (c == '%') {
-                out.append("%%");
-                i++;
-                continue;
-            }
-            if (c == 'y' || c == 'M' || c == 'd' || c == 'H' || c == 'm' || c == 's'
-                    || c == 'E' || c == 'a' || c == 'D' || c == 'w' || c == 'u') {
-                int run = 0;
-                while (i + run < fmt.length() && fmt.charAt(i + run) == c) run++;
-                String spec = switch (c) {
-                    case 'y' -> run == 2 ? "%y" : "%Y";
-                    case 'M' -> run >= 3 ? "%b" : "%m";
-                    case 'd' -> run == 2 ? "%d" : "%e";
-                    case 'H' -> run == 2 ? "%H" : "%H";
-                    case 'm' -> run == 2 ? "%M" : "%M";
-                    case 's' -> run == 2 ? "%S" : "%S";
-                    case 'E' -> run >= 4 ? "%A" : "%a";
-                    case 'a' -> "%p";
-                    case 'D' -> "%j";
-                    case 'w' -> run == 1 ? "%u" : "%W";
-                    case 'u' -> "%u";
-                    default -> "%Y";
-                };
-                out.append(spec);
-                i += run;
-                continue;
-            }
-            if (c == 'S' || c == 'z' || c == 'Z' || c == 'G' || c == 'k' || c == 'K' || c == 'F' || c == 'W') {
-                throw new IllegalArgumentException("date_format specifier not supported: '" + c
-                        + "' in " + fmt + " (supported: y/M/d/H/m/s/E/a/D/w/u + quoted literals)");
-            }
-            out.append(c);
-            i++;
-        }
-        return out.toString();
-    }
 
     private void emitWindowSpec(WindowSpec w, StringBuilder sb) {
         sb.append(" OVER (");

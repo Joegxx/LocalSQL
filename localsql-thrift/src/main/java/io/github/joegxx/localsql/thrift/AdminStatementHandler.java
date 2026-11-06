@@ -31,6 +31,12 @@ final class AdminStatementHandler {
             Pattern.compile("(?i)^(DESCRIBEFORMATTED|DESCRIBE|DESC)(\\s+(EXTENDED|FORMATTED))?(\\s+TABLE)?\\s+((?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\")(?:\\.(?:[A-Za-z_][\\w]*|`[^`]+`|\"[^\"]+\"))*)\\s*$");
     private static final String IDENT = "(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"|'[^']*')";
     private static final String QUALIFIED = IDENT + "(?:\\." + IDENT + ")*";
+    private static final Pattern DESCRIBE_DATABASE =
+            Pattern.compile("(?i)^(DESCRIBE|DESC)\\s+"
+                    // keyword required: DESCRIBE SCHEMA [EXTENDED] db | DESCRIBE EXTENDED DATABASE db
+                    + "(?:(?:SCHEMA|DATABASE)\\s+(?:(EXTENDED|FORMATTED)\\s+)?"
+                    + "|(EXTENDED|FORMATTED)\\s+(?:SCHEMA|DATABASE)\\s+)"
+                    + "(" + IDENT + ")\\s*$");
     private static final Pattern SHOW_CREATE =
             Pattern.compile("(?i)^SHOW\\s+CREATE\\s+(TABLE|VIEW|DATABASE|SCHEMA)\\s+(" + QUALIFIED + ")(?:\\s+AS\\s+SEMI)?\\s*$");
     private static final Pattern SHOW_INDEXES =
@@ -83,6 +89,15 @@ final class AdminStatementHandler {
         m = SHOW_COLUMNS.matcher(s);
         if (m.matches()) {
             return Optional.of(describe(catalog, m.group(2), currentDatabase));
+        }
+
+        m = DESCRIBE_DATABASE.matcher(s);
+        if (m.matches()) {
+            // Spark 3.2: DESCRIBE {DATABASE|SCHEMA} [EXTENDED] name, both
+            // keyword orders accepted; group(3) is the name either way.
+            // groups: 1=DESCRIBE, 2=EXTENDED (suffix form), 3=EXTENDED (prefix form), 4=name
+            boolean extended = m.group(2) != null || m.group(3) != null;
+            return Optional.of(describeDatabase(catalog, unquoteQualified(m.group(4)), extended));
         }
 
         m = DESCRIBE.matcher(s);
@@ -298,6 +313,33 @@ final class AdminStatementHandler {
             if (c.name().equalsIgnoreCase(name)) return c;
         }
         return null;
+    }
+
+    /**
+     * Spark 3.2 output shape: one row with database_name / description /
+     * location; EXTENDED (or FORMATTED) adds a properties column listing
+     * the database properties as (k=v, ...) pairs.
+     */
+    private static Outcome describeDatabase(CatalogService catalog, String name, boolean extended) {
+        Catalog.Database db = catalog.catalog().getDatabase(name)
+                .orElseThrow(() -> new IllegalArgumentException("Database does not exist: " + name));
+        List<String> cols = new ArrayList<>(List.of("database_name", "description", "location"));
+        String props = db.properties().entrySet().stream()
+                .map(e -> "(" + e.getKey() + "," + e.getValue() + ")")
+                .reduce((a, b) -> a + ", " + b).orElse("");
+        if (extended) {
+            cols.add("properties");
+        }
+        List<Object> row = new ArrayList<>(cols.size());
+        row.add(db.name());
+        row.add(db.description() == null ? "" : db.description());
+        row.add(db.location() == null ? "" : db.location());
+        if (extended) {
+            row.add(props);
+        }
+        List<List<Object>> rows = new ArrayList<>(1);
+        rows.add(row);
+        return new Outcome(new DuckDbExecutor.QueryResult(cols, rows), null);
     }
 
     private static Outcome describe(CatalogService catalog, String qualified, String currentDatabase) {

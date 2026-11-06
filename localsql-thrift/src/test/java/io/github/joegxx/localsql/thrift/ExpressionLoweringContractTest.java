@@ -151,6 +151,45 @@ class ExpressionLoweringContractTest {
         assertTrue(sql.contains("TRY_CAST("), sql);
     }
 
+    @Test
+    void existsLowersToListFilter() throws Exception {
+        Relation rel = analyzeRewrite("SELECT exists(array(1, 2), x -> x > 1) FROM t");
+        io.github.joegxx.localsql.ir.expression.BinaryExpression b =
+                assertInstanceOf(io.github.joegxx.localsql.ir.expression.BinaryExpression.class, item(rel));
+        assertEquals(io.github.joegxx.localsql.ir.expression.BinaryExpression.Op.GT, b.op());
+        String sql = generate(rel);
+        assertTrue(sql.contains("list_filter("), sql);
+        assertTrue(sql.contains("x -> "), sql);
+    }
+
+    @Test
+    void zipWithSubstitutesLambdaVariables() throws Exception {
+        Relation rel = analyzeRewrite("SELECT zip_with(array(1, 2), array(10, 20), (x, y) -> x + y) FROM t");
+        String sql = generate(rel);
+        // variables become indexed list_extract over the two inputs
+        assertTrue(sql.contains("list_extract("), sql);
+        assertTrue(sql.contains("i -> "), sql);
+        assertTrue(!sql.contains("x + y"), sql);
+    }
+
+    @Test
+    void transformValuesPacksNamedStructs() throws Exception {
+        Relation rel = analyzeRewrite(
+                "SELECT transform_values(map('a', 1, 'b', 2), (k, v) -> v * 10) FROM t");
+        String sql = generate(rel);
+        assertTrue(sql.contains("map_from_entries("), sql);
+        assertTrue(sql.contains("key := "), sql);
+        assertTrue(!sql.contains("transform_values("), sql);
+    }
+
+    @Test
+    void aggregatePrependsZeroSeed() throws Exception {
+        Relation rel = analyzeRewrite("SELECT aggregate(array(1, 2), 0, (acc, x) -> acc + x) FROM t");
+        String sql = generate(rel);
+        assertTrue(sql.contains("list_reduce("), sql);
+        assertTrue(sql.contains("list_value(0), "), sql);
+    }
+
     private FunctionCall unwrapCall(Expression e) {
         if (e instanceof FunctionCall f) return f;
         if (e instanceof io.github.joegxx.localsql.ir.expression.Alias a) return unwrapCall(a.child());

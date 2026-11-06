@@ -19,16 +19,30 @@ public final class Catalog {
         }
     }
 
+    /**
+     * Logical table metadata. {@code physicalSchema} is the DuckDB schema the
+     * physical object actually lives in: {@code main} for the default
+     * database and legacy layouts, the database name for per-database
+     * schemas. Defaults to {@code main} so existing constructors keep the
+     * legacy single-schema layout.
+     */
     public record Table(long tableId, List<String> name, String tableType, List<Column> columns,
                         String location, String format, String comment,
-                        Map<String, String> properties, String metadataJson) {
+                        Map<String, String> properties, String metadataJson,
+                        String physicalSchema) {
         public Table(List<String> name, List<Column> columns, String location, String format) {
             this(0, name, "TABLE", columns, location, format, null, new LinkedHashMap<>(), null);
+        }
+        public Table(long tableId, List<String> name, String tableType, List<Column> columns,
+                     String location, String format, String comment,
+                     Map<String, String> properties, String metadataJson) {
+            this(tableId, name, tableType, columns, location, format, comment, properties, metadataJson, "main");
         }
         public Table {
             name = List.copyOf(name);
             columns = columns == null ? List.of() : List.copyOf(columns);
             properties = properties == null ? Map.of() : Map.copyOf(properties);
+            physicalSchema = physicalSchema == null || physicalSchema.isBlank() ? "main" : physicalSchema;
         }
         public String qualifiedName() { return String.join(".", name); }
         /** [t]->default; [db,t]/[catalog,db,t]->db; [catalog,db,schema,t]->db. */
@@ -141,7 +155,7 @@ public final class Catalog {
         Table t = removeTable(fromDb, fromTable);
         if (t == null) return;
         Table renamed = new Table(t.tableId(), List.of(toDb, toTable), t.tableType(), t.columns(),
-                t.location(), t.format(), t.comment(), t.properties(), t.metadataJson());
+                t.location(), t.format(), t.comment(), t.properties(), t.metadataJson(), t.physicalSchema());
         tables.put(renamed.qualifiedName().toLowerCase(), renamed);
         if (nextTableId <= t.tableId()) nextTableId = t.tableId() + 1;
     }

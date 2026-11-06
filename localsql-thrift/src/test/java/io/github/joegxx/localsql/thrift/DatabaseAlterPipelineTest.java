@@ -74,9 +74,38 @@ class DatabaseAlterPipelineTest {
         exec("ALTER TABLE t RENAME TO t2");
         assertThrows(Exception.class, () -> exec("SELECT * FROM t"));
         assertEquals(1, exec("SELECT * FROM t2").rows().size());
+        // runtime store: physical definition re-read from DuckDB metadata under the new name
+        var t2 = catalog.getTable("default", "t2").orElseThrow();
+        var tInfo = catalog.store().loadRuntimeInfo(t2.tableId()).orElseThrow();
+        assertEquals("t2", tInfo.duckTableName());
+        assertTrue(tInfo.createSql() != null && tInfo.createSql().contains("t2"),
+                "replay DDL should reference the new name: " + tInfo.createSql());
         exec("CREATE VIEW v AS SELECT * FROM t2");
         exec("ALTER VIEW v RENAME TO v2");
         assertEquals(1, exec("SELECT * FROM v2").rows().size());
+        var v2 = catalog.getTable("default", "v2").orElseThrow();
+        var vInfo = catalog.store().loadRuntimeInfo(v2.tableId()).orElseThrow();
+        assertEquals("v2", vInfo.duckTableName());
+        assertTrue(vInfo.createSql() != null && vInfo.createSql().contains("v2"),
+                "replay DDL should reference the new name: " + vInfo.createSql());
+    }
+
+    @Test
+    void failedMultiColumnAddLeavesNoPartialChange() throws Exception {
+        exec("CREATE TABLE t (id INT)");
+        exec("INSERT INTO t VALUES (1)");
+        // second column conflicts with the first: the physical ALTER fails
+        // mid-transaction, so neither column may land anywhere
+        assertThrows(Exception.class,
+                () -> exec("ALTER TABLE t ADD COLUMNS (name STRING, name STRING)"));
+        // memory: only the original column
+        assertEquals(1, catalog.getTable("default", "t").orElseThrow().columns().size());
+        // physical: only the original column, data intact
+        assertEquals(1, executor.execute("DESCRIBE t").rows().size());
+        assertEquals(1, exec("SELECT * FROM t").rows().size());
+        // a later valid add still works
+        exec("ALTER TABLE t ADD COLUMNS (name STRING)");
+        assertEquals(2, catalog.getTable("default", "t").orElseThrow().columns().size());
     }
 
     @Test
@@ -260,6 +289,48 @@ class DatabaseAlterPipelineTest {
     }
 
     @Test
+    void databasesSurviveRestart() throws Exception {
+        // empty database + properties with special characters
+        exec("CREATE DATABASE db_empty COMMENT 'desc with \\'quote\\''");
+        exec("CREATE DATABASE db_full COMMENT 'full db' LOCATION '/tmp/full' "
+                + "WITH DBPROPERTIES ('k1'='v1', 'k2'='a=b', 'k3'='multi line')");
+        exec("CREATE TABLE db_full.t (id INT)");
+
+        CatalogService reloaded = new CatalogService(new DuckDbCatalogStore(executor));
+        // empty database survives with its description
+        var empty = reloaded.catalog().getDatabase("db_empty").orElseThrow();
+        assertTrue(empty.description().contains("quote"));
+        // full database: description/location/properties all round-trip
+        var full = reloaded.catalog().getDatabase("db_full").orElseThrow();
+        assertEquals("/tmp/full", full.location());
+        assertEquals("v1", full.properties().get("k1"));
+        assertEquals("a=b", full.properties().get("k2"));
+        assertEquals("multi line", full.properties().get("k3"));
+        // and the table inside it too
+        assertTrue(reloaded.getTable("db_full", "t").isPresent());
+        // default is always present
+        assertTrue(reloaded.catalog().getDatabase("default").isPresent());
+
+        // ALTER properties persist
+        exec("ALTER DATABASE db_empty SET DBPROPERTIES ('alt'='yes')");
+        var reloaded2 = new CatalogService(new DuckDbCatalogStore(executor));
+        assertEquals("yes", reloaded2.catalog().getDatabase("db_empty").orElseThrow().properties().get("alt"));
+
+        // DROP persists
+        exec("DROP DATABASE db_empty");
+        var reloaded3 = new CatalogService(new DuckDbCatalogStore(executor));
+        assertTrue(reloaded3.catalog().getDatabase("db_empty").isEmpty());
+        // and db_full is untouched
+        assertTrue(reloaded3.catalog().getDatabase("db_full").isPresent());
+
+        // DROP CASCADE removes tables with the database
+        exec("DROP DATABASE db_full CASCADE");
+        var reloaded4 = new CatalogService(new DuckDbCatalogStore(executor));
+        assertTrue(reloaded4.catalog().getDatabase("db_full").isEmpty());
+        assertTrue(reloaded4.getTable("db_full", "t").isEmpty());
+    }
+
+    @Test
     void sessionDatabaseAndEscapedSchemaPattern() throws Exception {
         LocalSqlThriftService svc = new LocalSqlThriftService(catalog, new SqlPipeline(catalog, executor));
         var open = svc.OpenSession(
@@ -366,13 +437,35 @@ class DatabaseAlterPipelineTest {
         List<List<String>> rows = new ArrayList<>();
         var cols = res.getResults().getColumns();
         if (cols == null || cols.isEmpty()) return rows;
-        int n = cols.get(0).getStringVal().getValuesSize();
+        int n = channelCount(cols.get(0));
         for (int r = 0; r < n; r++) {
             List<String> row = new ArrayList<>();
-            for (var c : cols) row.add(c.getStringVal().getValues().get(r));
+            for (var c : cols) row.add(channelValue(c, r));
             rows.add(row);
         }
         return rows;
+    }
+
+    private static int channelCount(org.apache.hive.service.rpc.thrift.TColumn c) {
+        if (c.isSetStringVal()) return c.getStringVal().getValuesSize();
+        if (c.isSetI64Val()) return c.getI64Val().getValuesSize();
+        if (c.isSetI32Val()) return c.getI32Val().getValuesSize();
+        if (c.isSetDoubleVal()) return c.getDoubleVal().getValuesSize();
+        if (c.isSetBoolVal()) return c.getBoolVal().getValuesSize();
+        if (c.isSetByteVal()) return c.getByteVal().getValuesSize();
+        if (c.isSetI16Val()) return c.getI16Val().getValuesSize();
+        return 0;
+    }
+
+    private static String channelValue(org.apache.hive.service.rpc.thrift.TColumn c, int r) {
+        if (c.isSetStringVal()) return c.getStringVal().getValues().get(r);
+        if (c.isSetI64Val()) return String.valueOf(c.getI64Val().getValues().get(r));
+        if (c.isSetI32Val()) return String.valueOf(c.getI32Val().getValues().get(r));
+        if (c.isSetDoubleVal()) return String.valueOf(c.getDoubleVal().getValues().get(r));
+        if (c.isSetBoolVal()) return String.valueOf(c.getBoolVal().getValues().get(r));
+        if (c.isSetByteVal()) return String.valueOf(c.getByteVal().getValues().get(r));
+        if (c.isSetI16Val()) return String.valueOf(c.getI16Val().getValues().get(r));
+        return null;
     }
 
     private static List<String> fetchColumn(LocalSqlThriftService svc, TOperationHandle op, int col) {

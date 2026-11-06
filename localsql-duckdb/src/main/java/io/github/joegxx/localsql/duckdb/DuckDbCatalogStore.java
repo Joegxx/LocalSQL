@@ -115,6 +115,16 @@ public final class DuckDbCatalogStore implements CatalogStore {
             }
             executeUpdate("INSERT INTO catalog_schema_version VALUES (" + SCHEMA_VERSION + ")");
         }
+        ensureDefaultDatabase();
+    }
+
+    private void ensureDefaultDatabase() throws Exception {
+        DuckDbExecutor.QueryResult rs = executor.execute(
+                "SELECT count(*) FROM catalog_database WHERE lower(database_name) = 'default'");
+        long n = rs.rows().isEmpty() ? 0 : ((Number) rs.rows().get(0).get(0)).longValue();
+        if (n == 0) {
+            saveDatabase(new Catalog.Database("default", null, "default database"));
+        }
     }
 
     private boolean catalogDatabaseTableIsEmpty() throws Exception {
@@ -127,9 +137,10 @@ public final class DuckDbCatalogStore implements CatalogStore {
                 "SELECT DISTINCT database_name FROM catalog_table");
         for (List<Object> row : rs.rows()) {
             String name = asString(row.get(0));
-            if (name == null || name.isBlank()) continue;
+            if (name == null || name.isBlank() || "default".equalsIgnoreCase(name)) continue;
             saveDatabase(new Catalog.Database(name, null, name + " database"));
         }
+        // default must always exist, even for a legacy store with tables
         if (catalogDatabaseTableIsEmpty()) {
             saveDatabase(new Catalog.Database("default", null, "default database"));
         }
@@ -142,13 +153,15 @@ public final class DuckDbCatalogStore implements CatalogStore {
         // [t] / [db,t] / [catalog,db,t] / [catalog,db,schema,t]
         String catalogName;
         String databaseName;
-        String schemaName;
         switch (n.size()) {
-            case 1 -> { catalogName = "local"; databaseName = "default"; schemaName = databaseName; }
-            case 2 -> { catalogName = "local"; databaseName = n.get(0); schemaName = databaseName; }
-            case 3 -> { catalogName = n.get(0); databaseName = n.get(1); schemaName = databaseName; }
-            default -> { catalogName = n.get(0); databaseName = n.get(1); schemaName = n.get(2); }
+            case 1 -> { catalogName = "local"; databaseName = "default"; }
+            case 2 -> { catalogName = "local"; databaseName = n.get(0); }
+            case 3 -> { catalogName = n.get(0); databaseName = n.get(1); }
+            default -> { catalogName = n.get(0); databaseName = n.get(1); }
         }
+        // physicalSchema: where the DuckDB object actually lives (per-database
+        // schema, or main for the default database / legacy layouts)
+        String schemaName = table.physicalSchema() == null ? "main" : table.physicalSchema();
         String tableName = table.tableName();
         String tableType = table.tableType() == null ? "TABLE" : table.tableType();
         // Properties live exclusively in catalog_property rows; the legacy
@@ -307,28 +320,66 @@ public final class DuckDbCatalogStore implements CatalogStore {
                 "SELECT t.table_id, t.catalog_name, t.database_name, t.schema_name, t.table_name, "
                         + "t.table_type, t.comment, t.metadata_json FROM catalog_table t "
                         + whereClause + " ORDER BY t.table_id");
+        // Physical presence map: (schema, table) lowercased -> exists. Used to
+        // detect where each table's DuckDB object actually lives, because the
+        // stored schema_name column predates per-database schemas (legacy
+        // stores wrote the database name there for every table).
+        java.util.Set<String> physical = physicalObjectIndex();
         List<Catalog.Table> out = new ArrayList<>();
         for (List<Object> row : rs.rows()) {
             long id = ((Number) row.get(0)).longValue();
             String catalogName = asString(row.get(1));
             String databaseName = asString(row.get(2));
-            String schemaName = asString(row.get(3));
             String tableName = asString(row.get(4));
             String tableType = asString(row.get(5));
             String comment = asString(row.get(6));
             String metadataJson = asString(row.get(7));
 
-            List<String> name = schemaName != null && !schemaName.equals(databaseName)
-                    ? List.of(catalogName, databaseName, schemaName, tableName)
-                    : List.of(databaseName, tableName);
+            List<String> name = List.of(databaseName, tableName);
 
             List<Catalog.Column> cols = loadColumns(id);
             java.util.Map<String, String> props = loadProperties(id);
 
             out.add(new Catalog.Table(id, name, tableType == null ? "TABLE" : tableType,
-                    cols, null, "duckdb", comment, props, metadataJson));
+                    cols, null, "duckdb", comment, props, metadataJson,
+                    detectPhysicalSchema(databaseName, tableName, physical)));
         }
         return out;
+    }
+
+    /** (schema, table) pairs of non-internal DuckDB tables and views, lowercased. */
+    private java.util.Set<String> physicalObjectIndex() throws Exception {
+        java.util.Set<String> index = new java.util.HashSet<>();
+        try {
+            DuckDbExecutor.QueryResult rs = executor.execute(
+                    "SELECT schema_name, table_name FROM duckdb_tables() WHERE internal = false "
+                            + "UNION ALL SELECT schema_name, view_name FROM duckdb_views() WHERE internal = false");
+            for (List<Object> row : rs.rows()) {
+                index.add(asString(row.get(0)).toLowerCase() + "." + asString(row.get(1)).toLowerCase());
+            }
+        } catch (Exception ignore) {
+            // detection is best effort; fall back to the default layout below
+        }
+        return index;
+    }
+
+    /**
+     * Where this table's DuckDB object actually lives: a schema named after
+     * the database, or main (the default database and every legacy store).
+     * When nothing is found physically, keep the default layout for the
+     * database so the error surfaces as a missing table at query time.
+     */
+    private static String detectPhysicalSchema(String databaseName, String tableName,
+                                              java.util.Set<String> physical) {
+        String bare = tableName.toLowerCase(java.util.Locale.ROOT);
+        if (!"default".equalsIgnoreCase(databaseName)
+                && physical.contains(databaseName.toLowerCase(java.util.Locale.ROOT) + "." + bare)) {
+            return databaseName;
+        }
+        if (physical.contains("main." + bare)) {
+            return "main";
+        }
+        return "default".equalsIgnoreCase(databaseName) ? "main" : databaseName;
     }
 
     private java.util.Map<String, String> loadProperties(long tableId) throws Exception {

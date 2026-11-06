@@ -296,26 +296,37 @@ public final class SemanticAnalyzer {
         private Relation resolveTableScan(TableScan t) {
             List<String> parts = t.tableName();
             List<AttributeReference> base;
+            List<String> physical = new ArrayList<>(2);
             if (parts.size() == 1) {
                 CTERelation cte = scope.findCte(parts.get(0));
                 if (cte != null) {
                     base = new ArrayList<>(cte.output());
                 } else {
-                    base = resolveCatalogTable(scope.sessionDatabase(), parts.get(0), t);
+                    base = resolveCatalogTable(scope.sessionDatabase(), parts.get(0), physical);
                 }
             } else if (parts.size() == 2) {
-                base = resolveCatalogTable(parts.get(0), parts.get(1), t);
+                base = resolveCatalogTable(parts.get(0), parts.get(1), physical);
             } else {
-                base = resolveCatalogTable(parts.get(parts.size() - 2), parts.get(parts.size() - 1), t);
+                base = resolveCatalogTable(parts.get(parts.size() - 2), parts.get(parts.size() - 1), physical);
             }
             String qualifier = t.alias() != null ? t.alias() : parts.get(parts.size() - 1);
             List<AttributeReference> qualified = qualify(qualifier, base);
-            TableScan resolved = new TableScan(parts, qualified, t.alias());
+            // Resolved scans carry the physical location: [schema, table]
+            // (main-resident tables stay addressable by the bare name the
+            // generator emits). CTE references keep their original name.
+            List<String> resolvedParts = physical.isEmpty() ? parts : List.copyOf(physical);
+            TableScan resolved = new TableScan(resolvedParts, qualified, t.alias());
             resolved.setOutput(qualified);
             return resolved;
         }
 
-        private List<AttributeReference> resolveCatalogTable(String db, String table, TableScan t) {
+        /**
+         * Binds a catalog table's columns and records its physical location
+         * into {@code physicalParts} as {@code [schema, table]}. The schema
+         * is where the DuckDB object actually lives (per-database schema or
+         * main); the generator emits it as a schema prefix unless it is main.
+         */
+        private List<AttributeReference> resolveCatalogTable(String db, String table, List<String> physicalParts) {
             if (catalog.getDatabase(db).isEmpty()) {
                 throw new IllegalArgumentException(
                         "Database does not exist: " + db + " (referenced by table " + table + ")");
@@ -325,6 +336,10 @@ public final class SemanticAnalyzer {
                 throw new IllegalArgumentException("Table does not exist: " + db + "." + table);
             }
             Catalog.Table catalogTable = found.get();
+            physicalParts.clear();
+            physicalParts.add(catalogTable.physicalSchema() == null || catalogTable.physicalSchema().isBlank()
+                    ? "main" : catalogTable.physicalSchema());
+            physicalParts.add(table);
             List<AttributeReference> out = new ArrayList<>();
             for (Catalog.Column c : catalogTable.columns()) {
                 AttributeReference attr = new AttributeReference(c.name(), List.of(table));
@@ -389,10 +404,16 @@ public final class SemanticAnalyzer {
             Relation child = resolveRelation(a.child());
             registerOutputs(child, childScope);
 
+            List<Expression> aggExprs = new ArrayList<>();
+            for (Expression e : a.resultExpressions()) aggExprs.add(resolveExpr(e, childScope));
             List<Expression> grouping = new ArrayList<>();
             for (Expression e : a.groupingExpressions()) grouping.add(resolveExpr(e, childScope));
-            List<Expression> aggExprs = new ArrayList<>();
-            for (Expression e : a.aggregateExpressions()) aggExprs.add(resolveExpr(e, childScope));
+            // GROUP BY ordinals refer to the select list (Spark semantics):
+            // translate them to the referenced result expression so the IR
+            // never depends on downstream ordinal interpretation
+            for (int i = 0; i < grouping.size(); i++) {
+                grouping.set(i, resolveGroupByOrdinal(grouping.get(i), aggExprs));
+            }
 
             // HAVING sees select aliases first (Spark semantics), then the
             // raw FROM columns beneath the aggregation. Same explicit
@@ -415,14 +436,121 @@ public final class SemanticAnalyzer {
                 List<List<Expression>> sets = new ArrayList<>();
                 for (List<Expression> set : ga.sets()) {
                     List<Expression> rs = new ArrayList<>();
-                    for (Expression e : set) rs.add(resolveExpr(e, childScope));
+                    for (Expression e : set) rs.add(resolveGroupByOrdinal(resolveExpr(e, childScope), aggExprs));
                     sets.add(rs);
                 }
                 analytics.add(new Aggregate.GroupingAnalytics(ga.kind(), sets));
             }
+            validateGroupBy(aggExprs, grouping, analytics);
             Aggregate resolved = new Aggregate(child, grouping, aggExprs, having, analytics);
             resolved.setOutput(outputOf(aggExprs));
             return resolved;
+        }
+
+        /**
+         * {@code GROUP BY 2} refers to the second select item: replace the
+         * ordinal literal with the (alias-unwrapped) resolved result
+         * expression. Ordinals outside the result list are passed through
+         * and fail downstream, mirroring Spark.
+         */
+        private static Expression resolveGroupByOrdinal(Expression e, List<Expression> resultExprs) {
+            if (e instanceof Literal l && l.kind() == Literal.Kind.INTEGER && l.value() instanceof Number n) {
+                int ord = n.intValue();
+                if (ord >= 1 && ord <= resultExprs.size()) {
+                    Expression target = resultExprs.get(ord - 1);
+                    return target instanceof Alias al ? al.child() : target;
+                }
+            }
+            return e;
+        }
+
+        /**
+         * Spark semantics: every result expression of an aggregate must be
+         * functionally determined by the GROUP BY keys. Following Catalyst's
+         * checkAnalysis: a subtree that structurally equals a grouping
+         * expression is covered (stop descending); a bare attribute must
+         * itself be a grouping expression; aggregate and window calls are
+         * covered without descending into their arguments. Functions unknown
+         * to the catalog (e.g. grouping()) and subqueries are passed — their
+         * grouping rules are out of scope here.
+         */
+        private void validateGroupBy(List<Expression> resultExprs, List<Expression> grouping,
+                                      List<Aggregate.GroupingAnalytics> analytics) {
+            java.util.Set<String> keys = new java.util.HashSet<>();
+            for (Expression g : grouping) keys.add(unwrapAlias(g).toString());
+            for (Aggregate.GroupingAnalytics ga : analytics) {
+                for (List<Expression> set : ga.sets()) {
+                    for (Expression e : set) keys.add(unwrapAlias(e).toString());
+                }
+            }
+            for (Expression r : resultExprs) {
+                Expression base = unwrapAlias(r);
+                if (base instanceof Star) continue;
+                if (coveredByGrouping(base, keys)) continue;
+                throw new IllegalArgumentException("Column " + base
+                        + " must appear in the GROUP BY clause or be used in an aggregate function");
+            }
+        }
+
+        private static Expression unwrapAlias(Expression e) {
+            return e instanceof Alias a ? a.child() : e;
+        }
+
+        /** Catalyst-style upward coverage check (see {@link #validateGroupBy}). */
+        private boolean coveredByGrouping(Expression e, java.util.Set<String> keys) {
+            if (e == null) return true;
+            if (keys.contains(e.toString())) return true;
+            if (e instanceof ScalarSubquery || e instanceof Subquery || e instanceof Lambda) return true;
+            if (e instanceof FunctionCall f) {
+                if (f.windowSpec() != null) return true;
+                Optional<FunctionInfo> info = functions == null ? Optional.empty() : functions.lookup(f.name());
+                if (info.isEmpty()) return true;
+                FunctionKind kind = info.get().kind();
+                if (kind == FunctionKind.AGGREGATE || kind == FunctionKind.WINDOW) return true;
+                for (Expression a : f.arguments()) {
+                    if (!coveredByGrouping(a, keys)) return false;
+                }
+                return true;
+            }
+            if (e instanceof Alias a) return coveredByGrouping(a.child(), keys);
+            if (e instanceof AttributeReference || e instanceof Identifier) return false;
+            if (e instanceof BinaryExpression b) {
+                return coveredByGrouping(b.left(), keys) && coveredByGrouping(b.right(), keys);
+            }
+            if (e instanceof UnaryExpression u) return coveredByGrouping(u.child(), keys);
+            if (e instanceof Cast c) return coveredByGrouping(c.child(), keys);
+            if (e instanceof CaseWhen c) {
+                for (CaseWhen.WhenBranch b : c.branches()) {
+                    if (!coveredByGrouping(b.condition(), keys) || !coveredByGrouping(b.value(), keys)) return false;
+                }
+                return coveredByGrouping(c.elseValue(), keys);
+            }
+            if (e instanceof InList il) {
+                if (!coveredByGrouping(il.value(), keys)) return false;
+                for (Expression item : il.list()) {
+                    if (!coveredByGrouping(item, keys)) return false;
+                }
+                return true;
+            }
+            if (e instanceof ArrayExpr ae) {
+                for (Expression el : ae.elements()) {
+                    if (!coveredByGrouping(el, keys)) return false;
+                }
+                return true;
+            }
+            if (e instanceof StructExpr se) {
+                for (Expression fld : se.fields()) {
+                    if (!coveredByGrouping(fld, keys)) return false;
+                }
+                return true;
+            }
+            if (e instanceof MapExpr me) {
+                for (Map.Entry<Expression, Expression> en : me.entries()) {
+                    if (!coveredByGrouping(en.getKey(), keys) || !coveredByGrouping(en.getValue(), keys)) return false;
+                }
+                return true;
+            }
+            return true;
         }
 
         /**
@@ -614,7 +742,8 @@ public final class SemanticAnalyzer {
                     throw new IllegalArgumentException(
                             "Column does not exist in FROM clause: " + id.name());
                 }
-                return new AttributeReference(resolved.name(), resolved.qualifier());
+                // resolved carries the bound data type; rebuild would drop it
+                return resolved;
             }
             if (expr instanceof AttributeReference a) {
                 if (!a.qualifier().isEmpty()) {

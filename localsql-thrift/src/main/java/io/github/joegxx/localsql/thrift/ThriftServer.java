@@ -94,13 +94,17 @@ public final class ThriftServer {
 
     public DuckDbExecutor.QueryResult executeSparkSql(String sql) throws SQLException {
         LOG.info("Executing Spark SQL: {}", sql);
-        var admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDatabase());
-        if (admin.isPresent()) {
-            sessionDatabase = admin.get().newCurrentDatabase() != null
-                    ? admin.get().newCurrentDatabase() : sessionDatabase;
-            return admin.get().result();
+        // admin readers share the pipeline lock so introspection never observes
+        // a DDL's intermediate in-memory state
+        synchronized (pipeline) {
+            var admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDatabase());
+            if (admin.isPresent()) {
+                sessionDatabase = admin.get().newCurrentDatabase() != null
+                        ? admin.get().newCurrentDatabase() : sessionDatabase;
+                return admin.get().result();
+            }
+            return pipeline.execute(sql, currentDatabase());
         }
-        return pipeline.execute(sql, currentDatabase());
     }
 
     private String currentDatabase() {

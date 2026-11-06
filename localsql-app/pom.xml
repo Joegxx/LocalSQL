@@ -47,6 +47,59 @@
             <groupId>io.github.joegxx.localsql</groupId>
             <artifactId>localsql-udf-runtime</artifactId>
         </dependency>
+        <!-- F3: the in-process Hive gateway needs the Hive UDF API at runtime.
+             udf-runtime marks it provided (the old worker-jar plan); until a
+             separate worker exists, runtime.jar carries it. Transitive deps are
+             excluded: the API classes live in the hive-exec jar itself and user
+             UDF JARs bring their own hadoop. -->
+        <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-exec</artifactId>
+            <version>${hive.version}</version>
+            <scope>runtime</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Writable types (Text, IntWritable...) used by the simple-UDF and
+             object-inspector conversion paths; user UDF JARs carry anything
+             beyond these. -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>3.3.4</version>
+            <scope>runtime</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- hadoop-common's Configuration XML parsing pulls these in at runtime
+             (WritableComparator → Text → Configuration.loadResource); without
+             them simple-UDF calls fail with NoClassDefFoundError. -->
+        <dependency>
+            <groupId>com.fasterxml.woodstox</groupId>
+            <artifactId>woodstox-core</artifactId>
+            <version>5.0.3</version>
+            <scope>runtime</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.codehaus.woodstox</groupId>
+            <artifactId>stax2-api</artifactId>
+            <version>4.2.1</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>

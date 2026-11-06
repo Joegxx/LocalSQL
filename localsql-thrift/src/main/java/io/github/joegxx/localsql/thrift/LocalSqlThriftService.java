@@ -49,13 +49,19 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         }
     }
 
+    /** All-STRING columns for hand-built metadata results (the legacy shape). */
+    private static List<DuckDbExecutor.ColMeta> stringMetas(String... names) {
+        return java.util.Arrays.stream(names).map(DuckDbExecutor.ColMeta::string).toList();
+    }
+
     private static final class OperationState {
         final TOperationHandle handle;
-        final List<String> columns;
+        final List<DuckDbExecutor.ColMeta> columns;
         final List<List<Object>> rows;
         boolean fetched;
         int fetchOffset = 0;
-        OperationState(TOperationHandle handle, List<String> columns, List<List<Object>> rows, boolean fetched) {
+        OperationState(TOperationHandle handle, List<DuckDbExecutor.ColMeta> columns,
+                       List<List<Object>> rows, boolean fetched) {
             this.handle = handle;
             this.columns = columns;
             this.rows = rows;
@@ -125,22 +131,27 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         LOG.info("ExecuteStatement [session={}, db={}]: {}", sessionId, currentDb, sql);
         TOperationHandle opHandle = newHandle(TOperationType.EXECUTE_STATEMENT, true);
         try {
-            // admin/introspection statements (SHOW/DESCRIBE/USE) that IDEs send
-            var admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDb);
-            if (admin.isPresent()) {
-                DuckDbExecutor.QueryResult result = admin.get().result();
-                if (admin.get().newCurrentDatabase() != null && session != null) {
-                    session.currentDatabase = admin.get().newCurrentDatabase();
+            // admin/introspection statements (SHOW/DESCRIBE/USE) that IDEs send;
+            // sharing the pipeline lock keeps them from observing a DDL's
+            // intermediate in-memory state
+            java.util.Optional<AdminStatementHandler.Outcome> admin;
+            synchronized (pipeline) {
+                admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDb);
+                if (admin.isPresent()) {
+                    DuckDbExecutor.QueryResult result = admin.get().result();
+                    if (admin.get().newCurrentDatabase() != null && session != null) {
+                        session.currentDatabase = admin.get().newCurrentDatabase();
+                    }
+                    LOG.info("Admin statement handled: {} row(s)", result.rows().size());
+                    operations.put(guid(opHandle), new OperationState(opHandle, result.colMetas(), result.rows(), false));
+                } else {
+                    DuckDbExecutor.QueryResult result = pipeline.execute(sql, currentDb);
+                    operations.put(guid(opHandle), new OperationState(opHandle, result.colMetas(), result.rows(), false));
                 }
-                LOG.info("Admin statement handled: {} row(s)", result.rows().size());
-                operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
-            } else {
-                DuckDbExecutor.QueryResult result = pipeline.execute(sql, currentDb);
-                operations.put(guid(opHandle), new OperationState(opHandle, result.columns(), result.rows(), false));
             }
         } catch (Exception e) {
             LOG.error("Execute failed [session={}]: {}", sessionId, sql, e);
-            operations.put(guid(opHandle), new OperationState(opHandle, List.of("error"), List.of(List.of(e.getMessage())), false));
+            operations.put(guid(opHandle), new OperationState(opHandle, stringMetas("error"), List.of(List.of(e.getMessage())), false));
             TExecuteStatementResp resp = new TExecuteStatementResp(error(e.getMessage()));
             resp.setOperationHandle(opHandle);
             return resp;
@@ -169,8 +180,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         };
         for (Object[] t : types) rows.add(nullableRow(t));
         TOperationHandle h = newHandle(TOperationType.GET_TYPE_INFO, true);
-        operations.put(guid(h), new OperationState(h,
-                List.of("TYPE_NAME", "DATA_TYPE", "PRECISION", "LITERAL_PREFIX", "LITERAL_SUFFIX",
+        operations.put(guid(h), new OperationState(h, stringMetas("TYPE_NAME", "DATA_TYPE", "PRECISION", "LITERAL_PREFIX", "LITERAL_SUFFIX",
                         "CREATE_PARAMS", "NULLABLE", "CASE_SENSITIVE", "SEARCHABLE", "UNSIGNED_ATTRIBUTE",
                         "FIXED_PREC_SCALE", "AUTO_INCREMENT"),
                 rows, false));
@@ -182,7 +192,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     @Override
     public TGetCatalogsResp GetCatalogs(TGetCatalogsReq req) {
         TOperationHandle h = newHandle(TOperationType.GET_CATALOGS, true);
-        operations.put(guid(h), new OperationState(h, List.of("TABLE_CAT"),
+        operations.put(guid(h), new OperationState(h, stringMetas("TABLE_CAT"),
                 List.of(List.of("spark_catalog")), false));
         TGetCatalogsResp r = new TGetCatalogsResp(ok());
         r.setOperationHandle(h);
@@ -200,7 +210,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             }
         }
         TOperationHandle h = newHandle(TOperationType.GET_SCHEMAS, true);
-        operations.put(guid(h), new OperationState(h, List.of("TABLE_SCHEM", "TABLE_CATALOG"), rows, false));
+        operations.put(guid(h), new OperationState(h, stringMetas("TABLE_SCHEM", "TABLE_CATALOG"), rows, false));
         TGetSchemasResp r = new TGetSchemasResp(ok());
         r.setOperationHandle(h);
         return r;
@@ -226,8 +236,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                     t.comment(), null, null, null, null, null));
         }
         TOperationHandle h = newHandle(TOperationType.GET_TABLES, true);
-        operations.put(guid(h), new OperationState(h,
-                List.of("TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "TABLE_TYPE", "REMARKS",
+        operations.put(guid(h), new OperationState(h, stringMetas("TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "TABLE_TYPE", "REMARKS",
                         "TYPE_NAME", "SELF_REFERENCING_COL_NAME", "REF_GENERATION"),
                 rows, false));
         TGetTablesResp r = new TGetTablesResp(ok());
@@ -238,7 +247,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     @Override
     public TGetTableTypesResp GetTableTypes(TGetTableTypesReq req) {
         TOperationHandle h = newHandle(TOperationType.GET_TABLE_TYPES, true);
-        operations.put(guid(h), new OperationState(h, List.of("TABLE_TYPE"),
+        operations.put(guid(h), new OperationState(h, stringMetas("TABLE_TYPE"),
                 List.of(List.of("TABLE")), false));
         TGetTableTypesResp r = new TGetTableTypesResp(ok());
         r.setOperationHandle(h);
@@ -270,8 +279,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             pos = 1;
         }
         TOperationHandle h = newHandle(TOperationType.GET_COLUMNS, true);
-        operations.put(guid(h), new OperationState(h,
-                List.of("TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "COLUMN_NAME", "DATA_TYPE",
+        operations.put(guid(h), new OperationState(h, stringMetas("TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "COLUMN_NAME", "DATA_TYPE",
                         "TYPE_NAME", "COLUMN_SIZE", "BUFFER_LENGTH", "DECIMAL_DIGITS", "NUM_PREC_RADIX",
                         "NULLABLE", "REMARKS", "COLUMN_DEF", "SQL_DATA_TYPE", "SQL_DATETIME_SUB",
                         "CHAR_OCTET_LENGTH", "ORDINAL_POSITION", "IS_NULLABLE", "SCOPE_CATALOG",
@@ -302,8 +310,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     @Override
     public TGetFunctionsResp GetFunctions(TGetFunctionsReq req) {
         TOperationHandle h = newHandle(TOperationType.GET_FUNCTIONS, true);
-        operations.put(guid(h), new OperationState(h,
-                List.of("FUNCTION_CAT", "FUNCTION_SCHEM", "FUNCTION_NAME", "REMARKS", "FUNCTION_TYPE", "SPECIFIC_NAME"),
+        operations.put(guid(h), new OperationState(h, stringMetas("FUNCTION_CAT", "FUNCTION_SCHEM", "FUNCTION_NAME", "REMARKS", "FUNCTION_TYPE", "SPECIFIC_NAME"),
                 List.of(), false));
         TGetFunctionsResp r = new TGetFunctionsResp(ok());
         r.setOperationHandle(h);
@@ -346,7 +353,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         TTableSchema schema = new TTableSchema();
         if (op != null) {
             for (int i = 0; i < op.columns.size(); i++) {
-                schema.addToColumns(new TColumnDesc(op.columns.get(i), stringType(), i));
+                schema.addToColumns(new TColumnDesc(op.columns.get(i).name(),
+                        typeDesc(op.columns.get(i)), i));
             }
         }
         resp.setSchema(schema);
@@ -414,30 +422,185 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         return new TSetClientInfoResp(ok());
     }
 
-    private TRowSet toRowSet(List<String> columns, List<List<Object>> rows) {
+    /**
+     * Columnar serialization with the channel matching each column's
+     * metadata type (HiveServer2 clients pick the union branch from the
+     * reported type; a mismatch silently reads NULL). TIMESTAMP, DATE,
+     * DECIMAL and complex types stay in the string channel like Hive does.
+     */
+    private TRowSet toRowSet(List<DuckDbExecutor.ColMeta> columns, List<List<Object>> rows) {
         TRowSet rowSet = new TRowSet(0, new ArrayList<>());
         List<TColumn> tcols = new ArrayList<>();
+        int rowCount = rows.size();
         for (int c = 0; c < columns.size(); c++) {
-            List<String> values = new ArrayList<>();
-            byte[] nulls = new byte[(rows.size() + 7) / 8];
-            for (int r = 0; r < rows.size(); r++) {
-                Object v = rows.get(r).size() > c ? rows.get(r).get(c) : null;
-                if (v == null) {
-                    nulls[r / 8] |= (byte) (1 << (r % 8));
-                    values.add("");
-                } else {
-                    values.add(v.toString());
+            byte[] nulls = new byte[(rowCount + 7) / 8];
+            TColumn col = new TColumn();
+            switch (columns.get(c).sqlType()) {
+                case Types.BOOLEAN -> {
+                    List<Boolean> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add(false);
+                        } else {
+                            values.add(((Boolean) v) || "true".equalsIgnoreCase(String.valueOf(v)));
+                        }
+                    }
+                    TBoolColumn bc = new TBoolColumn();
+                    bc.setValues(values);
+                    bc.setNulls(ByteBuffer.wrap(nulls));
+                    col.setBoolVal(bc);
+                }
+                case Types.TINYINT -> {
+                    List<Byte> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add((byte) 0);
+                        } else {
+                            values.add(((Number) v).byteValue());
+                        }
+                    }
+                    TByteColumn byc = new TByteColumn();
+                    byc.setValues(values);
+                    byc.setNulls(ByteBuffer.wrap(nulls));
+                    col.setByteVal(byc);
+                }
+                case Types.SMALLINT -> {
+                    List<Short> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add((short) 0);
+                        } else {
+                            values.add(((Number) v).shortValue());
+                        }
+                    }
+                    TI16Column ic = new TI16Column();
+                    ic.setValues(values);
+                    ic.setNulls(ByteBuffer.wrap(nulls));
+                    col.setI16Val(ic);
+                }
+                case Types.INTEGER -> {
+                    List<Integer> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add(0);
+                        } else {
+                            values.add(((Number) v).intValue());
+                        }
+                    }
+                    TI32Column ic = new TI32Column();
+                    ic.setValues(values);
+                    ic.setNulls(ByteBuffer.wrap(nulls));
+                    col.setI32Val(ic);
+                }
+                case Types.BIGINT -> {
+                    List<Long> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add(0L);
+                        } else {
+                            values.add(((Number) v).longValue());
+                        }
+                    }
+                    TI64Column ic = new TI64Column();
+                    ic.setValues(values);
+                    ic.setNulls(ByteBuffer.wrap(nulls));
+                    col.setI64Val(ic);
+                }
+                case Types.FLOAT, Types.DOUBLE, Types.REAL -> {
+                    List<Double> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add(0d);
+                        } else {
+                            values.add(((Number) v).doubleValue());
+                        }
+                    }
+                    TDoubleColumn dc = new TDoubleColumn();
+                    dc.setValues(values);
+                    dc.setNulls(ByteBuffer.wrap(nulls));
+                    col.setDoubleVal(dc);
+                }
+                default -> {
+                    List<String> values = new ArrayList<>(rowCount);
+                    for (int r = 0; r < rowCount; r++) {
+                        Object v = cell(rows, r, c);
+                        if (v == null) {
+                            nulls[r / 8] |= (byte) (1 << (r % 8));
+                            values.add("");
+                        } else {
+                            values.add(String.valueOf(v));
+                        }
+                    }
+                    TStringColumn sc = new TStringColumn();
+                    sc.setValues(values);
+                    sc.setNulls(ByteBuffer.wrap(nulls));
+                    col.setStringVal(sc);
                 }
             }
-            TStringColumn sc = new TStringColumn();
-            sc.setValues(values);
-            sc.setNulls(ByteBuffer.wrap(nulls));
-            TColumn col = new TColumn();
-            col.setStringVal(sc);
             tcols.add(col);
         }
         rowSet.setColumns(tcols);
         return rowSet;
+    }
+
+    private static Object cell(List<List<Object>> rows, int r, int c) {
+        return rows.get(r).size() > c ? rows.get(r).get(c) : null;
+    }
+
+    /**
+     * JDBC sqlType -> HiveServer2 TTypeId. DECIMAL carries precision/scale
+     * qualifiers; types with no HiveServer2 equivalent fall back to STRING
+     * (the value stays in the string channel, so both ends stay consistent).
+     */
+    private TTypeDesc typeDesc(DuckDbExecutor.ColMeta col) {
+        TTypeId typeId = switch (col.sqlType()) {
+            case Types.BOOLEAN -> TTypeId.BOOLEAN_TYPE;
+            case Types.TINYINT -> TTypeId.TINYINT_TYPE;
+            case Types.SMALLINT -> TTypeId.SMALLINT_TYPE;
+            case Types.INTEGER -> TTypeId.INT_TYPE;
+            case Types.BIGINT -> TTypeId.BIGINT_TYPE;
+            case Types.FLOAT, Types.REAL -> TTypeId.FLOAT_TYPE;
+            case Types.DOUBLE -> TTypeId.DOUBLE_TYPE;
+            case Types.NUMERIC, Types.DECIMAL -> TTypeId.DECIMAL_TYPE;
+            case Types.DATE -> TTypeId.DATE_TYPE;
+            case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> TTypeId.TIMESTAMP_TYPE;
+            case Types.VARCHAR -> TTypeId.VARCHAR_TYPE;
+            case Types.CHAR -> TTypeId.CHAR_TYPE;
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> TTypeId.BINARY_TYPE;
+            default -> TTypeId.STRING_TYPE;
+        };
+        TPrimitiveTypeEntry prim = new TPrimitiveTypeEntry(typeId);
+        if (typeId == TTypeId.DECIMAL_TYPE) {
+            Map<String, TTypeQualifierValue> quals = new java.util.HashMap<>();
+            quals.put("precision", tLiteral(String.valueOf(Math.max(col.precision(), 1))));
+            quals.put("scale", tLiteral(String.valueOf(Math.max(col.scale(), 0))));
+            TTypeQualifiers qualifiers = new TTypeQualifiers();
+            qualifiers.setQualifiers(quals);
+            prim.setTypeQualifiers(qualifiers);
+        }
+        TTypeEntry entry = new TTypeEntry();
+        entry.setPrimitiveEntry(prim);
+        TTypeDesc td = new TTypeDesc();
+        td.addToTypes(entry);
+        return td;
+    }
+
+    private static TTypeQualifierValue tLiteral(String value) {
+        TTypeQualifierValue q = new TTypeQualifierValue();
+        q.setStringValue(value);
+        return q;
     }
 
     private TTypeDesc stringType() {

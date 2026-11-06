@@ -44,6 +44,8 @@ public final class Main {
         String manifest = flag(args, "--manifest");
         String failures = flag(args, "--failures", "import-failures.txt");
         String udfConfigPath = flag(args, "--udf-config");
+        String udfGatewayMode = flag(args, "--udf-gateway", "in-process");
+        String udfWorkerXmx = flag(args, "--udf-worker-xmx");
         String functionMapPath = flag(args, "--function-map");
         int port = port(args, 10000);
 
@@ -52,11 +54,14 @@ public final class Main {
         io.github.joegxx.localsql.thrift.UdfSupport support = null;
         if (udfConfigPath != null) {
             var config = io.github.joegxx.localsql.udf.runtime.UdfConfigLoader.load(Paths.get(udfConfigPath));
+            io.github.joegxx.localsql.udf.api.UdfGateway gateway =
+                    "worker".equalsIgnoreCase(udfGatewayMode)
+                            ? new io.github.joegxx.localsql.udf.runtime.UdfWorkerGateway(null, udfWorkerXmx)
+                            : new io.github.joegxx.localsql.udf.runtime.HiveUdfGateway();
             support = new io.github.joegxx.localsql.thrift.UdfSupport(
-                    config.registry(), new io.github.joegxx.localsql.udf.runtime.HiveUdfGateway(),
-                    config.timeoutMillis());
-            LOG.info("Loaded {} UDF definitions from {} (timeout {}ms)",
-                    config.registry().definitions().size(), udfConfigPath, config.timeoutMillis());
+                    config.registry(), gateway, config.timeoutMillis());
+            LOG.info("Loaded {} UDF definitions from {} (gateway {}, timeout {}ms)",
+                    config.registry().definitions().size(), udfConfigPath, udfGatewayMode, config.timeoutMillis());
         }
 
         io.github.joegxx.localsql.duckdb.DuckDbSqlGenerator generator = null;

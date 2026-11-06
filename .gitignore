@@ -29,5 +29,7 @@ target/
 # IntelliJ
 out/
 .idea/
-!/localsql-data/
+# Local sandbox data (absolute symlink to a machine-local directory) and docs drafts
+/localsql-data
+/new.md
 .DS_Store

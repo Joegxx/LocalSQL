@@ -363,7 +363,8 @@ class DdlDmlPipelineTest {
                     new TFetchResultsReq(ins.getOperationHandle(), TFetchOrientation.FETCH_FIRST, 10));
             assertEquals(TStatusCode.SUCCESS_STATUS, fetch.getStatus().getStatusCode());
             assertEquals(1, fetch.getResults().getColumns().size());
-            assertEquals(List.of("2"), fetch.getResults().getColumns().get(0).getStringVal().getValues());
+            // DML count reports BIGINT: the value rides the i64 channel now
+            assertEquals(List.of(2L), fetch.getResults().getColumns().get(0).getI64Val().getValues());
             client.CloseSession(new TCloseSessionReq(open.getSessionHandle()));
         }
     }

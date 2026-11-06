@@ -80,14 +80,11 @@ final class ThriftQueryRunner implements AutoCloseable {
             List<TColumn> cols = res.getResults().getColumns();
             List<List<String>> rows = new ArrayList<>();
             if (cols == null || cols.isEmpty()) return rows;
-            int n = cols.get(0).getStringVal().getValuesSize();
+            int n = valueCount(cols.get(0));
             for (int r = 0; r < n; r++) {
                 List<String> row = new ArrayList<>(cols.size());
                 for (TColumn c : cols) {
-                    TStringColumn sc = c.getStringVal();
-                    byte[] nulls = sc.getNulls() != null ? sc.getNulls() : new byte[0];
-                    boolean isNull = nulls.length > r / 8 && (nulls[r / 8] & (1 << (r % 8))) != 0;
-                    row.add(isNull ? null : sc.getValues().get(r));
+                    row.add(cellValue(c, r));
                 }
                 rows.add(row);
             }
@@ -95,6 +92,47 @@ final class ThriftQueryRunner implements AutoCloseable {
         } finally {
             client.CloseOperation(new TCloseOperationReq(op));
         }
+    }
+
+    private static int valueCount(TColumn c) {
+        if (c.isSetStringVal()) return c.getStringVal().getValuesSize();
+        if (c.isSetI64Val()) return c.getI64Val().getValuesSize();
+        if (c.isSetI32Val()) return c.getI32Val().getValuesSize();
+        if (c.isSetDoubleVal()) return c.getDoubleVal().getValuesSize();
+        if (c.isSetBoolVal()) return c.getBoolVal().getValuesSize();
+        if (c.isSetByteVal()) return c.getByteVal().getValuesSize();
+        if (c.isSetI16Val()) return c.getI16Val().getValuesSize();
+        return 0;
+    }
+
+    /** Cell as text with the null bitmap applied (channels match the metadata type). */
+    private static String cellValue(TColumn c, int r) {
+        if (c.isSetStringVal()) {
+            return nullBit(c.getStringVal().getNulls(), r) ? null : c.getStringVal().getValues().get(r);
+        }
+        if (c.isSetI64Val()) {
+            return nullBit(c.getI64Val().getNulls(), r) ? null : String.valueOf(c.getI64Val().getValues().get(r));
+        }
+        if (c.isSetI32Val()) {
+            return nullBit(c.getI32Val().getNulls(), r) ? null : String.valueOf(c.getI32Val().getValues().get(r));
+        }
+        if (c.isSetDoubleVal()) {
+            return nullBit(c.getDoubleVal().getNulls(), r) ? null : String.valueOf(c.getDoubleVal().getValues().get(r));
+        }
+        if (c.isSetBoolVal()) {
+            return nullBit(c.getBoolVal().getNulls(), r) ? null : String.valueOf(c.getBoolVal().getValues().get(r));
+        }
+        if (c.isSetByteVal()) {
+            return nullBit(c.getByteVal().getNulls(), r) ? null : String.valueOf(c.getByteVal().getValues().get(r));
+        }
+        if (c.isSetI16Val()) {
+            return nullBit(c.getI16Val().getNulls(), r) ? null : String.valueOf(c.getI16Val().getValues().get(r));
+        }
+        return null;
+    }
+
+    private static boolean nullBit(byte[] nulls, int r) {
+        return nulls != null && nulls.length > r / 8 && (nulls[r / 8] & (1 << (r % 8))) != 0;
     }
 
     @Override

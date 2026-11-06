@@ -73,7 +73,19 @@ final class SqlPipeline {
         this.udfSplitter = udfSupport == null ? null : new UdfProjectionSplitter(udfSupport.registry());
         this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
         this.generator = generator == null ? new DuckDbSqlGenerator() : generator;
-        this.rewriter = new RewriteEngine(reservedFunctionNames());
+        this.rewriter = new RewriteEngine(reservedFunctionNames(), udtfGeneratorNames());
+    }
+
+    /** Registered UDTF source names; their LATERAL VIEW generators pass lowering. */
+    private java.util.Set<String> udtfGeneratorNames() {
+        if (udfSupport == null) return java.util.Set.of();
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (var def : udfSupport.registry().definitions()) {
+            if (def.kind() == io.github.joegxx.localsql.udf.api.UdfKind.TABLE) {
+                names.add(def.name().toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        return names;
     }
 
     /**
@@ -387,7 +399,7 @@ final class SqlPipeline {
             inTransaction(() -> {
                 catalogService.dropTable(db, name);
                 executor.run((dr.view() ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ")
-                        + DuckDbSqlGenerator.quote(name));
+                        + physRef(existing.physicalSchema(), name));
             });
         } catch (SQLException e) {
             throw new SQLException("Failed to drop catalog entry for " + name + ": " + e.getMessage(), e);
@@ -397,17 +409,22 @@ final class SqlPipeline {
 
     private DuckDbExecutor.QueryResult executeInsert(Insert stmt) throws SQLException {
         Insert i = (Insert) analyzer.analyze(stmt, sessionDatabase);
-        rewriter.rewrite(i.query());
-        String table = bare(i.tableName());
+        // rewrite returns a new tree; the original must not be reused
+        i = new Insert(i.tableName(), i.overwrite(), i.columns(), rewriter.rewrite(i.query()));
+        String bareTable = i.tableName().get(i.tableName().size() - 1);
+        String schema = physSchemaOf(databaseOf(i.tableName()), bareTable);
+        String table = physRef(schema, bareTable);
         boolean tx = i.overwrite();
         if (tx) executor.run("BEGIN");
         try {
             if (tx) executor.run("DELETE FROM " + table);
-            String sql = generator.generateInsert(i);
+            String sql = generator.generateInsert(i, schema);
             LOG.info("Translated to DuckDB SQL: {}", sql);
             int n = executor.executeUpdate(sql);
             if (tx) executor.run("COMMIT");
-            return new DuckDbExecutor.QueryResult(List.of("count"), List.of(List.of((long) n)));
+            return new DuckDbExecutor.QueryResult(
+                    List.of(new DuckDbExecutor.ColMeta("count", java.sql.Types.BIGINT, "BIGINT", true, 19, 0)),
+                    List.of(List.of((long) n)));
         } catch (Exception e) {
             if (tx) {
                 try { executor.run("ROLLBACK"); } catch (Exception ignored) {}
@@ -417,6 +434,11 @@ final class SqlPipeline {
     }
 
     private DuckDbExecutor.QueryResult executeCreateTable(CreateTable rawCt) throws SQLException {
+        // The columns+AS query path re-analyzes the query inside executeInsert:
+        // keep the ORIGINAL (unresolved) query so analysis runs exactly once.
+        // A pre-analyzed query would carry rewritten [schema, table] scans that
+        // a second analysis cannot resolve.
+        Relation rawQuery = rawCt.query();
         CreateTable ct = (CreateTable) analyzer.analyze(rawCt, sessionDatabase);
         String db = databaseOf(ct.tableName());
         // Unquoted logical name: this feeds catalog metadata, not SQL text.
@@ -427,15 +449,20 @@ final class SqlPipeline {
             throw new IllegalArgumentException(
                     "Table already exists: " + String.join(".", ct.tableName()));
         }
-        // All physical tables live in DuckDB's single main schema: a bare name
-        // cannot be shared by two logical tables even across databases.
+        // Physical namespace per schema: default lives in main, every other
+        // database in its own DuckDB schema, so bare names collide only
+        // within the same schema.
+        String schema = targetSchema(db);
         for (Catalog.Table other : catalogService.catalog().listTables(null)) {
-            if (other.tableName().equalsIgnoreCase(table)) {
+            String otherSchema = other.physicalSchema() == null || other.physicalSchema().isBlank()
+                    ? "main" : other.physicalSchema();
+            if (other.tableName().equalsIgnoreCase(table) && otherSchema.equalsIgnoreCase(schema)) {
                 throw new IllegalArgumentException(
                         "A table named " + table + " already exists in database "
-                                + other.database() + " (tables from all databases share one physical namespace)");
+                                + other.database() + " (same physical schema: " + otherSchema + ")");
             }
         }
+        ensureSchema(db);
         String createSql;
         if (ct.likeSource() != null) {
             Catalog.Table src = catalogService.catalog().resolveTable(ct.likeSource())
@@ -446,43 +473,47 @@ final class SqlPipeline {
                 cols.add(new CreateTable.ColumnDef(c.name(), c.type(), c.nullable(), c.comment()));
             }
             CreateTable resolved = new CreateTable(ct.tableName(), false, cols, null, null);
-            createSql = generator.generateCreateTable(resolved);
+            createSql = generator.generateCreateTable(resolved, schema);
             Map<String, String> srcPartitionProps = src.properties().containsKey(PARTITION_COLUMNS_KEY)
                     ? Map.of(PARTITION_COLUMNS_KEY, src.properties().get(PARTITION_COLUMNS_KEY)) : null;
             inTransaction(() -> {
                 executor.run(createSql);
-                registerPhysical(db, table, "TABLE", createSql, srcPartitionProps);
+                registerPhysical(db, table, "TABLE", createSql, srcPartitionProps, schema);
                 patchColumnComments(db, table, commentMap(cols));
             });
             return empty();
         }
         if (ct.query() == null) {
-            createSql = generator.generateCreateTable(ct);
+            createSql = generator.generateCreateTable(ct, schema);
             inTransaction(() -> {
                 executor.run(createSql);
-                registerPhysical(db, table, "TABLE", createSql, partitionProps(ct));
+                registerPhysical(db, table, "TABLE", createSql, partitionProps(ct), schema);
                 patchColumnComments(db, table, commentMap(ct.columns()));
             });
             return empty();
         }
-        rewriter.rewrite(ct.query());
         if (ct.columns().isEmpty()) {
-            createSql = generator.generateCreateTableAs(ct);
+            // rewrite returns a new tree; the original must not be reused.
+            // (The columns+query combination path goes through executeInsert,
+            // which does its own analyze+rewrite exactly once.)
+            final CreateTable rewrittenCt = new CreateTable(ct.tableName(), ct.ifNotExists(), ct.columns(),
+                    rewriter.rewrite(ct.query()), ct.likeSource(), ct.partitionColumnNames());
+            final String createSqlAs = generator.generateCreateTableAs(rewrittenCt, schema);
             inTransaction(() -> {
-                executor.run(createSql);
-                registerPhysical(db, table, "TABLE", createSql);
+                executor.run(createSqlAs);
+                registerPhysical(db, table, "TABLE", createSqlAs, null, schema);
             });
             return empty();
         }
         // Explicit column list + AS query: create the (empty) table with the
         // declared schema, then populate it through the INSERT path.
-        createSql = generator.generateCreateTable(ct);
+        createSql = generator.generateCreateTable(ct, schema);
         DuckDbExecutor.QueryResult[] inserted = new DuckDbExecutor.QueryResult[1];
         inTransaction(() -> {
             executor.run(createSql);
-            registerPhysical(db, table, "TABLE", createSql);
+            registerPhysical(db, table, "TABLE", createSql, null, schema);
             patchColumnComments(db, table, commentMap(ct.columns()));
-            inserted[0] = executeInsert(new Insert(ct.tableName(), false, null, ct.query()));
+            inserted[0] = executeInsert(new Insert(ct.tableName(), false, null, rawQuery));
         });
         return inserted[0];
     }
@@ -503,9 +534,13 @@ final class SqlPipeline {
             }
         }
         // view does not exist: IF NOT EXISTS only matters in the branch above;
-        // always create it here
-        rewriter.rewrite(cv.query());
-        String createSql = generator.generateCreateView(cv);
+        // always create it here. OR REPLACE keeps the existing physical
+        // location; a new view goes to the database's target schema.
+        // rewrite returns a new tree; the original must not be reused
+        final CreateView rewrittenCv = new CreateView(cv.tableName(), cv.orReplace(), cv.ifNotExists(),
+                rewriter.rewrite(cv.query()));
+        final String schema = existing == null ? targetSchema(db) : existing.physicalSchema();
+        final String createSql = generator.generateCreateView(rewrittenCv, schema);
         final boolean replacing = existing != null;
         inTransaction(() -> {
             if (replacing) {
@@ -514,10 +549,10 @@ final class SqlPipeline {
                 } catch (Exception e) {
                     throw new SQLException("Failed to drop view " + name + ": " + e.getMessage(), e);
                 }
-                executor.run("DROP VIEW IF EXISTS " + DuckDbSqlGenerator.quote(name));
+                executor.run("DROP VIEW IF EXISTS " + physRef(schema, name));
             }
             executor.run(createSql);
-            registerPhysical(db, name, "VIEW", createSql);
+            registerPhysical(db, name, "VIEW", createSql, null, schema);
         });
         return empty();
     }
@@ -528,6 +563,12 @@ final class SqlPipeline {
         if (catalogService.catalog().getDatabase(name).isPresent()) {
             if (cd.ifNotExists()) return empty();
             throw new IllegalArgumentException("Database already exists: " + name);
+        }
+        // Per-database physical schema (default lives in main)
+        try {
+            ensureSchema(name);
+        } catch (SQLException e) {
+            throw new SQLException("Failed to create physical schema for " + name + ": " + e.getMessage(), e);
         }
         catalogService.createDatabase(name, cd.comment(), cd.location(), cd.properties());
         return empty();
@@ -559,9 +600,17 @@ final class SqlPipeline {
             inTransaction(() -> {
                 for (Catalog.Table t : tables) {
                     String drop = "VIEW".equalsIgnoreCase(t.tableType()) ? "DROP VIEW IF EXISTS " : "DROP TABLE IF EXISTS ";
-                    try { executor.run(drop + DuckDbSqlGenerator.quote(t.tableName())); } catch (Exception ignored) {}
+                    String schema = t.physicalSchema() == null || t.physicalSchema().isBlank()
+                            ? "main" : t.physicalSchema();
+                    try { executor.run(drop + physRef(schema, t.tableName())); } catch (Exception ignored) {}
                 }
                 catalogService.dropDatabase(name, dd.cascade());
+                // the per-database schema goes with the database
+                if (!"default".equalsIgnoreCase(name)) {
+                    try {
+                        executor.run("DROP SCHEMA IF EXISTS " + DuckDbSqlGenerator.quote(name) + " CASCADE");
+                    } catch (Exception ignored) {}
+                }
             });
         } catch (SQLException e) {
             throw new SQLException("Failed to drop database " + name + ": " + e.getMessage(), e);
@@ -580,25 +629,18 @@ final class SqlPipeline {
         if (!fromDb.equalsIgnoreCase(toDb)) {
             throw new IllegalArgumentException("RENAME across databases not supported: " + fromDb + " -> " + toDb);
         }
-        String sql = generator.generateRenameTable(rt, isView);
+        String sql = generator.generateRenameTable(rt, isView, existing.physicalSchema());
         LOG.info("Translated to DuckDB SQL: {}", sql);
         try {
             inTransaction(() -> {
                 executor.run(sql);
                 catalogService.renameTable(fromDb, fromTable, toDb, toTable);
-                // After a physical rename DuckDB's view definitions already
-                // reference the new name. Persist the replay DDL under the new
-                // name — loaded from the store, not regex-patched here.
+                // After a physical rename DuckDB's own catalog already has the
+                // definition under the new name; read it back from physical
+                // metadata instead of patching the stored SQL string.
                 if (catalogService.store() != null && existing.tableId() > 0) {
-                    catalogService.store().loadRuntimeInfo(existing.tableId()).ifPresent(info -> {
-                        try {
-                            String def = replayDdlAfterRename(info.createSql(), fromTable, toTable, isView);
-                            catalogService.store().saveRuntimeInfo(existing.tableId(), toTable, def);
-                        } catch (Exception ex) {
-                            throw new RuntimeException("Failed to update runtime definition for "
-                                    + toTable + ": " + ex.getMessage(), ex);
-                        }
-                    });
+                    String def = readPhysicalCreateSql(toTable, isView, existing.physicalSchema());
+                    catalogService.store().saveRuntimeInfo(existing.tableId(), toTable, def);
                 }
             });
         } catch (SQLException e) {
@@ -607,26 +649,28 @@ final class SqlPipeline {
         return empty();
     }
 
+
     /**
-     * Rename the top-level object inside a stored replay DDL. Views replay
-     * as CREATE VIEW <name> AS <select>; the SELECT body must NOT be touched
-     * (it legitimately contains the old name only when referencing other
-     * objects). For tables the DDL is CREATE TABLE <name> (...); only the
-     * first occurrence after the CREATE keyword is replaced.
+     * Read the canonical CREATE statement for a physical table or view from
+     * DuckDB's metadata. Called after the physical object already exists under
+     * {@code name} in {@code schema}; returns null when DuckDB does not report one.
      */
-    private static String replayDdlAfterRename(String createSql, String fromTable, String toTable, boolean isView) {
-        if (createSql == null) return null;
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
-                "(?is)^(CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW|CREATE\\s+TABLE)\\s+" +
-                        "(?:IF\\s+NOT\\s+EXISTS\\s+)?([`\"]?)([^`\".\\s]+)\\2")
-                .matcher(createSql);
-        if (m.find() && m.group(3).equalsIgnoreCase(fromTable)) {
-            String newDef = createSql.substring(0, m.start(3)) + toTable + createSql.substring(m.end(3));
-            // Views replayed by name may also self-reference in their body via
-            // other objects — out of scope; table column defaults etc. remain.
-            return newDef;
+    private String readPhysicalCreateSql(String name, boolean isView, String schema) {
+        String catalogTable = isView ? "duckdb_views" : "duckdb_tables";
+        String nameCol = isView ? "view_name" : "table_name";
+        String effectiveSchema = schema == null || schema.isBlank() ? "main" : schema;
+        String sql = "SELECT sql FROM " + catalogTable
+                + "() WHERE internal = false AND lower(schema_name) = lower('" + effectiveSchema.replace("'", "''")
+                + "') AND lower(" + nameCol + ") = lower('" + name.replace("'", "''") + "')";
+        try {
+            DuckDbExecutor.QueryResult r = executor.execute(sql);
+            if (!r.rows().isEmpty() && r.rows().get(0).get(0) != null) {
+                return String.valueOf(r.rows().get(0).get(0));
+            }
+        } catch (SQLException e) {
+            LOG.warn("Failed to read physical definition of {} from {}: {}", name, catalogTable, e.getMessage());
         }
-        return createSql;
+        return null;
     }
 
     private DuckDbExecutor.QueryResult executeSetTableProperties(io.github.joegxx.localsql.ir.statement.SetTableProperties stp) throws SQLException {
@@ -636,9 +680,12 @@ final class SqlPipeline {
         Catalog.Table t = catalogService.getTable(db, table).orElseThrow();
         java.util.Map<String, String> merged = new java.util.LinkedHashMap<>(t.properties());
         merged.putAll(stp.properties());
-        Catalog.Table updated = new Catalog.Table(t.tableId(), t.name(), t.tableType(), t.columns(), t.location(), t.format(), t.comment(), merged, t.metadataJson());
-        catalogService.catalog().updateTable(updated);
-        try { if (catalogService.store() != null) catalogService.store().saveTable(updated); } catch (Exception e) { throw new SQLException(e.getMessage(), e); }
+        Catalog.Table updated = new Catalog.Table(t.tableId(), t.name(), t.tableType(), t.columns(), t.location(), t.format(), t.comment(), merged, t.metadataJson(), t.physicalSchema());
+        try {
+            catalogService.updateTable(updated);
+        } catch (Exception e) {
+            throw new SQLException(e.getMessage(), e);
+        }
         return empty();
     }
 
@@ -654,9 +701,12 @@ final class SqlPipeline {
             }
             props.remove(key);
         }
-        Catalog.Table updated = new Catalog.Table(t.tableId(), t.name(), t.tableType(), t.columns(), t.location(), t.format(), t.comment(), props, t.metadataJson());
-        catalogService.catalog().updateTable(updated);
-        try { if (catalogService.store() != null) catalogService.store().saveTable(updated); } catch (Exception e) { throw new SQLException(e.getMessage(), e); }
+        Catalog.Table updated = new Catalog.Table(t.tableId(), t.name(), t.tableType(), t.columns(), t.location(), t.format(), t.comment(), props, t.metadataJson(), t.physicalSchema());
+        try {
+            catalogService.updateTable(updated);
+        } catch (Exception e) {
+            throw new SQLException(e.getMessage(), e);
+        }
         return empty();
     }
 
@@ -668,9 +718,10 @@ final class SqlPipeline {
         if (t != null && t.properties().containsKey(PARTITION_COLUMNS_KEY)) {
             return addColumnsOnPartitionedTable(ac, db, table, t);
         }
+        final String schema = physSchemaOf(db, table);
         inTransaction(() -> {
             for (var col : ac.columns()) {
-                String sql = generator.generateAddColumn(ac.tableName(), col);
+                String sql = generator.generateAddColumn(ac.tableName(), col, schema);
                 LOG.info("Translated to DuckDB SQL: {}", sql);
                 executor.run(sql);
             }
@@ -716,8 +767,9 @@ final class SqlPipeline {
         }
 
         String tmp = "__localsql_rebuild_" + table;
-        String qTable = DuckDbSqlGenerator.quote(table);
-        String qTmp = DuckDbSqlGenerator.quote(tmp);
+        String schema = t.physicalSchema() == null || t.physicalSchema().isBlank() ? "main" : t.physicalSchema();
+        String qTable = physRef(schema, table);
+        String qTmp = physRef(schema, tmp);
         StringBuilder rebuildDdl = new StringBuilder("CREATE TABLE ").append(qTable).append(" (");
         for (int i = 0; i < finalOrder.size(); i++) {
             Catalog.Column c = finalOrder.get(i);
@@ -754,7 +806,8 @@ final class SqlPipeline {
             executor.run(ins.toString());
             // 3. swap names
             executor.run("DROP TABLE " + qTable);
-            executor.run("ALTER TABLE " + qTmp + " RENAME TO " + qTable);
+            // RENAME TO stays within the source schema: the target must be bare
+            executor.run("ALTER TABLE " + qTmp + " RENAME TO " + DuckDbSqlGenerator.quote(table));
         });
         // 4. metadata: final order + new column comments; also refresh the
         //    stored runtime DDL so a restart replays the new schema
@@ -782,9 +835,10 @@ final class SqlPipeline {
         analyzer.analyze(dc, sessionDatabase);
         String db = databaseOf(dc.tableName());
         String table = dc.tableName().get(dc.tableName().size() - 1);
+        final String schema = physSchemaOf(db, table);
         inTransaction(() -> {
             for (String col : dc.columns()) {
-                String sql = generator.generateDropColumn(dc.tableName(), col);
+                String sql = generator.generateDropColumn(dc.tableName(), col, schema);
                 LOG.info("Translated to DuckDB SQL: {}", sql);
                 executor.run(sql);
             }
@@ -797,7 +851,7 @@ final class SqlPipeline {
         analyzer.analyze(rc, sessionDatabase);
         String db = databaseOf(rc.tableName());
         String table = rc.tableName().get(rc.tableName().size() - 1);
-        String sql = generator.generateRenameColumn(rc.tableName(), rc.from(), rc.to());
+        String sql = generator.generateRenameColumn(rc.tableName(), rc.from(), rc.to(), physSchemaOf(db, table));
         LOG.info("Translated to DuckDB SQL: {}", sql);
         inTransaction(() -> {
             executor.run(sql);
@@ -827,19 +881,20 @@ final class SqlPipeline {
         }
         final String col = targetCol;
         final String comment = desiredComment;
+        final String schema = physSchemaOf(db, table);
         inTransaction(() -> {
             if (renamed) {
-                String sqlRename = generator.generateRenameColumn(alc.tableName(), alc.column(), alc.newName());
+                String sqlRename = generator.generateRenameColumn(alc.tableName(), alc.column(), alc.newName(), schema);
                 LOG.info("Translated to DuckDB SQL: {}", sqlRename);
                 executor.run(sqlRename);
             }
             if (alc.newType() != null) {
-                String sql = generator.generateAlterColumnType(alc.tableName(), col, alc.newType());
+                String sql = generator.generateAlterColumnType(alc.tableName(), col, alc.newType(), schema);
                 LOG.info("Translated to DuckDB SQL: {}", sql);
                 executor.run(sql);
             }
             if (alc.setNotNull() != null) {
-                String sql = generator.generateAlterColumnSetNotNull(alc.tableName(), col, alc.setNotNull());
+                String sql = generator.generateAlterColumnSetNotNull(alc.tableName(), col, alc.setNotNull(), schema);
                 LOG.info("Translated to DuckDB SQL: {}", sql);
                 executor.run(sql);
             }
@@ -869,11 +924,13 @@ final class SqlPipeline {
         // (refreshFromDescribe preserved them), so pass nulls explicitly.
         java.util.Map<String, String> comments = new java.util.HashMap<>();
         for (var c : rpc.columns()) comments.put(c.name().toLowerCase(), c.comment());
+        final String schema = old.physicalSchema() == null || old.physicalSchema().isBlank()
+                ? "main" : old.physicalSchema();
         inTransaction(() -> {
             // Drop columns not in new schema
             for (Catalog.Column c : List.copyOf(old.columns())) {
                 if (!newNames.contains(c.name().toLowerCase())) {
-                    executor.run(generator.generateDropColumn(rpc.tableName(), c.name()));
+                    executor.run(generator.generateDropColumn(rpc.tableName(), c.name(), schema));
                 }
             }
             // Add columns not in old schema; alter overlapping columns whose
@@ -881,14 +938,14 @@ final class SqlPipeline {
             // TINYINT vs INT) or nullability changed.
             for (var c : rpc.columns()) {
                 if (!oldNames.contains(c.name().toLowerCase())) {
-                    executor.run(generator.generateAddColumn(rpc.tableName(), c));
+                    executor.run(generator.generateAddColumn(rpc.tableName(), c, schema));
                 } else {
                     Catalog.Column oc = old.columns().stream().filter(col -> col.name().equalsIgnoreCase(c.name())).findFirst().orElse(null);
                     if (oc != null && !oc.type().equals(c.type())) {
-                        executor.run(generator.generateAlterColumnType(rpc.tableName(), c.name(), c.type()));
+                        executor.run(generator.generateAlterColumnType(rpc.tableName(), c.name(), c.type(), schema));
                     }
                     if (oc != null && oc.nullable() != c.nullable()) {
-                        executor.run(generator.generateAlterColumnSetNotNull(rpc.tableName(), c.name(), !c.nullable()));
+                        executor.run(generator.generateAlterColumnSetNotNull(rpc.tableName(), c.name(), !c.nullable(), schema));
                     }
                 }
             }
@@ -942,7 +999,8 @@ final class SqlPipeline {
 
     private void refreshFromDescribe(String db, String table) throws SQLException {
         try {
-            DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + DuckDbSqlGenerator.quote(table));
+            DuckDbExecutor.QueryResult desc = executor.execute(
+                    "DESCRIBE " + physRef(physSchemaOf(db, table), table));
             Catalog.Table old = catalogService.getTable(db, table).orElse(null);
             java.util.Map<String, String> oldComments = new java.util.HashMap<>();
             if (old != null) {
@@ -976,14 +1034,11 @@ final class SqlPipeline {
         return props;
     }
 
-    private void registerPhysical(String db, String table, String type, String createSql) throws SQLException {
-        registerPhysical(db, table, type, createSql, null);
-    }
-
     private void registerPhysical(String db, String table, String type, String createSql,
-                                  Map<String, String> extraProperties) throws SQLException {
+                                  Map<String, String> extraProperties, String schema)
+            throws SQLException {
         try {
-            DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + DuckDbSqlGenerator.quote(table));
+            DuckDbExecutor.QueryResult desc = executor.execute("DESCRIBE " + physRef(schema, table));
             List<CatalogService.ColumnDef> cols = new ArrayList<>();
             for (List<Object> row : desc.rows()) {
                 // DESCRIBE columns: 0=name 1=type 2=null(YES/NO) 3=key 4=default 5=extra
@@ -994,7 +1049,8 @@ final class SqlPipeline {
                         nullable, null));
             }
             Catalog.Table t = catalogService.registerTable(
-                    db, table, type, cols, null, null, null, extraProperties, null);
+                    db, table, type, cols, null, null, null, extraProperties, null,
+                    schema == null || schema.isBlank() ? "main" : schema);
             if (catalogService.store() != null) {
                 catalogService.store().saveRuntimeInfo(t.tableId(), table, createSql);
             }
@@ -1007,12 +1063,35 @@ final class SqlPipeline {
         return new DuckDbExecutor.QueryResult(List.of("result"), List.of());
     }
 
-    private static String bare(List<String> parts) {
-        return DuckDbSqlGenerator.quote(parts.get(parts.size() - 1));
-    }
-
     /** Unqualified single-part names resolve against the session database. */
     private String databaseOf(List<String> parts) {
         return parts.size() == 1 ? sessionDatabase : parts.get(parts.size() - 2);
+    }
+
+    /** Physical schema a NEW object in this database gets (default -> main). */
+    private static String targetSchema(String db) {
+        return "default".equalsIgnoreCase(db) ? "main" : db;
+    }
+
+    /** Physical schema where a table's DuckDB object actually lives. */
+    private String physSchemaOf(String db, String table) {
+        return catalogService.getTable(db, table)
+                .map(t -> t.physicalSchema() == null || t.physicalSchema().isBlank()
+                        ? "main" : t.physicalSchema())
+                .orElse(targetSchema(db));
+    }
+
+    /** Quoted physical reference; main keeps the bare name (legacy layouts). */
+    private static String physRef(String schema, String table) {
+        if (schema == null || schema.isBlank() || "main".equalsIgnoreCase(schema)) {
+            return DuckDbSqlGenerator.quote(table);
+        }
+        return DuckDbSqlGenerator.quote(schema) + "." + DuckDbSqlGenerator.quote(table);
+    }
+
+    /** Creates the per-database DuckDB schema if it does not exist yet. */
+    private void ensureSchema(String db) throws SQLException {
+        if ("default".equalsIgnoreCase(db)) return;
+        executor.run("CREATE SCHEMA IF NOT EXISTS " + DuckDbSqlGenerator.quote(db));
     }
 }

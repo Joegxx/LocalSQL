@@ -483,7 +483,7 @@ public final class SparkAstBuilder {
         if (having != null && input != null) {
             if (aggregated && input instanceof Aggregate aggregate) {
                 input = new Aggregate(aggregate.child(), aggregate.groupingExpressions(),
-                        aggregate.aggregateExpressions(), exprBuilder.visit(having.booleanExpression()),
+                        aggregate.resultExpressions(), exprBuilder.visit(having.booleanExpression()),
                         aggregate.groupingAnalytics());
             } else if (!aggregated) {
                 // HAVING without GROUP BY: implicit single-group aggregate
@@ -511,7 +511,11 @@ public final class SparkAstBuilder {
         List<String> outs = new ArrayList<>();
         if (lv.colName != null) for (var id : lv.colName) outs.add(SparkExpressionBuilder.unquote(id.getText()));
         String viewAlias = lv.tblName != null ? SparkExpressionBuilder.unquote(lv.tblName.getText()) : null;
-        if (outs.isEmpty() && viewAlias != null) {
+        if (fn.equalsIgnoreCase("posexplode")) {
+            // posexplode has a fixed (pos, col) shape; the view name is not a
+            // column name here (Spark semantics)
+            if (outs.isEmpty()) { outs.add("pos"); outs.add("col"); }
+        } else if (outs.isEmpty() && viewAlias != null) {
             // LATERAL VIEW f(x) v without AS: the view name doubles as the column name
             outs.add(viewAlias);
         }

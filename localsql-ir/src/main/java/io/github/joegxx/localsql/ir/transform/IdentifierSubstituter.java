@@ -59,7 +59,7 @@ public final class IdentifierSubstituter {
             return new ArrayExpr(a.elements().stream().map(x -> rewrite(x, substitutions)).toList());
         }
         if (e instanceof StructExpr s) {
-            return new StructExpr(s.fields().stream().map(x -> rewrite(x, substitutions)).toList());
+            return new StructExpr(s.fields().stream().map(x -> rewrite(x, substitutions)).toList(), s.fieldNames());
         }
         if (e instanceof MapExpr m) {
             return new MapExpr(m.entries().stream()

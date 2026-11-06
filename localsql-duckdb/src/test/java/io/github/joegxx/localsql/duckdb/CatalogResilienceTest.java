@@ -129,6 +129,48 @@ class CatalogResilienceTest {
     }
 
     @Test
+    void legacyStoreMigratesDatabasesFromTables() throws Exception {
+        try (DuckDbExecutor exec = new DuckDbExecutor()) {
+            // build a legacy v0 store: four tables, no catalog_database rows
+            exec.executeUpdate("CREATE TABLE catalog_table (table_id BIGINT PRIMARY KEY, catalog_name VARCHAR,"
+                    + " database_name VARCHAR, schema_name VARCHAR, table_name VARCHAR, table_type VARCHAR,"
+                    + " comment VARCHAR, properties VARCHAR, metadata_json VARCHAR)");
+            exec.executeUpdate("CREATE TABLE catalog_column (table_id BIGINT, ordinal INTEGER, column_name VARCHAR,"
+                    + " data_type VARCHAR, nullable BOOLEAN, comment VARCHAR, default_value VARCHAR, expression VARCHAR)");
+            exec.executeUpdate("CREATE TABLE catalog_property (table_id BIGINT, property_key VARCHAR, property_value VARCHAR)");
+            exec.executeUpdate("CREATE TABLE runtime_table (table_id BIGINT PRIMARY KEY, duck_table_name VARCHAR,"
+                    + " create_sql VARCHAR, last_refresh VARCHAR)");
+            exec.executeUpdate("CREATE TABLE catalog_schema_version (version INTEGER)");
+            exec.executeUpdate("INSERT INTO catalog_table VALUES (1, 'local', 'legacy_db', 'legacy_db', 't', 'TABLE', NULL, NULL, NULL)");
+            exec.executeUpdate("INSERT INTO catalog_column VALUES (1, 0, 'id', 'INT', true, NULL, NULL, NULL)");
+
+            DuckDbCatalogStore store = new DuckDbCatalogStore(exec);
+            store.init();
+            // derived: legacy_db + default, schema version stamped
+            List<String> names = store.loadDatabases().stream().map(Catalog.Database::name).toList();
+            assertTrue(names.contains("legacy_db"), "legacy database must be derived from tables: " + names);
+            assertTrue(names.contains("default"));
+            var rs = exec.execute("SELECT MAX(version) FROM catalog_schema_version");
+            assertEquals(1, ((Number) rs.rows().get(0).get(0)).intValue());
+
+            // re-running init is idempotent: no duplicate rows
+            store.init();
+            assertEquals(2, store.loadDatabases().size());
+        }
+    }
+
+    @Test
+    void futureSchemaVersionIsRejected() throws Exception {
+        try (DuckDbExecutor exec = new DuckDbExecutor()) {
+            DuckDbCatalogStore store = new DuckDbCatalogStore(exec);
+            store.init();
+            exec.executeUpdate("INSERT INTO catalog_schema_version VALUES (99)");
+            IllegalStateException e = assertThrows(IllegalStateException.class, store::init);
+            assertTrue(e.getMessage().contains("newer"), e.getMessage());
+        }
+    }
+
+    @Test
     void createDatabaseRollsBackMemoryOnStoreFailure() throws Exception {
         try (DuckDbExecutor exec = new DuckDbExecutor()) {
             FailingStore store = new FailingStore(new DuckDbCatalogStore(exec));

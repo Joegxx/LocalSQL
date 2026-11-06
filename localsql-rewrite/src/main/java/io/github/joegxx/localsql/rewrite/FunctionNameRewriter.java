@@ -2,6 +2,7 @@ package io.github.joegxx.localsql.rewrite;
 
 import io.github.joegxx.localsql.ir.expression.Expression;
 import io.github.joegxx.localsql.ir.expression.FunctionCall;
+import io.github.joegxx.localsql.ir.relation.Generate;
 import io.github.joegxx.localsql.ir.relation.Relation;
 import io.github.joegxx.localsql.ir.visitor.IrVisitor;
 
@@ -113,6 +114,24 @@ public final class FunctionNameRewriter {
                 e.rename(RENAMES.get(name));
             }
             return super.visitFunctionCall(e, ctx);
+        }
+
+        /**
+         * The generator position of a LATERAL VIEW keeps its source name:
+         * explode/posexplode are lowered by ExpressionLowering (UNNEST around
+         * the argument list, optionally WITH ORDINALITY), so renaming them
+         * here would double-wrap the argument when serialized. Arguments are
+         * still visited normally.
+         */
+        @Override
+        public Void visitGenerate(Generate g, Void ctx) {
+            if (g.generator() instanceof FunctionCall f) {
+                for (Expression arg : f.arguments()) visit(arg, ctx);
+            } else {
+                visit(g.generator(), ctx);
+            }
+            visitRelation(g.child(), ctx);
+            return null;
         }
     }
 }

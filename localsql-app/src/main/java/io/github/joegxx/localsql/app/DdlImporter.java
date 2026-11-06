@@ -61,14 +61,29 @@ public final class DdlImporter {
         List<String> failures = new ArrayList<>();
         long start = System.currentTimeMillis();
         int ok = 0;
+        // One pre-import snapshot of the physical table set, plus an in-memory
+        // set of names this run created (cheaper than re-scanning before every
+        // entry). Cleanup consults both so it only ever drops a physical table
+        // this import brought into existence, never a pre-existing table with
+        // the same bare name in any schema. Without a snapshot
+        // (physicalTables returned null) the cleanup falls back to the
+        // qualified catalog-level DROP only.
+        Set<String> existing = physicalTables(executor);
+        Set<String> createdHere = new LinkedHashSet<>();
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
+            String physical = tableOf(e.canonical());
+            String schema = physicalSchema(e.canonical());
+            String physicalKey = (schema + "." + physical).toLowerCase(java.util.Locale.ROOT);
             try {
                 server.executeSparkSql(preprocess(Files.readString(e.file(), StandardCharsets.UTF_8), e.canonical()));
                 ok++;
+                createdHere.add(physicalKey);
             } catch (Exception ex) {
                 try { server.executeSparkSql("DROP TABLE IF EXISTS " + e.canonical()); } catch (Exception ignore) {}
-                try { executor.run("DROP TABLE IF EXISTS \"" + tableOf(e.canonical()) + "\""); } catch (Exception ignore) {}
+                if (existing != null && !existing.contains(physicalKey) && !createdHere.contains(physicalKey)) {
+                    try { executor.run("DROP TABLE IF EXISTS " + physicalRef(schema, physical)); } catch (Exception ignore) {}
+                }
                 failures.add(e.canonical() + "\n  " + oneLine(ex.getMessage()) + "\n  [" + e.file() + "]");
             }
             if ((i + 1) % 250 == 0) {
@@ -142,11 +157,46 @@ public final class DdlImporter {
             }
         }
         sql = sql.replaceFirst("(?i)CREATE\\s+TABLE(?!\\s+IF\\s+NOT)", "CREATE TABLE IF NOT EXISTS");
-        sql = sql.replaceAll("(?i)\\b(varchar|char)(\\s*\\(\\s*\\d+\\s*\\))?", "string");
+        sql = sql.replaceAll("(?i)\\b(varchar|char)\\b(\\s*\\(\\s*\\d+\\s*\\))?", "string");
         return sql;
     }
 
     private static String tableOf(String canonical) { return canonical.substring(canonical.indexOf('.') + 1); }
+
+    /** Physical DuckDB schema for a canonical db.table name (default -> main). */
+    private static String physicalSchema(String canonical) {
+        String db = canonical.substring(0, canonical.indexOf('.'));
+        return "default".equalsIgnoreCase(db) ? "main" : db;
+    }
+
+    /** Quoted physical reference; main keeps the bare name. */
+    private static String physicalRef(String schema, String table) {
+        if ("main".equalsIgnoreCase(schema)) return "\"" + table.replace("\"", "\"\"") + "\"";
+        return "\"" + schema.replace("\"", "\"\"") + "\".\"" + table.replace("\"", "\"\"") + "\"";
+    }
+
+    /**
+     * Snapshot of the physical DuckDB table set across all schemas, taken once
+     * before the import loop. Entries are lowercased {@code schema.table}
+     * pairs; together with the in-memory set of names created during the run
+     * they decide whether a failed import entry created its physical table,
+     * so cleanup only drops what this import brought into existence and never
+     * a pre-existing table with the same bare name in any schema.
+     */
+    private static Set<String> physicalTables(DuckDbExecutor executor) {
+        Set<String> names = new LinkedHashSet<>();
+        try {
+            for (List<Object> row : executor.execute(
+                    "SELECT table_schema, table_name FROM information_schema.tables").rows()) {
+                names.add((String.valueOf(row.get(0)) + "." + row.get(1)).toLowerCase(java.util.Locale.ROOT));
+            }
+        } catch (Exception ignore) {
+            // best effort only: without a snapshot cleanup falls back to the
+            // catalog-level DROP (qualified), never the bare physical name
+            return null;
+        }
+        return names;
+    }
 
     private static String oneLine(String m) {
         if (m == null) return "";

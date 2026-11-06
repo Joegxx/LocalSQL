@@ -44,16 +44,45 @@ public final class UdfProjectionSplitter {
         this.registry = registry;
     }
 
+    /**
+     * Unwraps the query organization wrappers around the top-level Project.
+     * The AST builder nests them as Limit(Sort(Project)) (ORDER BY binds
+     * first, LIMIT wraps the sorted result), so unwrap outside-in; any
+     * nesting order is accepted and remembered so rebuild can restore it.
+     */
+    private Relation unwrap(Relation top, Ref<Sort> sort, Ref<Limit> limit, Ref<Class<?>> outermost) {
+        Relation current = top;
+        while (current instanceof Sort || current instanceof Limit) {
+            if (outermost.get() == null) outermost.set(current.getClass());
+            if (current instanceof Sort s) {
+                sort.set(s);
+                current = s.child();
+            } else {
+                Limit l = (Limit) current;
+                limit.set(l);
+                current = l.child();
+            }
+        }
+        return current;
+    }
+
+    private static final class Ref<T> {
+        T value;
+        void set(T v) { value = v; }
+        T get() { return value; }
+    }
+
     /** Returns null when no registered UDF applies to this query. */
     public SplitPlan trySplit(Relation top) {
         if (registry == null || registry.definitions().isEmpty()) return null;
 
-        Sort sort = null;
-        Limit limit = null;
-        Relation current = top;
-        if (current instanceof Sort s) { sort = s; current = s.child(); }
-        if (current instanceof Limit l) { limit = l; current = l.child(); }
-        if (!(current instanceof Project project)) {
+        Ref<Sort> sortRef = new Ref<>();
+        Ref<Limit> limitRef = new Ref<>();
+        Ref<Class<?>> outermost = new Ref<>();
+        Relation inner = unwrap(top, sortRef, limitRef, outermost);
+        Sort sort = sortRef.get();
+        Limit limit = limitRef.get();
+        if (!(inner instanceof Project project)) {
             requireNoUdf(top, "only top-level SELECT projection is supported");
             return null;
         }
@@ -74,12 +103,12 @@ public final class UdfProjectionSplitter {
         boolean anyUdf = false;
         boolean sawStar = false;
         for (Expression item : project.projectList()) {
-            Expression inner = item instanceof Alias a ? a.child() : item;
-            Optional<UdfDefinition> udf = inner instanceof FunctionCall call && call.windowSpec() == null
+            Expression innerExpr = item instanceof Alias a ? a.child() : item;
+            Optional<UdfDefinition> udf = innerExpr instanceof FunctionCall call && call.windowSpec() == null
                     ? resolveUdf(call) : Optional.empty();
             if (udf.isPresent()) {
                 anyUdf = true;
-                FunctionCall call = (FunctionCall) inner;
+                FunctionCall call = (FunctionCall) innerExpr;
                 List<Integer> argIndexes = new ArrayList<>();
                 for (Expression arg : call.arguments()) {
                     stage1Items.add(new Alias(arg, "__udf_arg_" + outputs.size() + "_" + argIndexes.size(), List.of()));
@@ -119,8 +148,16 @@ public final class UdfProjectionSplitter {
 
         Project stage1 = new Project(project.child(), stage1Items);
         Relation wrapped = stage1;
-        if (limit != null) wrapped = new Limit(stage1, limit.limit(), limit.offset());
-        if (sort != null) wrapped = new Sort(wrapped, sort.order());
+        // Restore the original nesting: the outermost wrapper seen during
+        // unwrap goes back on last. Limit(Sort(stage1)) emits
+        // "... ORDER BY ... LIMIT n"; the reverse would emit invalid SQL.
+        if (outermost.get() == Limit.class) {
+            if (sort != null) wrapped = new Sort(wrapped, sort.order());
+            if (limit != null) wrapped = new Limit(wrapped, limit.limit(), limit.offset());
+        } else {
+            if (limit != null) wrapped = new Limit(wrapped, limit.limit(), limit.offset());
+            if (sort != null) wrapped = new Sort(wrapped, sort.order());
+        }
         return new SplitPlan(wrapped, List.copyOf(outputs));
     }
 

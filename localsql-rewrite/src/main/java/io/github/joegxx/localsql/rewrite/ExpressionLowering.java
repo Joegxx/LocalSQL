@@ -58,6 +58,23 @@ public final class ExpressionLowering {
             new io.github.joegxx.localsql.ir.type.TimestampType();
     private static final io.github.joegxx.localsql.ir.type.FractionalType DOUBLE =
             io.github.joegxx.localsql.ir.type.FractionalType.DOUBLE;
+    private static final IntegralType INT = IntegralType.INT;
+    private static final io.github.joegxx.localsql.ir.type.BinaryType BLOB =
+            new io.github.joegxx.localsql.ir.type.BinaryType();
+    private final java.util.Set<String> udtfNames;
+
+    public ExpressionLowering() { this(java.util.Set.of()); }
+
+    /**
+     * @param udtfNames registered UDTF source names (TABLE kind). A LATERAL
+     *                  VIEW generator matching one of these passes through
+     *                  untouched for UdtfGenerateSplitter, which runs after
+     *                  this rewrite and consumes the tree before generation.
+     */
+    public ExpressionLowering(java.util.Set<String> udtfNames) {
+        this.udtfNames = udtfNames == null ? java.util.Set.of() : udtfNames;
+    }
+
     private static final IntegralType UBIGINT = new IntegralType(64, false);
     private static final IntegralType HUGEINT = new IntegralType(128, true);
 
@@ -88,7 +105,7 @@ public final class ExpressionLowering {
                 groups.add(new Aggregate.GroupingAnalytics(ga.kind(), sets));
             }
             return new Aggregate(rewriteRelation(ag.child()), rewriteList(ag.groupingExpressions()),
-                    rewriteList(ag.aggregateExpressions()),
+                    rewriteList(ag.resultExpressions()),
                     ag.havingCondition() == null ? null : lower(ag.havingCondition()), groups);
         }
         if (rel instanceof Sort s) {
@@ -117,7 +134,8 @@ public final class ExpressionLowering {
             return new Window(rewriteRelation(wnd.child()), items, wnd.spec());
         }
         if (rel instanceof Generate g) {
-            return new Generate(lower(g.generator()), g.generatorOutputNames(), g.viewAlias(),
+            LoweredGenerator gen = lowerGenerator(g);
+            return new Generate(gen.argument(), gen.outputNames(), g.viewAlias(), gen.ordinal(),
                     rewriteRelation(g.child()));
         }
         if (rel instanceof SubqueryAlias s) {
@@ -158,6 +176,19 @@ public final class ExpressionLowering {
         return -1;
     }
 
+    /**
+     * Integer literal value; rejects anything else loudly. Callers whose Spark
+     * semantics need a compile-time constant must use this instead of
+     * {@link #literalInt} so a non-literal argument fails with a clear error
+     * instead of silently lowering with the -1 sentinel.
+     */
+    private static int requireLiteralInt(Expression e, String what) {
+        if (e instanceof Literal l && l.kind() == Literal.Kind.INTEGER && l.value() instanceof Number n) {
+            return n.intValue();
+        }
+        throw new UnsupportedOperationException(what);
+    }
+
     private static String literalString(Expression e) {
         if (e instanceof Literal l && l.kind() == Literal.Kind.STRING) return String.valueOf(l.value());
         return null;
@@ -168,10 +199,145 @@ public final class ExpressionLowering {
         return null;
     }
 
+    /**
+     * Value lookup for map lambdas: map_extract(m, k) yields the list of
+     * matching values (empty when absent), list_extract(..., 1) takes the
+     * first; out-of-range list_extract is NULL, matching Spark's missing-key
+     * NULL for map_zip_with.
+     */
+    private Expression mapValueLookup(Expression map, String key) {
+        return new FunctionCall("list_extract", List.of(
+                new FunctionCall("map_extract", List.of(map, new AttributeReference(key, List.of()))),
+                Literal.ofInt(1)));
+    }
+
+    /** EXTRACT(year*12 + month) of a timestamp. */
+    private Expression monthsComponent(Expression ts) {
+        return new BinaryExpression(
+                new BinaryExpression(
+                        new FunctionCall("date_part", List.of(Literal.ofString("year"), ts)),
+                        BinaryExpression.Op.MUL, Literal.ofInt(12)),
+                BinaryExpression.Op.ADD,
+                new FunctionCall("date_part", List.of(Literal.ofString("month"), ts)));
+    }
+
+    /** day + (h*3600 + m*60 + s) / 86400.0 of a timestamp. */
+    private Expression dayFraction(Expression ts) {
+        return new BinaryExpression(
+                new FunctionCall("date_part", List.of(Literal.ofString("day"), ts)),
+                BinaryExpression.Op.ADD,
+                new BinaryExpression(
+                        new BinaryExpression(
+                                new BinaryExpression(
+                                        new BinaryExpression(
+                                                new FunctionCall("date_part", List.of(Literal.ofString("hour"), ts)),
+                                                BinaryExpression.Op.MUL, Literal.ofInt(3600)),
+                                        BinaryExpression.Op.ADD,
+                                        new BinaryExpression(
+                                                new FunctionCall("date_part", List.of(Literal.ofString("minute"), ts)),
+                                                BinaryExpression.Op.MUL, Literal.ofInt(60))),
+                                BinaryExpression.Op.ADD,
+                                new FunctionCall("date_part", List.of(Literal.ofString("second"), ts))),
+                        BinaryExpression.Op.DIV, Literal.ofDecimal("86400.0")));
+    }
+
+    /** list_extract(list, i) for the zip_with index-iteration rewrite. */
+    private Expression listExtract(Expression list) {
+        return new FunctionCall("list_extract", List.of(list, new AttributeReference("i", List.of())));
+    }
+
+    /**
+     * Lowers the lambda body first, then substitutes already-lowered lookup
+     * expressions. Substitute expressions are never re-lowered, so function
+     * forms produced by lowering (e.g. the two-list form of map) cannot be
+     * mistaken for a Spark source call and re-processed.
+     */
+    private Expression lowerBody(Expression body, java.util.Map<String, Expression> substitutions) {
+        java.util.Map<String, Expression> lowered = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, Expression> en : substitutions.entrySet()) {
+            lowered.put(en.getKey(), lower(en.getValue()));
+        }
+        Expression loweredBody = lower(body);
+        return io.github.joegxx.localsql.ir.transform.IdentifierSubstituter.rewrite(loweredBody, lowered);
+    }
+
     private List<Expression> rewriteList(List<Expression> list) {
         List<Expression> out = new ArrayList<>(list.size());
         for (Expression e : list) out.add(lower(e));
         return out;
+    }
+
+    /**
+     * A lowered LATERAL VIEW generator: the pure argument expression the
+     * UNNEST expands, whether a position column is appended (posexplode),
+     * and the physical output column names. The name rewriter skips the
+     * generator position, so only this pass owns the conversion; anything
+     * that is not the supported builtin family fails loudly here instead of
+     * emitting invalid SQL downstream.
+     */
+    private record LoweredGenerator(Expression argument, boolean ordinal, List<String> outputNames) {}
+
+    /**
+     * Lowers the generator function of a LATERAL VIEW. Supported family:
+     * explode, explode_outer (NULL/empty arrays yield one NULL row) and
+     * posexplode (position column via DuckDB's WITH ORDINALITY, which the
+     * DuckDB generator appends after the value column, so the stored output
+     * names are in physical order: value first, pos last). explode with two
+     * declared output columns is a map explode and is rejected explicitly;
+     * unknown generator functions are rejected (registered UDTFs are split
+     * out by UdtfGenerateSplitter before the rewrite runs).
+     */
+    private LoweredGenerator lowerGenerator(Generate g) {
+        Expression gen = g.generator();
+        String name = gen instanceof FunctionCall f ? f.name().toLowerCase(java.util.Locale.ROOT) : "";
+        List<String> names = g.generatorOutputNames();
+        if ("posexplode".equals(name)) {
+            if (!(gen instanceof FunctionCall f) || f.arguments().size() != 1) {
+                throw new UnsupportedOperationException("posexplode requires exactly one argument");
+            }
+            if (!names.isEmpty() && names.size() != 2) {
+                throw new UnsupportedOperationException(
+                        "posexplode requires two output column names (pos, col), got: " + names);
+            }
+            // physical order: value column first, WITH ORDINALITY pos last
+            List<String> physical = names.isEmpty()
+                    ? List.of("col", "pos")
+                    : List.of(names.get(1), names.get(0));
+            return new LoweredGenerator(lower(f.arguments().get(0)), true, physical);
+        }
+        if ("explode".equals(name) || "explode_outer".equals(name)) {
+            if (!(gen instanceof FunctionCall f) || f.arguments().size() != 1) {
+                throw new UnsupportedOperationException(name + " requires exactly one argument");
+            }
+            if (names.size() > 1) {
+                throw new UnsupportedOperationException(
+                        "explode on maps (two output columns " + names + ") is not supported; "
+                                + "explode the keys instead, e.g. via map_keys");
+            }
+            Expression arr = lower(f.arguments().get(0));
+            if (name.endsWith("_outer")) {
+                // Spark explode_outer: a NULL or empty array still yields one
+                // row with NULL; DuckDB UNNEST drops such rows, so substitute
+                // a single-NULL list in those cases.
+                arr = new CaseWhen(List.of(new CaseWhen.WhenBranch(
+                        new BinaryExpression(
+                                new UnaryExpression(UnaryExpression.Op.IS_NULL, arr),
+                                BinaryExpression.Op.OR,
+                                new BinaryExpression(
+                                        new FunctionCall("len", List.of(arr)),
+                                        BinaryExpression.Op.EQ, Literal.ofInt(0))),
+                        new ArrayExpr(List.of(Literal.ofNull())))),
+                        arr);
+            }
+            return new LoweredGenerator(arr, false, names);
+        }
+        if (udtfNames.contains(name)) {
+            // registered UDTF: passed through untouched; UdtfGenerateSplitter
+            // consumes the tree after this rewrite, before generation
+            return new LoweredGenerator(lower(gen), false, names);
+        }
+        throw new UnsupportedOperationException(
+                "LATERAL VIEW generator '" + name + "' is not supported; supported: explode, explode_outer, posexplode");
     }
 
     // ------------------------------------------------------------------
@@ -207,7 +373,7 @@ public final class ExpressionLowering {
         if (e instanceof StructExpr s) {
             List<Expression> fields = new ArrayList<>();
             for (Expression fld : s.fields()) fields.add(lower(fld));
-            return new StructExpr(fields);
+            return new StructExpr(fields, s.fieldNames());
         }
         if (e instanceof CaseWhen c) {
             List<CaseWhen.WhenBranch> branches = new ArrayList<>();
@@ -454,7 +620,8 @@ public final class ExpressionLowering {
                     if (precision < 0) {
                         throw new UnsupportedOperationException("decimal(x, p[, s]) requires literal precision");
                     }
-                    int scale = a.size() == 3 ? literalInt(a.get(2)) : 0;
+                    int scale = a.size() == 3
+                            ? requireLiteralInt(a.get(2), "decimal(x, p[, s]) requires a literal scale") : 0;
                     target = new DecimalType(precision, Math.max(scale, 0));
                 }
                 return new Cast(lower(a.get(0)), target);
@@ -537,6 +704,425 @@ public final class ExpressionLowering {
                 List<Expression> rest = new ArrayList<>();
                 for (int i = 2; i < a.size(); i++) rest.add(lower(a.get(i)));
                 return new FunctionCall(mapped, rest);
+            }
+            case "exists" -> {
+                if (a.size() != 2) return null;
+                return new BinaryExpression(
+                        new FunctionCall("len", List.of(new FunctionCall("list_filter",
+                                List.of(lower(a.get(0)), lower(a.get(1)))))),
+                        BinaryExpression.Op.GT, Literal.ofInt(0));
+            }
+            case "forall" -> {
+                if (a.size() != 2) return null;
+                Expression arr = lower(a.get(0));
+                return new BinaryExpression(
+                        new FunctionCall("len", List.of(new FunctionCall("list_filter",
+                                List.of(arr, lower(a.get(1)))))),
+                        BinaryExpression.Op.EQ,
+                        new FunctionCall("len", List.of(arr)));
+            }
+            case "aggregate" -> {
+                if (a.size() != 3) {
+                    throw new UnsupportedOperationException(
+                            "aggregate with a finish lambda is not supported yet; use aggregate(arr, zero, merge)");
+                }
+                return new FunctionCall("list_reduce", List.of(
+                        new FunctionCall("list_concat", List.of(
+                                new FunctionCall("list_value", List.of(lower(a.get(1)))),
+                                lower(a.get(0)))),
+                        lower(a.get(2))));
+            }
+            case "array_except" -> {
+                if (a.size() != 2) return null;
+                return new FunctionCall("list_distinct", List.of(new FunctionCall("list_filter", List.of(
+                        lower(a.get(0)),
+                        new Lambda(List.of("x"), new UnaryExpression(UnaryExpression.Op.NOT,
+                                new FunctionCall("list_contains", List.of(
+                                        lower(a.get(1)), new AttributeReference("x", List.of())))))))));
+            }
+            case "array_remove" -> {
+                if (a.size() != 2) return null;
+                return new FunctionCall("list_filter", List.of(
+                        lower(a.get(0)),
+                        new Lambda(List.of("x"), new UnaryExpression(UnaryExpression.Op.NOT,
+                                new BinaryExpression(
+                                        new AttributeReference("x", List.of()),
+                                        BinaryExpression.Op.EQ_NULL_SAFE,
+                                        lower(a.get(1)))))));
+            }
+            case "transform_values", "transform_keys", "map_filter" -> {
+                if (a.size() != 2 || !(a.get(1) instanceof Lambda lam) || lam.variables().size() != 2) {
+                    throw new UnsupportedOperationException(name
+                            + " requires a two-variable lambda, got: " + (a.size() >= 2 ? a.get(1) : ""));
+                }
+                // lower the two-variable Spark lambda onto a single-variable
+                // DuckDB lambda over map_entries structs: k -> e.key, v -> e.value
+                String k = lam.variables().get(0);
+                String v = lam.variables().get(1);
+                Expression body = lowerBody(lam.body(), java.util.Map.of(
+                        k, new AttributeReference("key", List.of("e")),
+                        v, new AttributeReference("value", List.of("e"))));
+                Expression lambdaVar = new AttributeReference("e", List.of());
+                if (name.equals("map_filter")) {
+                    return new FunctionCall("map_from_entries", List.of(
+                            new FunctionCall("list_filter", List.of(
+                                    new FunctionCall("map_entries", List.of(lower(a.get(0)))),
+                                    new Lambda(List.of("e"), body)))));
+                }
+                // transform_keys: {'key': body, 'value': e.value}
+                // transform_values: {'key': e.key, 'value': body}
+                Expression keyExpr = name.equals("transform_keys")
+                        ? body : new AttributeReference("key", List.of("e"));
+                Expression valueExpr = name.equals("transform_keys")
+                        ? new AttributeReference("value", List.of("e")) : body;
+                Expression entry = new StructExpr(
+                        List.of(keyExpr, valueExpr), List.of("key", "value"));
+                return new FunctionCall("map_from_entries", List.of(
+                        new FunctionCall("list_transform", List.of(
+                                new FunctionCall("map_entries", List.of(lower(a.get(0)))),
+                                new Lambda(List.of("e"), entry)))));
+            }
+            case "map_zip_with" -> {
+                if (a.size() != 3 || !(a.get(2) instanceof Lambda lam) || lam.variables().size() != 3) {
+                    throw new UnsupportedOperationException(
+                            "map_zip_with requires (m1, m2, (k, v1, v2) -> expr)");
+                }
+                String k = lam.variables().get(0);
+                String v1 = lam.variables().get(1);
+                String v2 = lam.variables().get(2);
+                Expression lookup1 = mapValueLookup(a.get(0), k);
+                Expression lookup2 = mapValueLookup(a.get(1), k);
+                Expression body = lowerBody(lam.body(), java.util.Map.of(v1, lookup1, v2, lookup2));
+                Expression entry = new StructExpr(
+                        List.of(new AttributeReference(k, List.of()),
+                                body),
+                        List.of("key", "value"));
+                return new FunctionCall("map_from_entries", List.of(
+                        new FunctionCall("list_transform", List.of(
+                                new FunctionCall("list_distinct", List.of(
+                                        new FunctionCall("list_concat", List.of(
+                                                new FunctionCall("map_keys", List.of(lower(a.get(0)))),
+                                                new FunctionCall("map_keys", List.of(lower(a.get(1)))))))),
+                                new Lambda(List.of(k), entry)))));
+            }
+            case "named_struct" -> {
+                if (a.isEmpty() || a.size() % 2 != 0) return null;
+                List<Expression> fields = new ArrayList<>();
+                List<String> names = new ArrayList<>();
+                for (int i = 0; i < a.size(); i += 2) {
+                    String fieldName = literalString(a.get(i));
+                    if (fieldName == null) {
+                        throw new UnsupportedOperationException(
+                                "named_struct field names must be string literals; got: " + a.get(i));
+                    }
+                    names.add(fieldName);
+                    fields.add(lower(a.get(i + 1)));
+                }
+                return new StructExpr(fields, names);
+            }
+            case "substring_index" -> {
+                if (a.size() != 3) return null;
+                int count = requireLiteralInt(a.get(2), "substring_index requires a literal count");
+                Expression split = new FunctionCall("string_split", List.of(
+                        new Cast(lower(a.get(0)), VARCHAR),
+                        new Cast(lower(a.get(1)), VARCHAR)));
+                Expression delim = new Cast(lower(a.get(1)), VARCHAR);
+                // count > 0: first count fields; count < 0: last |count|;
+                // count = 0: empty string
+                Expression positive = new FunctionCall("array_to_string", List.of(
+                        new FunctionCall("list_slice", List.of(split,
+                                Literal.ofInt(1), Literal.ofInt(count))), delim));
+                Expression negative = new FunctionCall("array_to_string", List.of(
+                        new FunctionCall("list_slice", List.of(split,
+                                Literal.ofInt(count), Literal.ofInt(-1))), delim));
+                return new CaseWhen(List.of(
+                                new CaseWhen.WhenBranch(
+                                        new BinaryExpression(lower(a.get(2)), BinaryExpression.Op.GT, Literal.ofInt(0)),
+                                        positive),
+                                new CaseWhen.WhenBranch(
+                                        new BinaryExpression(lower(a.get(2)), BinaryExpression.Op.LT, Literal.ofInt(0)),
+                                        negative)),
+                        Literal.ofString(""));
+            }
+            case "next_day" -> {
+                if (a.size() != 2) return null;
+                String dayName = literalString(a.get(1));
+                if (dayName == null) {
+                    throw new UnsupportedOperationException("next_day requires a literal day name");
+                }
+                int target = SparkDialectFormats.dayIndex(dayName);
+                if (target < 0) {
+                    throw new UnsupportedOperationException("next_day: unknown day name " + dayName);
+                }
+                // (target - weekday(ts)+1) mod 7 in [0..6]; 0 means same day ->
+                // advance a full week (Spark wants the NEXT such day)
+                Expression ts = lower(a.get(0));
+                Expression weekday = new FunctionCall("weekday", List.of(ts));
+                Expression delta = new BinaryExpression(
+                        new BinaryExpression(
+                                new BinaryExpression(
+                                        new BinaryExpression(Literal.ofInt(target),
+                                                BinaryExpression.Op.SUB,
+                                                new BinaryExpression(weekday, BinaryExpression.Op.SUB, Literal.ofInt(1))),
+                                        BinaryExpression.Op.MOD, Literal.ofInt(7)),
+                                BinaryExpression.Op.ADD, Literal.ofInt(7)),
+                        BinaryExpression.Op.MOD, Literal.ofInt(7));
+                Expression days = new CaseWhen(
+                        List.of(new CaseWhen.WhenBranch(
+                                new BinaryExpression(delta, BinaryExpression.Op.EQ, Literal.ofInt(0)),
+                                Literal.ofInt(7))),
+                        delta);
+                return new Cast(new BinaryExpression(
+                        new Cast(ts, DATE), BinaryExpression.Op.ADD, new Cast(days, INT)), DATE);
+            }
+            case "format_number" -> {
+                if (a.size() != 2) return null;
+                int scale = requireLiteralInt(a.get(1), "format_number requires a literal scale");
+                return new FunctionCall("printf", List.of(
+                        Literal.ofString("%,." + Math.max(scale, 0) + "f"), lower(a.get(0))));
+            }
+            case "date_format" -> {
+                if (a.size() != 2) return null;
+                String pattern = literalString(a.get(1));
+                if (pattern == null) {
+                    throw new UnsupportedOperationException(
+                            "date_format requires a literal format string (Java -> strftime translation)");
+                }
+                int sss = pattern.indexOf("SSS");
+                if (sss >= 0) {
+                    if (pattern.indexOf("SSS", sss + 3) >= 0) {
+                        throw new UnsupportedOperationException("date_format: multiple SSS segments are not supported: " + pattern);
+                    }
+                    String before = SparkDialectFormats.javaFormatToStrftime(pattern.substring(0, sss));
+                    String after = SparkDialectFormats.javaFormatToStrftime(pattern.substring(sss + 3));
+                    Expression millis = new FunctionCall("lpad", List.of(
+                            new Cast(new BinaryExpression(
+                                    new BinaryExpression(
+                                            new FunctionCall("microsecond", List.of(new Cast(lower(a.get(0)), TIMESTAMP))),
+                                            BinaryExpression.Op.MOD, Literal.ofInt(1000000)),
+                                    BinaryExpression.Op.INT_DIV, Literal.ofInt(1000)), VARCHAR),
+                            Literal.ofInt(3), Literal.ofString("0")));
+                    List<Expression> parts = new ArrayList<>();
+                    if (!before.isEmpty()) parts.add(new FunctionCall("strftime", List.of(lower(a.get(0)), Literal.ofString(before))));
+                    parts.add(millis);
+                    if (!after.isEmpty()) parts.add(new FunctionCall("strftime", List.of(lower(a.get(0)), Literal.ofString(after))));
+                    return new FunctionCall("concat", parts);
+                }
+                String strftime = SparkDialectFormats.javaFormatToStrftime(pattern);
+                return new FunctionCall("strftime", List.of(lower(a.get(0)), Literal.ofString(strftime)));
+            }
+            case "from_json" -> {
+                if (a.size() < 2 || a.size() > 3) return null;
+                String schema = literalString(a.get(1));
+                if (schema == null) {
+                    throw new UnsupportedOperationException(
+                            "from_json requires a literal schema string (e.g. 'STRUCT<a INT, b STRING>' or 'a INT, b STRING')");
+                }
+                String duckSchema = SparkDialectFormats.sparkSchemaToDuckJson(schema);
+                Expression json = lower(a.get(0));
+                return new CaseWhen(List.of(new CaseWhen.WhenBranch(
+                                new FunctionCall("json_valid", List.of(json)),
+                                new FunctionCall("from_json", List.of(json, Literal.ofString(duckSchema))))),
+                        Literal.ofNull());
+            }
+            case "from_utc_timestamp", "to_utc_timestamp" -> {
+                if (a.size() != 2) return null;
+                Expression ts = new Cast(lower(a.get(0)), TIMESTAMP);
+                Expression tz = lower(a.get(1));
+                // from_utc: naive is UTC -> timezone('UTC', ts) makes it
+                // TIMESTAMPTZ, timezone(tz, ...) renders it in tz
+                // to_utc: naive is tz-local -> timezone(tz, ts) makes it
+                // TIMESTAMPTZ, timezone('UTC', ...) renders it in UTC
+                Expression asUtc = new FunctionCall("timezone", List.of(Literal.ofString("UTC"), ts));
+                Expression asTz = new FunctionCall("timezone", List.of(tz, ts));
+                return name.equals("from_utc_timestamp")
+                        ? new FunctionCall("timezone", List.of(tz, asUtc))
+                        : new FunctionCall("timezone", List.of(Literal.ofString("UTC"), asTz));
+            }
+            case "bround" -> {
+                if (a.isEmpty() || a.size() > 2) return null;
+                // connection-registered Java UDF; binder needs explicit casts
+                List<Expression> args = new ArrayList<>();
+                args.add(new Cast(lower(a.get(0)), DOUBLE));
+                if (a.size() == 2) args.add(new Cast(lower(a.get(1)), DOUBLE));
+                return new FunctionCall("bround", args);
+            }
+            case "conv" -> {
+                if (a.size() != 3) return null;
+                return new FunctionCall("conv", List.of(
+                        new Cast(lower(a.get(0)), VARCHAR),
+                        new Cast(lower(a.get(1)), VARCHAR),
+                        new Cast(lower(a.get(2)), VARCHAR)));
+            }
+            case "parse_url" -> {
+                if (a.size() < 2 || a.size() > 3) return null;
+                List<Expression> args = new ArrayList<>();
+                args.add(new Cast(lower(a.get(0)), VARCHAR));
+                args.add(new Cast(lower(a.get(1)), VARCHAR));
+                if (a.size() == 3) args.add(new Cast(lower(a.get(2)), VARCHAR));
+                return new FunctionCall("parse_url", args);
+            }
+            case "initcap" -> {
+                if (a.size() != 1) return null;
+                // connection-registered Java UDF (DuckDB has no initcap)
+                return new FunctionCall("initcap", List.of(new Cast(lower(a.get(0)), VARCHAR)));
+            }
+            case "nvl2" -> {
+                if (a.size() != 3) return null;
+                return new CaseWhen(List.of(new CaseWhen.WhenBranch(
+                                new UnaryExpression(UnaryExpression.Op.IS_NOT_NULL, lower(a.get(0))),
+                                lower(a.get(1)))),
+                        lower(a.get(2)));
+            }
+            case "equal_null" -> {
+                if (a.size() != 2) return null;
+                return new BinaryExpression(lower(a.get(0)), BinaryExpression.Op.EQ_NULL_SAFE, lower(a.get(1)));
+            }
+            case "mod", "pmod" -> {
+                if (a.size() != 2) return null;
+                // DuckDB % matches Spark mod (dividend sign). Spark pmod makes
+                // the result carry the divisor sign instead: when the raw
+                // remainder and the divisor disagree on sign (and raw is not
+                // zero), shift by one divisor.
+                Expression raw = new BinaryExpression(lower(a.get(0)), BinaryExpression.Op.MOD, lower(a.get(1)));
+                if (name.equals("mod")) return raw;
+                Expression divisor = lower(a.get(1));
+                Expression signMismatch = new BinaryExpression(
+                        new BinaryExpression(
+                                new BinaryExpression(raw, BinaryExpression.Op.LT, Literal.ofInt(0)),
+                                BinaryExpression.Op.AND,
+                                new BinaryExpression(divisor, BinaryExpression.Op.GT, Literal.ofInt(0))),
+                        BinaryExpression.Op.OR,
+                        new BinaryExpression(
+                                new BinaryExpression(raw, BinaryExpression.Op.GT, Literal.ofInt(0)),
+                                BinaryExpression.Op.AND,
+                                new BinaryExpression(divisor, BinaryExpression.Op.LT, Literal.ofInt(0))));
+                return new CaseWhen(List.of(new CaseWhen.WhenBranch(
+                                signMismatch,
+                                new BinaryExpression(raw, BinaryExpression.Op.ADD, divisor))),
+                        raw);
+            }
+            case "array_union" -> {
+                if (a.size() != 2) return null;
+                return new FunctionCall("list_distinct", List.of(new FunctionCall("list_concat", List.of(
+                        lower(a.get(0)), lower(a.get(1))))));
+            }
+            case "locate", "position" -> {
+                if (a.size() == 2) {
+                    // Spark locate(substr, str); DuckDB strpos(str, substr)
+                    return new FunctionCall("strpos", List.of(lower(a.get(1)), lower(a.get(0))));
+                }
+                if (a.size() == 3) {
+                    // search inside substring(str, pos) then offset back
+                    Expression substr = new FunctionCall("substr", List.of(
+                            lower(a.get(1)), lower(a.get(2))));
+                    Expression found = new FunctionCall("strpos", List.of(substr, lower(a.get(0))));
+                    // Spark: 0 when absent, else strpos(substr(...)) + pos - 1
+                    return new CaseWhen(List.of(new CaseWhen.WhenBranch(
+                                    new BinaryExpression(found, BinaryExpression.Op.EQ, Literal.ofInt(0)),
+                                    Literal.ofInt(0))),
+                            new BinaryExpression(found, BinaryExpression.Op.ADD,
+                                    new BinaryExpression(lower(a.get(2)), BinaryExpression.Op.SUB, Literal.ofInt(1))));
+                }
+                return null;
+            }
+            case "map" -> {
+                if (a.isEmpty() || a.size() % 2 != 0) return null;
+                List<Expression> keys = new ArrayList<>();
+                List<Expression> values = new ArrayList<>();
+                for (int i = 0; i < a.size(); i += 2) {
+                    keys.add(lower(a.get(i)));
+                    values.add(lower(a.get(i + 1)));
+                }
+                return new FunctionCall("map", List.of(
+                        new FunctionCall("list_value", keys),
+                        new FunctionCall("list_value", values)));
+            }
+            case "octet_length" -> {
+                if (a.size() != 1) return null;
+                // DuckDB's octet_length only binds for BLOB; strings need a cast
+                return new FunctionCall("octet_length", List.of(new Cast(lower(a.get(0)), BLOB)));
+            }
+            case "slice" -> {
+                if (a.size() != 3) return null;
+                return new FunctionCall("list_slice", List.of(
+                        lower(a.get(0)), lower(a.get(1)),
+                        new BinaryExpression(
+                                new BinaryExpression(lower(a.get(1)), BinaryExpression.Op.ADD, lower(a.get(2))),
+                                BinaryExpression.Op.SUB, Literal.ofInt(1))));
+            }
+            case "date_from_unix_date" -> {
+                if (a.size() != 1) return null;
+                return new Cast(new BinaryExpression(
+                        new Cast(Literal.ofString("1970-01-01"), DATE),
+                        BinaryExpression.Op.ADD,
+                        new Cast(lower(a.get(0)), INT)), DATE);
+            }
+            case "unix_date" -> {
+                if (a.size() != 1) return null;
+                return new FunctionCall("date_diff", List.of(
+                        Literal.ofString("day"),
+                        new Cast(Literal.ofString("1970-01-01"), DATE),
+                        new Cast(lower(a.get(0)), DATE)));
+            }
+            case "months_between" -> {
+                if (a.size() != 2) return null;
+                // Spark: (y1*12+m1) - (y2*12+m2) + day/time fraction difference / 31
+                Expression t1 = new Cast(lower(a.get(0)), TIMESTAMP);
+                Expression t2 = new Cast(lower(a.get(1)), TIMESTAMP);
+                Expression months1 = monthsComponent(t1);
+                Expression months2 = monthsComponent(t2);
+                Expression frac1 = dayFraction(t1);
+                Expression frac2 = dayFraction(t2);
+                return new BinaryExpression(
+                        new BinaryExpression(months1, BinaryExpression.Op.SUB, months2),
+                        BinaryExpression.Op.ADD,
+                        new BinaryExpression(
+                                new BinaryExpression(frac1, BinaryExpression.Op.SUB, frac2),
+                                BinaryExpression.Op.DIV, Literal.ofDecimal("31.0")));
+            }
+            case "array_join" -> {
+                if (a.size() == 2) {
+                    // DuckDB array_to_string is a direct match for the
+                    // no-null-substitute form
+                    return new FunctionCall("array_to_string",
+                            List.of(lower(a.get(0)), lower(a.get(1))));
+                }
+                if (a.size() != 3) return null;
+                // 3-arg form null-substitutes inside the element transform
+                return new FunctionCall("array_to_string", List.of(
+                        new FunctionCall("list_transform", List.of(
+                                lower(a.get(0)),
+                                new Lambda(List.of("x"), new FunctionCall("coalesce", List.of(
+                                        new Cast(new AttributeReference("x", List.of()), VARCHAR),
+                                        lower(a.get(2))))))),
+                        lower(a.get(1))));
+            }
+            case "map_from_arrays" -> {
+                if (a.size() != 2) return null;
+                // DuckDB map(keys[], values[]) matches directly; emitted as
+                // "map" without re-entering the k/v-pairs map lowering
+                return new FunctionCall("map", List.of(lower(a.get(0)), lower(a.get(1))));
+            }
+            case "zip_with" -> {
+                if (a.size() != 3 || !(a.get(2) instanceof Lambda lam) || lam.variables().size() != 2) {
+                    throw new UnsupportedOperationException("zip_with requires (a, b, (x, y) -> expr)");
+                }
+                String x = lam.variables().get(0);
+                String y = lam.variables().get(1);
+                Expression loweredBody = lowerBody(lam.body(), java.util.Map.of(
+                        x, listExtract(a.get(0)),
+                        y, listExtract(a.get(1))));
+                Expression indexRange = new FunctionCall("range", List.of(
+                        Literal.ofInt(1),
+                        new BinaryExpression(
+                                new FunctionCall("greatest", List.of(
+                                        new FunctionCall("len", List.of(lower(a.get(0)))),
+                                        new FunctionCall("len", List.of(lower(a.get(1)))))),
+                                BinaryExpression.Op.ADD,
+                                Literal.ofInt(1))));
+                return new FunctionCall("list_transform", List.of(
+                        indexRange, new Lambda(List.of("i"), loweredBody)));
             }
             case "shiftleft" -> {
                 if (a.size() != 2) return null;

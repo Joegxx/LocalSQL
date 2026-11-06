@@ -72,7 +72,7 @@ ir -> (nothing)
 - `localsql-parser` - ANTLR4 语法 + `SparkSqlParser` 入口。**只有 parse-tree,不做任何逻辑。**
 - `localsql-ir` - 公共 IR。`Relation` 和 `Expression` 当前是 abstract class，不是 sealed 层级；`Statement` 表示顶层语句；`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源，任何后端不得绕过 IR 直接读 parse-tree。
 - `localsql-spark` - `SparkAstBuilder` 把 ParseTree 转成 IR。`SparkExpressionBuilder` 和 `SparkDataTypeBuilder` 是 package-private 辅助类。
-- `localsql-catalog` - 目标是纯逻辑元数据 + 持久化抽象。当前为 `LinkedHashMap` 缓存，配置 `CatalogStore` 后已有持久化；`CatalogStore.RuntimeInfo` 与 `CatalogService.renameTable` 修改 SQL 是待移除的边界偏离，不能照此扩展。
+- `localsql-catalog` - 纯逻辑元数据 + 持久化抽象，`LinkedHashMap` 缓存，配置 `CatalogStore` 后持久化。A2 已完成：`RuntimeInfo` 独立为 `RuntimeStore` 接口（Catalog 只存逻辑元数据）；`renameTable` 只做逻辑重命名，不再修补 SQL 字符串；写路径统一走 `CatalogService`（SET/UNSET TBLPROPERTIES 已收编），`registerTable` 对重复注册显式报错。
 - `localsql-duckdb` - Generator、JDBC Executor、`DuckDbCatalogStore` 和内置 Java 函数注册。当前 Generator 仍包含表达式重写；目标迁移至 Rewrite 后只序列化 IR。
 - `localsql-udf-api` - UDF 定义、注册表、批数据与 Gateway 接口，不包含 Hive 执行实现。
 - `localsql-udf-runtime` - 进程内 Hive UDF/GenericUDF/GenericUDTF 适配。独立 Gateway JVM 尚未实现，不能把 classloader 当作进程隔离或可靠超时机制。
@@ -124,7 +124,7 @@ ir -> (nothing)
 
 `emitJoin` **不**加 `SELECT * FROM` 前缀 - 之前是 bug。`FROM` 子句必须走 `emitChildSource`,永远不要裸用 `emit`。
 
-`DuckDbSqlGenerator` 的**目标**是无执行状态的序列化器。当前持有不可变函数配置，但还承担函数降级与表达式重写，须按开发计划迁移。**禁止新增**:
+`DuckDbSqlGenerator` 是无执行状态、无函数语义的序列化器（A1 已完成：`FN_MAP`/`emitMappedFunction`/`REFLECT_MAP` 均已删除，函数改名归 `FunctionNameRewriter`、降级归 `ExpressionLowering`，均在 rewrite 模块）。**禁止新增**:
 - 查 Catalog
 - 解析名称(标识符解析是 Analyzer 的活)
 - 重写表达式
@@ -145,7 +145,7 @@ Generator 永远不用查 Catalog。
 
 ## 函数映射归属(避免双重映射)
 
-现状：Rewrite 已接入且会 rename；Generator 的 `FN_MAP`、`emitMappedFunction`、自定义 rename/template 仍在做转换。二者并非独占关系，存在重复映射和覆盖顺序风险。
+现状（A1 完成后）：Rewrite 独占函数转换——`FunctionNameRewriter` 做 1:1 改名（62 对），`ExpressionLowering` 做参数重排/包装降级（含 reflect/java_method 白名单、array_join/map_from_arrays、全部 lambda 高阶函数与字面量模板族）。Generator 只按 IR 原名发射，无任何函数映射表。
 
 M2 已落地 A3 元数据契约：analyzer 模块新增 `FunctionCatalog`(只读 SPI)、`FunctionInfo`(name/aliases/arity/kind)、`FunctionKind`(SCALAR/AGGREGATE/WINDOW/TABLE)、`BuiltInFunctionCatalog`(Spark 3.2 内置名单,别名 substr→substring、ceiling→ceil、power→pow、char_length→length)。`SemanticAnalyzer(catalog, functions, strictFunctions)` 在解析 `FunctionCall` 时查目录；strict 模式拒绝未知函数，lenient 模式(SqlPipeline 当前默认)透传。别名重定向是元数据层行为,不影响 Rewrite/Generator 的翻译归属。
 
@@ -160,8 +160,9 @@ M2 已落地 A3 元数据契约：analyzer 模块新增 `FunctionCatalog`(只读
 - 命名窗口(`WINDOW w AS ...`)、聚合 `FILTER` 子句、`NATURAL JOIN`(需要同名列解析)抛 `UnsupportedOperationException`
 - 位运算/整数除法/`<=>`/`JOIN USING` 已正确映射(`INT_DIV` -> `//`、`BIT_XOR` -> `xor()`、`EQ_NULL_SAFE` -> `IS NOT DISTINCT FROM`)
 - Catalog 已有内存缓存 + DuckDB store；缺口是失败一致性、runtime 职责分离和数据库级持久化，不是尚未接入 store
-- Analyzer 严格名称解析已落地（M2/F1）：分层 Scope、错库/错表/缺列/歧义执行前拒绝、Star 展开、ORDER BY/HAVING 别名可见性（select 输出优先）、lambda 变量绑定、alias 屏蔽表名；类型传播仍不完整。DDL 缓存回滚（F2）与 UDF 兼容（F3）已修复；语法静默丢失（F4）、Thrift（F5）已修复；UDF 打包依赖缺口仍在
-- 导入异常清理会按裸表名删除物理表，可能误删其他库已有对象；该独立风险未纳入本轮六项主线，修复前禁止在不可丢弃的数据副本上验证导入
+- Analyzer 严格名称解析已落地（M2/F1）：分层 Scope、错库/错表/缺列/歧义执行前拒绝、Star 展开、ORDER BY/HAVING 别名可见性（select 输出优先）、lambda 变量绑定、alias 屏蔽表名；类型传播仍不完整（Identifier 绑定已回传带类型的引用，普通 Identifier 不再丢 dataType）。DDL 缓存回滚（F2）与 UDF 兼容（F3）已修复；语法静默丢失（F4）已修复；Thrift（F5）仅部分修复——GetResultSetMetadata 仍全列 STRING、GetOperationStatus 一律 FINISHED、无效 session 回落 default、CloseOperation 不校验句柄，缺口仍在；UDF 打包依赖缺口仍在
+- 2026-10-02 审查修复：SqlPipeline INSERT/CTAS/CREATE VIEW 三处已消费 RewriteEngine 返回值（函数降级对 DML/DDL 生效）；builtin explode LATERAL VIEW 修复——FunctionNameRewriter 在 Generate 生成器位置跳过 explode/posexplode 改名、ExpressionLowering 把 explode 解包为纯列表实参、Generator 以 `FROM <child>, UNNEST(list) AS <viewAlias>(<col>)` 表函数形式内联发射（child 经 emitChildSource 括号保护），posexplode 显式拒绝；UdfProjectionSplitter 解包/重建按实际嵌套形状（Limit(Sort(Project))）还原；DdlImporter 失败清理基于导入前物理表快照（快照失败则只做 qualified 逻辑 DROP），varchar/char 预处理正则补 `\b` 不再破坏含 char/varchar 字样的标识符
+- 导入异常清理已改为只回滚本次导入新建的物理表（基于导入前快照），不再按裸表名误删其他库已有对象
 
 ## TPC-DS 统一测试
 
@@ -222,12 +223,12 @@ L3 组件(全部 DuckDB 自举):
 - `SqlPipeline` 已统一调用 Analyzer/Rewrite，Thrift 与直接执行入口复用它。
 - Main 已支持 typed 样例、DDL 文件导入、持久化库加载、UDF 与函数映射配置。
 
-下一阶段按 [开发计划](docs/development-plan.md) 执行：A1 Generator → Rewrite、A2 CatalogService 边界、A3 函数转换统一，以及 F1–F6 六项正确性修复。A1 前两批已落地：`FunctionNameRewriter`（rewrite 模块）持有 62 个 1:1 改名对（Spark 源名→DuckDB 名，如 instr→strpos、size→array_length、mean→avg）；`ExpressionLowering`（rewrite 模块）把 40 个参数重排/包装函数降级为纯 IR（if→CASE WHEN、isnull→IS NULL、datediff→date_diff 重排、to_date→CAST/strptime、count_if→count(CASE)、collect_set→list(DISTINCT)、current_catalog→字面量等），关系树经 RewriteEngine 重建返回新树，`SqlPipeline` 已改为使用返回值（A1 验收：调用方必须用返回值）。Generator 的 `FN_MAP` 已删除这 62+1 对、`emitMappedFunction` 已删除对应 34 个 case；`map_from_arrays` 因 DuckDB `case "map"` 参数重排冲突留待 map 族一起迁移。A1 第三批已迁：CAST 类型函数（string/tinyint/.../decimal(x,p,s)→Cast IR）、sort_array、sequence、date_trunc（unit 字面量翻译）、sha2、reflect/java_method（REFLECT_MAP 移入 Rewrite）、array_repeat。仍留 Generator 的特判族：lambda 高阶函数（transform/zip_with/map_zip_with/map_filter/exists/forall/aggregate/array_except/array_join/array_remove）、字面量模板族（date_format/from_json/named_struct/next_day/substring_index/format_number）、位运算/溢出（shift/getbit/bit_*/try_add，需 IR 加 SHIFT/try_cast 支持）、时区（from/to_utc_timestamp，AT TIME ZONE 语法）、bround/conv/parse_url（连接级 Java UDF）。新增数据库元数据表与存储版本迁移是拟议方案，尚未实现；正式迁移前必须确认旧库兼容与备份策略。
+下一阶段按 [开发计划](docs/development-plan.md) 执行：F3 残留（正式 JAR 的 UDF 配置入口缺 Hive 运行依赖）与 F2 收尾（提交失败「状态未知」的 store 重载恢复）。**F6 数据库级持久化已完成**（catalog_database/catalog_db_property/catalog_schema_version 三表 + 旧库从 catalog_table 推导迁移 + ensureDefaultDatabase；重启保留/迁移幂等/未知版本拒绝均有回归）。**A2 主体已完成****A1 已完成**；**A2 主体已完成**（rename 的 replay DDL 改为从 DuckDB 物理元数据 `duckdb_views()`/`duckdb_tables()` 读取（`readPhysicalCreateSql`），删除 `replayDdlAfterRename` 正则修补；RuntimeStore 接口分离早已落地；SET/UNSET TBLPROPERTIES 旁路写收编进 `CatalogService.updateTable`；registerTable 重复注册显式拒绝）（Generator 的 `FN_MAP` 139 entry、`emitMappedFunction` 全部 case、`REFLECT_MAP` 死代码已全部删除；函数转换唯一归属 rewrite 模块）。迁移批次记录：`FunctionNameRewriter`（rewrite 模块）持有 62 个 1:1 改名对（Spark 源名→DuckDB 名，如 instr→strpos、size→array_length、mean→avg）；`ExpressionLowering`（rewrite 模块）把 40 个参数重排/包装函数降级为纯 IR（if→CASE WHEN、isnull→IS NULL、datediff→date_diff 重排、to_date→CAST/strptime、count_if→count(CASE)、collect_set→list(DISTINCT)、current_catalog→字面量等），关系树经 RewriteEngine 重建返回新树，`SqlPipeline` 已改为使用返回值（A1 验收：调用方必须用返回值）。Generator 的 `FN_MAP` 已删除这 62+1 对、`emitMappedFunction` 已删除对应 34 个 case；第六批（收尾）：nvl2/equal_null/mod/pmod（pmod 符号修正）/array_union/locate/map/octet_length/slice/date_from_unix_date/unix_date/months_between + 字面量模板族迁 `SparkDialectFormats`（named_struct/substring_index/next_day/format_number/date_format 含 SSS 毫秒分段/from_json 含 json_valid 守卫与 SchemaParser 迁移）+ from/to_utc_timestamp 纯函数形式 + initcap/bround/conv/parse_url 连接级 UDF。最后一批：FN_MAP 137 个 identity entry 删除（getOrDefault 等价）、array_join 2参与 map_from_arrays 迁入 ExpressionLowering（后者发射裸 `map` 避免与 k/v 对重排冲突）。已知坑：lambda 族必须先 lower body 再 substitute，否则替换表达式里的 `map(lv,lv)` 会被二次重排。A1 第三批已迁：CAST 类型函数（string/tinyint/.../decimal(x,p,s)→Cast IR）、sort_array、sequence、date_trunc（unit 字面量翻译）、sha2、reflect/java_method（REFLECT_MAP 移入 Rewrite）、array_repeat。lambda 高阶函数（A1 第五批已迁：exists/forall→len(list_filter)、aggregate→list_reduce+zero 前置、array_except→list_distinct(list_filter NOT contains)、array_remove→list_filter NOT EQ_NULL_SAFE、array_join 3参→array_to_string+COALESCE、zip_with→range 索引迭代+变量替换、transform_values/transform_keys/map_filter→map_entries 双变量 lambda 降级、map_zip_with→map_extract 值查找+并键迭代；IR StructExpr 新增 fieldNames 支持 struct_pack(name := v) 带名形式）、字面量模板族（date_format/from_json/named_struct/next_day/substring_index/format_number）、位运算/溢出（A1 第四批已迁：shiftleft/shiftright→Binary SHIFT_LEFT/RIGHT、shiftrightunsigned→UBIGINT 掩码+SHIFT_RIGHT、getbit/bit_get→(x>>b)&1、bit_and/bit_or→&/|、bit_xor→xor()、try_add→TRY_CAST(x AS HUGEINT) 求和；IR 新增 BinaryExpression.SHIFT_LEFT/RIGHT、Cast.tryCast、IntegralType UBIGINT/HUGEINT 类型名）、时区（from/to_utc_timestamp，AT TIME ZONE 语法）、bround/conv/parse_url（连接级 Java UDF）。新增数据库元数据表与存储版本迁移是拟议方案，尚未实现；正式迁移前必须确认旧库兼容与备份策略。
 
 ## 验证基线（2026-09-11）
 
 - Java 21 下 `mvn -o package -DskipTests` 成功。
-- 排除 `TpcdsConsistencyTest`/`TpcdsGoldenResultTest`（需真实端口与 tpcds 扩展）后 `mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest' -Dsurefire.failIfNoSpecifiedTests=false` 全量 554 项通过。
+- 排除 `TpcdsConsistencyTest`/`TpcdsGoldenResultTest`（需真实端口与 tpcds 扩展）后 `mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest' -Dsurefire.failIfNoSpecifiedTests=false` 全量 561 项通过。
 - 全量命令在本沙箱可完成 bind；TPC-DS 翻译 136 项（135 SQL + 汇总）含 24 表 fixture 绑定全绿，真实端口差分仍未跑。
 - M2 验收覆盖：F1AnalyzerBindingTest 20 项（USE/限定名/LIKE/CTE/子查询/self join/别名/JOIN USING 正反例 + 输出 schema）、FunctionCatalogContractTest 11 项（A3 契约）、SemanticAnalyzerContractTest 4 项（strict 闸门）。
 

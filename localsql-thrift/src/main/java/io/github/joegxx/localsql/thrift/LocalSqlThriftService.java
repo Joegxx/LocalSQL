@@ -43,9 +43,11 @@ final class LocalSqlThriftService implements TCLIService.Iface {
     private static final class SessionState {
         final TSessionHandle handle;
         volatile String currentDatabase;
-        SessionState(TSessionHandle handle, String initialDatabase) {
+        final Dialect dialect;
+        SessionState(TSessionHandle handle, String initialDatabase, Dialect dialect) {
             this.handle = handle;
             this.currentDatabase = initialDatabase;
+            this.dialect = dialect;
         }
     }
 
@@ -80,7 +82,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                 : TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11;
         TOpenSessionResp resp = new TOpenSessionResp(ok(), negotiated);
         resp.setServerProtocolVersion(negotiated);
-        resp.setSessionHandle(newSessionHandle(sessionDatabase(req)));
+        resp.setSessionHandle(newSessionHandle(sessionDatabase(req), sessionDialect(req)));
         resp.setConfiguration(new java.util.HashMap<>());
         return resp;
     }
@@ -97,6 +99,25 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             if (fromUrl != null && !fromUrl.isBlank()) return fromUrl;
         }
         return defaultDatabase;
+    }
+
+    /**
+     * Connection-time SQL dialect: hive-jdbc delivers URL session vars under
+     * several key forms; all accepted forms are listed here. Unknown values
+     * warn and fall back to SPARK — never silently misconfigure.
+     */
+    private Dialect sessionDialect(TOpenSessionReq req) {
+        Map<String, String> conf = req.getConfiguration();
+        if (conf == null) return Dialect.SPARK;
+        for (String key : List.of("sql_dialect", "set:hiveconf:sql_dialect", "set:var:sql_dialect")) {
+            String value = conf.get(key);
+            if (value == null || value.isBlank()) continue;
+            java.util.Optional<Dialect> dialect = Dialect.fromSessionValue(value);
+            if (dialect.isPresent()) return dialect.get();
+            LOG.warn("Unknown sql_dialect value '{}' (session key '{}'); falling back to spark", value, key);
+            return Dialect.SPARK;
+        }
+        return Dialect.SPARK;
     }
 
     @Override
@@ -128,7 +149,8 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         String sessionId = guid(req.getSessionHandle());
         SessionState session = sessions.get(sessionId);
         String currentDb = session != null ? session.currentDatabase : "default";
-        LOG.info("ExecuteStatement [session={}, db={}]: {}", sessionId, currentDb, sql);
+        Dialect dialect = session != null ? session.dialect : Dialect.SPARK;
+        LOG.info("ExecuteStatement [session={}, db={}, dialect={}]: {}", sessionId, currentDb, dialect, sql);
         TOperationHandle opHandle = newHandle(TOperationType.EXECUTE_STATEMENT, true);
         try {
             // admin/introspection statements (SHOW/DESCRIBE/USE) that IDEs send;
@@ -145,7 +167,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
                     LOG.info("Admin statement handled: {} row(s)", result.rows().size());
                     operations.put(guid(opHandle), new OperationState(opHandle, result.colMetas(), result.rows(), false));
                 } else {
-                    DuckDbExecutor.QueryResult result = pipeline.execute(sql, currentDb);
+                    DuckDbExecutor.QueryResult result = pipeline.execute(sql, currentDb, dialect);
                     operations.put(guid(opHandle), new OperationState(opHandle, result.colMetas(), result.rows(), false));
                 }
             }
@@ -626,10 +648,10 @@ final class LocalSqlThriftService implements TCLIService.Iface {
         return list;
     }
 
-    private TSessionHandle newSessionHandle(String initialDatabase) {
+    private TSessionHandle newSessionHandle(String initialDatabase, Dialect dialect) {
         THandleIdentifier id = newHandleId();
         TSessionHandle h = new TSessionHandle(id);
-        sessions.put(key(id.getGuid()), new SessionState(h, initialDatabase));
+        sessions.put(key(id.getGuid()), new SessionState(h, initialDatabase, dialect));
         return h;
     }
 

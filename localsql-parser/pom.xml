@@ -24,6 +24,7 @@
                 <artifactId>antlr4-maven-plugin</artifactId>
                 <configuration>
                     <sourceDirectory>${basedir}/src/main/antlr4</sourceDirectory>
+                    <libDirectory>${basedir}/src/main/antlr4/com/starrocks/sql/parser</libDirectory>
                     <visitor>true</visitor>
                     <listener>true</listener>
                 </configuration>

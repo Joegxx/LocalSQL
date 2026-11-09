@@ -42,6 +42,7 @@ final class SqlPipeline {
     private final SparkAstBuilder astBuilder = new SparkAstBuilder();
     private final SemanticAnalyzer analyzer;
     private final RewriteEngine rewriter;
+    private final Map<Dialect, DialectRuntime> runtimes;
     private final UdfSupport udfSupport;
     private final UdfProjectionSplitter udfSplitter;
     private final UdtfGenerateSplitter udtfSplitter;
@@ -74,6 +75,11 @@ final class SqlPipeline {
         this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
         this.generator = generator == null ? new DuckDbSqlGenerator() : generator;
         this.rewriter = new RewriteEngine(reservedFunctionNames(), udtfGeneratorNames());
+        // 方言注册表：SPARK bundle 包装现有组件，行为与改造前完全一致。
+        // STARROCKS bundle 随 M1（前端）/M2（strict analyzer + 方言作用域 rewrite）加入。
+        this.runtimes = Map.of(Dialect.SPARK, new DialectRuntime(
+                sql -> astBuilder.buildStatement(sql, s -> parser.parseStatement(s)),
+                analyzer, rewriter));
     }
 
     /** Registered UDTF source names; their LATERAL VIEW generators pass lowering. */
@@ -96,17 +102,31 @@ final class SqlPipeline {
      * runtime trades concurrency for correctness here.
      */
     synchronized DuckDbExecutor.QueryResult execute(String sql) throws SQLException {
-        return execute(sql, "default");
+        return execute(sql, "default", Dialect.SPARK);
     }
 
     /** @param currentDatabase session database for unqualified table names. */
     synchronized DuckDbExecutor.QueryResult execute(String sql, String currentDatabase) throws SQLException {
+        return execute(sql, currentDatabase, Dialect.SPARK);
+    }
+
+    /**
+     * @param dialect connection-time dialect for this session; selects the
+     *                frontend/analyzer/rewrite bundle. Unknown or not-yet-wired
+     *                dialects fail loudly instead of silently degrading to SPARK.
+     */
+    synchronized DuckDbExecutor.QueryResult execute(String sql, String currentDatabase, Dialect dialect) throws SQLException {
+        DialectRuntime runtime = runtimes.get(dialect);
+        if (runtime == null) {
+            throw new UnsupportedOperationException(
+                    "SQL dialect '" + dialect + "' is not supported by this build yet");
+        }
         this.sessionDatabase = currentDatabase == null || currentDatabase.isEmpty()
                 ? "default" : currentDatabase;
-        Statement stmt = astBuilder.buildStatement(sql, s -> parser.parseStatement(s));
+        Statement stmt = runtime.frontend().parse(sql);
         if (stmt instanceof QueryStatement q) {
-            Relation rel = analyzer.analyze(q.query(), sessionDatabase);
-            rel = rewriter.rewrite(rel);
+            Relation rel = runtime.analyzer().analyze(q.query(), sessionDatabase);
+            rel = runtime.rewriter().rewrite(rel);
             if (udtfSplitter != null) {
                 UdtfGenerateSplitter.UdtfPlan udtfPlan = udtfSplitter.trySplit(rel);
                 if (udtfPlan != null) return executeWithUdtf(udtfPlan);

@@ -1,0 +1,52 @@
+localsql-parser/pom.xml
+  s_273c04d32969ec::t_5988d076e65e4d 27
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_273c04d32969ec::t_dc50401bf1bde0 78-82
+  s_273c04d32969ec::t_dd49bbc1c01d52 105,110-123,126,128-129
+  s_273c04d32969ec::t_8ad9a38216dc36 45
+localsql-parser/src/main/antlr4/com/starrocks/sql/parser/StarRocksLex.g4
+  s_273c04d32969ec::t_10ddffabd2f9d1 18
+  s_273c04d32969ec::t_0781ff57937328 1-17,19-521,523-620
+  s_273c04d32969ec::t_09489e4e337e37 522
+localsql-parser/src/test/java/io/github/joegxx/localsql/parser/StarRocksLexerProbeTest.java
+  s_273c04d32969ec::t_66a8a3ce952171 1-6,8-23,25-41,43-49,51-58,60-67,69-74,76-86,88-100
+  s_273c04d32969ec::t_7abac23e890c2d 7,24,42,50,59,68,75,87
+docs/starrocks-compat-plan.md
+  s_273c04d32969ec::t_9cbaf5758ed1c6 1-127
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_273c04d32969ec::t_45a84c48559417 152-153
+  s_273c04d32969ec::t_3cfed4f3b1b954 651,654
+  s_273c04d32969ec::t_130475a5e8d47f 170
+  s_273c04d32969ec::t_aefdc3461ed750 85
+  s_273c04d32969ec::t_c9aecd750a1243 46-47,50
+  s_273c04d32969ec::t_a25ee444595536 104-122
+localsql-parser/src/main/java/io/github/joegxx/localsql/parser/StarRocksSqlParser.java
+  s_273c04d32969ec::t_302a207fb3bd4f 28
+  s_273c04d32969ec::t_af8aea9258f617 1-27,29-65
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DialectSessionTest.java
+  s_273c04d32969ec::t_75cd90e039bdce 1-127
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/DialectRuntime.java
+  s_273c04d32969ec::t_642c5fd0f63455 1-11
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlFrontend.java
+  s_273c04d32969ec::t_e8ace004876a14 1-12
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/Dialect.java
+  s_273c04d32969ec::t_8ee871b1cddeb0 1-27
+localsql-parser/src/main/antlr4/com/starrocks/sql/parser/StarRocks.g4
+  s_273c04d32969ec::t_0781ff57937328 1-3115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "4fed4ecca97c4d890af993eb9bb1b548a8da7912",
+  "prompts": {},
+  "sessions": {
+    "s_273c04d32969ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e5522f06dffe2A9PNs51jooYQo",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

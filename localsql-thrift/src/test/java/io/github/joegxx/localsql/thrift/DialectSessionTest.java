@@ -97,12 +97,12 @@ class DialectSessionTest {
     }
 
     @Test
-    void starrocksDialectFailsLoudlyBeforeM1Wiring() throws Exception {
+    void starrocksDialectExecutesThroughItsOwnFrontend() throws Exception {
+        // M1 接线后：starrocks 会话经 StarRocksAstBuilder 解析执行
         try (Client c = new Client(port, Map.of("sql_dialect", "starrocks"))) {
             TExecuteStatementResp resp = c.execute("SELECT 1");
-            assertEquals(TStatusCode.ERROR_STATUS, resp.getStatus().getStatusCode());
-            assertTrue(resp.getStatus().getErrorMessage().contains("STARROCKS"),
-                    "error should name the dialect: " + resp.getStatus().getErrorMessage());
+            assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode(),
+                    "starrocks dialect should execute: " + resp.getStatus().getErrorMessage());
         }
     }
 
@@ -110,9 +110,7 @@ class DialectSessionTest {
     void hiveConfKeyFormAccepted() throws Exception {
         // hive-jdbc 的 session var 可能以 set:hiveconf: 前缀送达
         try (Client c = new Client(port, Map.of("set:hiveconf:sql_dialect", "starrocks"))) {
-            TExecuteStatementResp resp = c.execute("SELECT 1");
-            assertEquals(TStatusCode.ERROR_STATUS, resp.getStatus().getStatusCode());
-            assertTrue(resp.getStatus().getErrorMessage().contains("STARROCKS"));
+            assertEquals(TStatusCode.SUCCESS_STATUS, c.execute("SELECT 1").getStatus().getStatusCode());
         }
     }
 

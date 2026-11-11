@@ -17,6 +17,8 @@ import io.github.joegxx.localsql.rewrite.RewriteEngine;
 import io.github.joegxx.localsql.rewrite.UdfProjectionSplitter;
 import io.github.joegxx.localsql.rewrite.UdtfGenerateSplitter;
 import io.github.joegxx.localsql.spark.SparkAstBuilder;
+import io.github.joegxx.localsql.starrocks.StarRocksAstBuilder;
+import io.github.joegxx.localsql.parser.StarRocksSqlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,11 +77,17 @@ final class SqlPipeline {
         this.udtfSplitter = udfSupport == null ? null : new UdtfGenerateSplitter(udfSupport.registry());
         this.generator = generator == null ? new DuckDbSqlGenerator() : generator;
         this.rewriter = new RewriteEngine(reservedFunctionNames(), udtfGeneratorNames());
-        // 方言注册表：SPARK bundle 包装现有组件，行为与改造前完全一致。
-        // STARROCKS bundle 随 M1（前端）/M2（strict analyzer + 方言作用域 rewrite）加入。
-        this.runtimes = Map.of(Dialect.SPARK, new DialectRuntime(
-                sql -> astBuilder.buildStatement(sql, s -> parser.parseStatement(s)),
-                analyzer, rewriter));
+        // 方言注册表：bundle 的三件套成对注册。SPARK bundle 包装现有组件，行为与
+        // 改造前一致；STARROCKS bundle 的 strict analyzer 与方言作用域 rewrite 在 M2 落地。
+        StarRocksSqlParser starRocksParser = new StarRocksSqlParser();
+        StarRocksAstBuilder starRocksAstBuilder = new StarRocksAstBuilder();
+        this.runtimes = Map.of(
+                Dialect.SPARK, new DialectRuntime(
+                        sql -> astBuilder.buildStatement(sql, s -> parser.parseStatement(s)),
+                        analyzer, rewriter),
+                Dialect.STARROCKS, new DialectRuntime(
+                        sql -> starRocksAstBuilder.buildStatement(sql, starRocksParser::parseStatement),
+                        analyzer, rewriter));
     }
 
     /** Registered UDTF source names; their LATERAL VIEW generators pass lowering. */

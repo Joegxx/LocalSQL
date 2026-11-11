@@ -29,6 +29,10 @@
         </dependency>
         <dependency>
             <groupId>io.github.joegxx.localsql</groupId>
+            <artifactId>localsql-starrocks</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.joegxx.localsql</groupId>
             <artifactId>localsql-analyzer</artifactId>
         </dependency>
         <dependency>

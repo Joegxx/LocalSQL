@@ -330,12 +330,11 @@ final class StarRocksExpressionBuilder {
         if (ctx instanceof StarRocksParser.WindowFunctionCallContext c) {
             // ignoreNulls appears in several windowFunction alternatives, so the
             // generated accessor is the list form (never null, empty when absent)
-            if (!c.windowFunction().ignoreNulls().isEmpty()) {
-                throw new UnsupportedOperationException("IGNORE NULLS is not supported");
-            }
+            boolean ignoreNulls = !c.windowFunction().ignoreNulls().isEmpty();
             String name = c.windowFunction().name.getText().toLowerCase();
             List<Expression> args = visitArgs(c.windowFunction().expression());
             FunctionCall call = new FunctionCall(name, args);
+            call.setIgnoreNulls(ignoreNulls);
             call.setWindowSpec(visitOver(c.over()));
             return call;
         }

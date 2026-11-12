@@ -157,7 +157,19 @@ class StarRocksAstBuilderTest {
                 "CREATE TABLE t (a INT)"));
         assertThrows(UnsupportedOperationException.class, () -> rel(
                 "SELECT a, b FROM t WHERE (a, b) IN (SELECT x, y FROM s)"));
-        assertThrows(UnsupportedOperationException.class, () -> rel(
-                "SELECT first_value(a IGNORE NULLS) OVER (ORDER BY b) FROM t"));
+    }
+
+    @Test
+    void ignoreNullsFlagPreserved() {
+        // IGNORE NULLS 落在 FunctionCall 标志上，由 generator 发射到最后一个参数后
+        Project project = (Project) rel(
+                "SELECT first_value(a IGNORE NULLS) OVER (ORDER BY b) FROM t");
+        FunctionCall call = (FunctionCall) project.projectList().get(0);
+        assertEquals("first_value", call.name());
+        assertEquals(true, call.ignoreNulls());
+        Project lead = (Project) rel("SELECT lead(a IGNORE NULLS, 1) OVER (ORDER BY b) FROM t");
+        assertEquals(true, ((FunctionCall) lead.projectList().get(0)).ignoreNulls());
+        Project plain = (Project) rel("SELECT rank() OVER (ORDER BY a) FROM t");
+        assertEquals(false, ((FunctionCall) plain.projectList().get(0)).ignoreNulls());
     }
 }

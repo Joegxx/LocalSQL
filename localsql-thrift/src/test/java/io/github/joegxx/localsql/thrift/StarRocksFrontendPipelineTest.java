@@ -39,23 +39,25 @@ class StarRocksFrontendPipelineTest {
      * yet. Every entry must be a genuinely unimplemented feature, verified in
      * the failure message.
      */
-    private static final List<String> KNOWN_GAPS = List.of(
-            // first_value/last_value ... IGNORE NULLS: FunctionCall carries no
-            // ignore-nulls flag yet; planned as its own IR+generator batch
-            "q36.sql", "q44.sql", "q47.sql", "q49.sql",
-            "q57.sql", "q67.sql", "q70.sql", "q86.sql");
+    private static final List<String> KNOWN_GAPS = List.of();
 
     private static final StarRocksSqlParser parser = new StarRocksSqlParser();
     private static final StarRocksAstBuilder builder = new StarRocksAstBuilder();
     private static final DuckDbSqlGenerator generator = new DuckDbSqlGenerator();
-    private static final RewriteEngine rewriter = new RewriteEngine();
+    private static final RewriteEngine rewriter = new RewriteEngine(java.util.Set.of(), java.util.Set.of(), true);
     private static final SemanticAnalyzer analyzer = newAnalyzer();
 
+    /**
+     * Strict name resolution against the StarRocks function catalog: this
+     * doubles as the catalog-coverage check — every function name in the
+     * official corpus must bind, or the suite fails.
+     */
     private static SemanticAnalyzer newAnalyzer() {
         try {
             CatalogService catalog = new CatalogService();
             TpcdsCatalogFixture.register(catalog);
-            return new SemanticAnalyzer(catalog.catalog());
+            return new SemanticAnalyzer(catalog.catalog(),
+                    io.github.joegxx.localsql.analyzer.StarRocksFunctionCatalog.instance(), true);
         } catch (Exception e) {
             throw new IllegalStateException("TPC-DS catalog fixture failed to register", e);
         }

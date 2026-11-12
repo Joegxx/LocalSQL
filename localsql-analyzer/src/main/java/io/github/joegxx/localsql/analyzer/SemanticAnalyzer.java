@@ -33,6 +33,10 @@ public final class SemanticAnalyzer {
     private final FunctionCatalog functions;
     private final boolean strictFunctions;
 
+    /** Operator encodings the builders emit as calls; never catalog-bound. */
+    private static final java.util.Set<String> INTERNAL_OPERATOR_CALLS =
+            java.util.Set.of("between", "exists", "like", "rlike");
+
     public SemanticAnalyzer(Catalog catalog) { this(catalog, null, false); }
 
     /**
@@ -853,6 +857,9 @@ public final class SemanticAnalyzer {
          */
         private void bindFunction(FunctionCall f) {
             if (functions == null) return;
+            // operator encodings, not catalog-able functions: the builders
+            // emit infix BETWEEN/EXISTS/LIKE/RLIKE as calls for the generator
+            if (INTERNAL_OPERATOR_CALLS.contains(f.name().toLowerCase(java.util.Locale.ROOT))) return;
             Optional<FunctionInfo> info = functions.lookup(f.name());
             if (info.isEmpty()) {
                 if (strictFunctions) {

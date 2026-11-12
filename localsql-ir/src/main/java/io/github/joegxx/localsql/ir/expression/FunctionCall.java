@@ -8,6 +8,7 @@ public final class FunctionCall extends Expression {
     private final List<Expression> arguments;
     private final boolean distinct;
     private WindowSpec windowSpec;
+    private boolean ignoreNulls;
 
     public FunctionCall(String name, List<Expression> arguments) {
         this(name, arguments, false);
@@ -25,6 +26,10 @@ public final class FunctionCall extends Expression {
     public boolean distinct() { return distinct; }
     public WindowSpec windowSpec() { return windowSpec; }
     public void setWindowSpec(WindowSpec spec) { this.windowSpec = spec; }
+
+    /** lead/lag/first_value/last_value IGNORE NULLS; emitted after the last argument. */
+    public boolean ignoreNulls() { return ignoreNulls; }
+    public void setIgnoreNulls(boolean ignoreNulls) { this.ignoreNulls = ignoreNulls; }
 
     @Override
     public String toString() {

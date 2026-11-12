@@ -732,6 +732,9 @@ public final class DuckDbSqlGenerator {
             if (i > 0) sb.append(", ");
             emitExpr(f.arguments().get(i), sb);
         }
+        // DuckDB window functions take IGNORE NULLS after the last argument:
+        // first_value(x IGNORE NULLS), lag(x, 1 IGNORE NULLS)
+        if (f.ignoreNulls()) sb.append(" IGNORE NULLS");
         sb.append(")");
         if (f.windowSpec() != null) emitWindowSpec(f.windowSpec(), sb);
     }

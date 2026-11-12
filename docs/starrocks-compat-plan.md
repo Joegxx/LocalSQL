@@ -112,8 +112,8 @@ AdminStatementHandler 是 pre-grammar 权宜层（文本正则匹配 SHOW/USE/SE
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M0 | 分支 + 本文档 + 双 g4 verbatim + 补丁 + codegen + 探针 + DialectRuntime 骨架 + OpenSession 注入 | ✅ |
-| M1 | `localsql-starrocks` 三类 builder DQL 全覆盖 + 归一化孪生回归 + STARROCKS bundle 接线 | |
-| M2 | `StarRocksFunctionCatalog`（SPI）+ 方言作用域 rewrite + strict 契约 + 碰撞审计 | |
+| M1 | `localsql-starrocks` 三类 builder DQL 全覆盖 + 归一化孪生回归 + STARROCKS bundle 接线 | ✅ |
+| M2 | `StarRocksFunctionCatalog`（SPI）+ 方言作用域 rewrite + strict 契约 + 碰撞审计 | ✅ |
 | M3 | Admin 方言优先分发 + `SHOW CATALOGS`/`SET CATALOG` + EXPLAIN 返回译文 + GetInfo 方言名 | |
 | M4 | L3 双方言差分 + `docs/starrocks-compat.md` 三态矩阵 + usage/README/AGENTS.md | |
 

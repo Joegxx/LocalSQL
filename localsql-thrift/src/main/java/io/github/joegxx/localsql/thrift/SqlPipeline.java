@@ -87,7 +87,12 @@ final class SqlPipeline {
                         analyzer, rewriter),
                 Dialect.STARROCKS, new DialectRuntime(
                         sql -> starRocksAstBuilder.buildStatement(sql, starRocksParser::parseStatement),
-                        analyzer, rewriter));
+                        // strict gate: unknown functions fail at binding instead
+                        // of surfacing as DuckDB errors, and the StarRocks-only
+                        // function tables apply only to this bundle
+                        new SemanticAnalyzer(catalogService.catalog(),
+                                io.github.joegxx.localsql.analyzer.StarRocksFunctionCatalog.instance(), true),
+                        new RewriteEngine(reservedFunctionNames(), udtfGeneratorNames(), true)));
     }
 
     /** Registered UDTF source names; their LATERAL VIEW generators pass lowering. */

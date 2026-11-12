@@ -118,6 +118,7 @@ public final class BuiltInFunctionCatalog implements FunctionCatalog {
         f("cot", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("current_date", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("current_timestamp", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
+        f("date_add", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("date_part", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("day", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("dayofmonth", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
@@ -136,6 +137,8 @@ public final class BuiltInFunctionCatalog implements FunctionCatalog {
         f("get_field", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("get_json_object", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("greatest", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
+        f("grouping", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
+        f("grouping_id", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("hex", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("hour", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);
         f("ifnull", NO_ALIASES, 0, MAX, FunctionKind.SCALAR);

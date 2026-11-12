@@ -90,12 +90,38 @@ public final class FunctionNameRewriter {
             Map.entry("weekofyear", "week")
     );
 
+    /**
+     * StarRocks source name -> DuckDB function name. Applied only for
+     * dialect=STARROCKS sessions (scope-guarded): none of these names exist
+     * in the Spark function vocabulary, so adding them to the shared table
+     * would silently widen Spark-session behavior.
+     */
+    static final Map<String, String> STARROCKS_RENAMES = Map.ofEntries(
+            // StarRocks get_json_string(v, path) uses Hive-style '$.a' paths,
+            // which json_extract_string accepts unchanged
+            Map.entry("get_json_string", "json_extract_string"),
+            Map.entry("curdate", "current_date"),
+            // DuckDB strptime keeps MySQL-style '%' format tokens, so the
+            // format argument passes through unchanged
+            Map.entry("str_to_date", "strptime")
+    );
+
     private final Set<String> reservedNames;
+    private final boolean starRocksScope;
 
     public FunctionNameRewriter() { this(Set.of()); }
 
     public FunctionNameRewriter(Set<String> reservedNames) {
+        this(reservedNames, false);
+    }
+
+    /**
+     * @param starRocksScope when true the StarRocks-only rename table applies
+     *                       as well; Spark sessions must never see it.
+     */
+    public FunctionNameRewriter(Set<String> reservedNames, boolean starRocksScope) {
         this.reservedNames = reservedNames == null ? Set.of() : reservedNames;
+        this.starRocksScope = starRocksScope;
     }
 
     public static boolean isRenamable(String name) {
@@ -110,7 +136,9 @@ public final class FunctionNameRewriter {
         @Override
         public Void visitFunctionCall(FunctionCall e, Void ctx) {
             String name = e.name().toLowerCase(Locale.ROOT);
-            if (RENAMES.containsKey(name) && !reservedNames.contains(name)) {
+            if (starRocksScope && STARROCKS_RENAMES.containsKey(name)) {
+                e.rename(STARROCKS_RENAMES.get(name));
+            } else if (RENAMES.containsKey(name) && !reservedNames.contains(name)) {
                 e.rename(RENAMES.get(name));
             }
             return super.visitFunctionCall(e, ctx);

@@ -233,6 +233,7 @@ public final class UdtfGenerateSplitter {
             for (Expression a : f.arguments()) args.add(unqualifyExpression(a));
             FunctionCall rebuilt = new FunctionCall(f.name(), args, f.distinct());
             rebuilt.setWindowSpec(f.windowSpec());
+            rebuilt.setIgnoreNulls(f.ignoreNulls());
             return rebuilt;
         }
         if (e instanceof io.github.joegxx.localsql.ir.expression.CaseWhen c) {

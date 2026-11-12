@@ -33,6 +33,17 @@ public final class RewriteEngine {
         this.expressionLowering = new ExpressionLowering(udtfNames);
     }
 
+    /**
+     * @param starRocksScope enables the StarRocks-only function tables.
+     *                       Spark sessions must use the two-arg constructor;
+     *                       the bundles are built per dialect so the scope
+     *                       is frozen at construction time.
+     */
+    public RewriteEngine(Set<String> reservedFunctionNames, Set<String> udtfNames, boolean starRocksScope) {
+        this.functionNames = new FunctionNameRewriter(reservedFunctionNames, starRocksScope);
+        this.expressionLowering = new ExpressionLowering(udtfNames, starRocksScope);
+    }
+
     /** Returns the rewritten tree; callers must use the return value. */
     public Relation rewrite(Relation rel) {
         functionNames.rewrite(rel);

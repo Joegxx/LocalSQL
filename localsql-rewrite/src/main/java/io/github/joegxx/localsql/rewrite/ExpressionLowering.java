@@ -62,6 +62,7 @@ public final class ExpressionLowering {
     private static final io.github.joegxx.localsql.ir.type.BinaryType BLOB =
             new io.github.joegxx.localsql.ir.type.BinaryType();
     private final java.util.Set<String> udtfNames;
+    private final boolean starRocksScope;
 
     public ExpressionLowering() { this(java.util.Set.of()); }
 
@@ -72,7 +73,16 @@ public final class ExpressionLowering {
      *                  this rewrite and consumes the tree before generation.
      */
     public ExpressionLowering(java.util.Set<String> udtfNames) {
+        this(udtfNames, false);
+    }
+
+    /**
+     * @param starRocksScope when true the StarRocks-only lowering cases apply
+     *                       as well; Spark sessions must never see them.
+     */
+    public ExpressionLowering(java.util.Set<String> udtfNames, boolean starRocksScope) {
         this.udtfNames = udtfNames == null ? java.util.Set.of() : udtfNames;
+        this.starRocksScope = starRocksScope;
     }
 
     private static final IntegralType UBIGINT = new IntegralType(64, false);
@@ -387,6 +397,7 @@ public final class ExpressionLowering {
             for (Expression a : f.arguments()) args.add(lower(a));
             FunctionCall rebuilt = new FunctionCall(f.name(), args, f.distinct());
             rebuilt.setWindowSpec(f.windowSpec());
+            rebuilt.setIgnoreNulls(f.ignoreNulls());
             return rebuilt;
         }
         if (e instanceof Lambda l) return new Lambda(l.variables(), lower(l.body()));
@@ -399,10 +410,43 @@ public final class ExpressionLowering {
         return e;
     }
 
+    /**
+     * StarRocks-only argument-restructuring lowerings. Plain 1:1 renames live
+     * in {@link FunctionNameRewriter#STARROCKS_RENAMES}. Returns null when the
+     * call keeps its current form.
+     */
+    private Expression lowerStarRocksCall(FunctionCall f) {
+        List<Expression> a = f.arguments();
+        String name = f.name().toLowerCase();
+        switch (name) {
+            // get_json_int(v, path) -> CAST(json_extract_string(v, path) AS BIGINT)
+            case "get_json_int" -> {
+                if (a.size() != 2) return null;
+                return new Cast(new FunctionCall("json_extract_string", List.of(lower(a.get(0)), lower(a.get(1)))),
+                        IntegralType.BIGINT);
+            }
+            // get_json_double(v, path) -> CAST(json_extract_string(v, path) AS DOUBLE)
+            case "get_json_double" -> {
+                if (a.size() != 2) return null;
+                return new Cast(new FunctionCall("json_extract_string", List.of(lower(a.get(0)), lower(a.get(1)))),
+                        io.github.joegxx.localsql.ir.type.FractionalType.DOUBLE);
+            }
+            default -> {
+                return null;
+            }
+        }
+    }
+
     /** @return the lowered expression, or null when the call keeps its current form. */
     private Expression lowerCall(FunctionCall f) {
         List<Expression> a = f.arguments();
         String name = f.name().toLowerCase();
+        // StarRocks-only cases are scope-guarded: Spark sessions must never
+        // gain behavior for functions that don't exist in Spark
+        if (starRocksScope) {
+            Expression lowered = lowerStarRocksCall(f);
+            if (lowered != null) return lowered;
+        }
         switch (name) {
             case "if" -> {
                 if (a.size() != 3) return null;

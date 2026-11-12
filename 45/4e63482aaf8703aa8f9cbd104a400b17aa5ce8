@@ -1,0 +1,33 @@
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/AdminStatementHandler.java
+  s_273c04d32969ec::t_a6cf0649aa0a1a 19-24,30-33
+  s_273c04d32969ec::t_e3c65d0870512b 66,68-72,76-89
+localsql-starrocks/src/main/java/io/github/joegxx/localsql/starrocks/StarRocksAstBuilder.java
+  s_273c04d32969ec::t_db9e86c6f765ae 37-46
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java
+  s_273c04d32969ec::t_acff075f53ec30 166
+  s_273c04d32969ec::t_9bbd1351858ffc 131-135,138-140
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DialectSessionTest.java
+  s_273c04d32969ec::t_9d6d04e03c9834 76-88
+  s_273c04d32969ec::t_4c680e84b4b187 208-211,215
+  s_273c04d32969ec::t_5dd022f9255298 177-207,212-214,216-227
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/statement/QueryStatement.java
+  s_273c04d32969ec::t_66b76b5d45a0bf 10,12-18,21,24
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_273c04d32969ec::t_207f13c8cef122 140-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "454e63482aaf8703aa8f9cbd104a400b17aa5ce8",
+  "prompts": {},
+  "sessions": {
+    "s_273c04d32969ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e5522f06dffe2A9PNs51jooYQo",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

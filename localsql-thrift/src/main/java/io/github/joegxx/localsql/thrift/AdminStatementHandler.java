@@ -16,10 +16,21 @@ import java.util.regex.Pattern;
  * issue over HiveServer2 that are not SELECT queries: SHOW DATABASES/SCHEMAS,
  * SHOW TABLES, SHOW COLUMNS, DESCRIBE and USE. The ANTLR pipeline is DQL-only,
  * so these are dispatched textually against the catalog before parsing.
+ *
+ * <p>Dialect-first dispatch: patterns are selected per session dialect, never
+ * shared across dialects — the same text can mean different things (Spark
+ * `SET x=y` configures a conf; StarRocks `SET CATALOG x` switches catalogs).
+ * This textual layer is a documented shortcut (pre-grammar hotfix layer); the
+ * dialect boundary is enforced here.
  */
 final class AdminStatementHandler {
 
     record Outcome(DuckDbExecutor.QueryResult result, String newCurrentDatabase) {}
+
+    private static final Pattern SHOW_CATALOGS =
+            Pattern.compile("(?i)^SHOW\\s+CATALOGS(\\s+LIKE\\s+'([^']*)')?\\s*$");
+    private static final Pattern SET_CATALOG =
+            Pattern.compile("(?i)^SET\\s+CATALOG\\s+" + "(?:[A-Za-z_][\\w]*|`(?:[^`]|``)+`|'[^']*'|\"[^\"]*\")\\s*$");
 
     private static final Pattern SHOW_DATABASES =
             Pattern.compile("(?i)^SHOW\\s+(DATABASES|SCHEMAS)(\\s+LIKE\\s+'([^']*)')?\\s*$");
@@ -52,10 +63,30 @@ final class AdminStatementHandler {
 
     private AdminStatementHandler() {}
 
-    /** Returns empty when the statement is not an admin statement (caller falls through to the SQL pipeline). */
+    /** Spark sessions (legacy entry point, e.g. the ThriftServer demo path). */
     static Optional<Outcome> tryHandle(CatalogService catalog, String sql, String currentDatabase) {
+        return tryHandle(catalog, sql, currentDatabase, Dialect.SPARK);
+    }
+
+    /** Returns empty when the statement is not an admin statement (caller falls through to the SQL pipeline). */
+    static Optional<Outcome> tryHandle(CatalogService catalog, String sql, String currentDatabase, Dialect dialect) {
         String s = strip(sql);
         if (s.isEmpty()) return Optional.empty();
+
+        // StarRocks-only admin statements, matched before the shared set
+        if (dialect == Dialect.STARROCKS) {
+            if (SHOW_CATALOGS.matcher(s).matches()) {
+                // single built-in catalog; StarRocks column shape
+                List<List<Object>> rows = List.of(List.of("default", "hive", "LocalSQL built-in catalog"));
+                return Optional.of(new Outcome(new DuckDbExecutor.QueryResult(
+                        List.of("Catalog", "CatalogType", "Comment"), rows), null));
+            }
+            if (SET_CATALOG.matcher(s).matches()) {
+                // LocalSQL has exactly one catalog: accept as a no-op switch
+                return Optional.of(new Outcome(
+                        new DuckDbExecutor.QueryResult(List.of("result"), new ArrayList<>()), null));
+            }
+        }
 
         // Spark 3.1.x JDBC probes metadata with an empty quoted database.
         // Treat it as a no-op so the probe can continue to GetSchemas.

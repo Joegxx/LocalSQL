@@ -128,11 +128,16 @@ final class LocalSqlThriftService implements TCLIService.Iface {
 
     @Override
     public TGetInfoResp GetInfo(TGetInfoReq req) {
+        // DBMS identity follows the session dialect so IDEs recognize the
+        // dialect the session actually speaks
+        SessionState session = sessions.get(guid(req.getSessionHandle()));
+        Dialect dialect = session != null ? session.dialect : Dialect.SPARK;
+        boolean starRocks = dialect == Dialect.STARROCKS;
         TGetInfoValue val = new TGetInfoValue();
         switch (req.getInfoType()) {
-            case CLI_DBMS_NAME -> val.setStringValue("Apache Hive");
-            case CLI_DBMS_VER -> val.setStringValue("2.3.9");
-            case CLI_SERVER_NAME -> val.setStringValue("Hive");
+            case CLI_DBMS_NAME -> val.setStringValue(starRocks ? "StarRocks" : "Apache Hive");
+            case CLI_DBMS_VER -> val.setStringValue(starRocks ? "3.5.21" : "2.3.9");
+            case CLI_SERVER_NAME -> val.setStringValue(starRocks ? "StarRocks" : "Hive");
             case CLI_MAX_COLUMN_NAME_LEN -> val.setSmallIntValue((short) 128);
             case CLI_MAX_SCHEMA_NAME_LEN -> val.setSmallIntValue((short) 128);
             case CLI_MAX_TABLE_NAME_LEN -> val.setSmallIntValue((short) 128);
@@ -158,7 +163,7 @@ final class LocalSqlThriftService implements TCLIService.Iface {
             // intermediate in-memory state
             java.util.Optional<AdminStatementHandler.Outcome> admin;
             synchronized (pipeline) {
-                admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDb);
+                admin = AdminStatementHandler.tryHandle(catalogService, sql, currentDb, dialect);
                 if (admin.isPresent()) {
                     DuckDbExecutor.QueryResult result = admin.get().result();
                     if (admin.get().newCurrentDatabase() != null && session != null) {

@@ -137,6 +137,17 @@ final class SqlPipeline {
         this.sessionDatabase = currentDatabase == null || currentDatabase.isEmpty()
                 ? "default" : currentDatabase;
         Statement stmt = runtime.frontend().parse(sql);
+        if (stmt instanceof QueryStatement q && q.explain()) {
+            // EXPLAIN <query> (StarRocks dialect): report the translated
+            // DuckDB SQL without executing — the sandbox's core value
+            Relation rel = runtime.analyzer().analyze(q.query(), sessionDatabase);
+            rel = runtime.rewriter().rewrite(rel);
+            String duckSql = generator.generate(rel);
+            LOG.info("EXPLAIN translated to DuckDB SQL: {}", duckSql);
+            return new DuckDbExecutor.QueryResult(
+                    List.of("Explain String"),
+                    List.of(List.of("Translated DuckDB SQL:"), List.of(duckSql)));
+        }
         if (stmt instanceof QueryStatement q) {
             Relation rel = runtime.analyzer().analyze(q.query(), sessionDatabase);
             rel = runtime.rewriter().rewrite(rel);

@@ -73,6 +73,19 @@ class DialectSessionTest {
             return client.ExecuteStatement(new TExecuteStatementReq(session, sql));
         }
 
+        List<String> fetchFirstColumn(TOperationHandle op) throws Exception {
+            TFetchResultsResp res = client.FetchResults(
+                    new TFetchResultsReq(op, TFetchOrientation.FETCH_FIRST, 1000));
+            assertEquals(TStatusCode.SUCCESS_STATUS, res.getStatus().getStatusCode());
+            return res.getResults().getColumns().get(0).getStringVal().getValues();
+        }
+
+        String getInfoDbmsName() throws Exception {
+            TGetInfoResp resp = client.GetInfo(new TGetInfoReq(session, TGetInfoType.CLI_DBMS_NAME));
+            assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode());
+            return resp.getInfoValue().getStringValue();
+        }
+
         @Override
         public void close() throws Exception {
             client.CloseSession(new TCloseSessionReq(session));
@@ -157,6 +170,58 @@ class DialectSessionTest {
             assertEquals(TStatusCode.ERROR_STATUS, c.execute("SELECT str_to_date('2026-01-05', '%Y-%m-%d')").getStatus().getStatusCode());
             // 共享表对 Spark 会话仍然生效
             assertEquals(TStatusCode.SUCCESS_STATUS, c.execute("SELECT nvl(1, 2)").getStatus().getStatusCode());
+        }
+    }
+
+    @Test
+    void getInfoReportsDialect() throws Exception {
+        try (Client spark = new Client(port, Map.of("sql_dialect", "spark"));
+             Client sr = new Client(port, Map.of("sql_dialect", "starrocks"))) {
+            assertEquals("Apache Hive", spark.getInfoDbmsName());
+            assertEquals("StarRocks", sr.getInfoDbmsName());
+        }
+    }
+
+    @Test
+    void starrocksShowCatalogsAndSetCatalog() throws Exception {
+        try (Client c = new Client(port, Map.of("sql_dialect", "starrocks"))) {
+            TExecuteStatementResp show = c.execute("SHOW CATALOGS");
+            assertEquals(TStatusCode.SUCCESS_STATUS, show.getStatus().getStatusCode(),
+                    show.getStatus().getErrorMessage());
+            List<String> catalogs = c.fetchFirstColumn(show.getOperationHandle());
+            assertEquals(List.of("default"), catalogs);
+
+            assertEquals(TStatusCode.SUCCESS_STATUS,
+                    c.execute("SET CATALOG default").getStatus().getStatusCode());
+            assertEquals(TStatusCode.SUCCESS_STATUS,
+                    c.execute("SET CATALOG 'default'").getStatus().getStatusCode());
+        }
+    }
+
+    @Test
+    void starrocksExplainReturnsTranslatedSql() throws Exception {
+        try (Client c = new Client(port, Map.of("sql_dialect", "starrocks"))) {
+            TExecuteStatementResp resp = c.execute("EXPLAIN SELECT id FROM t1 WHERE id > 0");
+            assertEquals(TStatusCode.SUCCESS_STATUS, resp.getStatus().getStatusCode(),
+                    resp.getStatus().getErrorMessage());
+            List<String> rows = c.fetchFirstColumn(resp.getOperationHandle());
+            // 列名 StarRocks 形状
+            TGetResultSetMetadataResp meta = c.client.GetResultSetMetadata(
+                    new TGetResultSetMetadataReq(resp.getOperationHandle()));
+            assertEquals("Explain String", meta.getSchema().getColumns().get(0).getColumnName());
+            String joined = String.join("\n", rows);
+            assertTrue(joined.contains("SELECT"), "should contain translated SQL: " + joined);
+            assertTrue(joined.contains("t1"), "should reference the table: " + joined);
+            assertTrue(joined.contains("id > 0"), "should contain the predicate: " + joined);
+        }
+    }
+
+    @Test
+    void sparkSessionExplainStillFails() throws Exception {
+        // Spark 会话行为不变：EXPLAIN 不在 Spark 前端 MVP 范围
+        try (Client c = new Client(port, Map.of("sql_dialect", "spark"))) {
+            assertEquals(TStatusCode.ERROR_STATUS,
+                    c.execute("EXPLAIN SELECT id FROM t1").getStatus().getStatusCode());
         }
     }
 

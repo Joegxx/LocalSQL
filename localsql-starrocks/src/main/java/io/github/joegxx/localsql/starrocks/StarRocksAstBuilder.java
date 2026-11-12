@@ -34,20 +34,19 @@ public final class StarRocksAstBuilder {
         // unlabeled alternatives share the base StatementContext; the DQL alt
         // is detected by its nested queryStatement() accessor
         if (stmt.queryStatement() != null) {
-            return new QueryStatement(visitQueryStatement(stmt.queryStatement()));
+            QueryStatementContext q = stmt.queryStatement();
+            if (q.optimizerTrace() != null) {
+                throw new UnsupportedOperationException("TRACE is not supported");
+            }
+            if (q.outfile() != null) {
+                throw new UnsupportedOperationException("INTO OUTFILE is not supported");
+            }
+            Relation rel = visitQueryRelation(q.queryRelation());
+            // EXPLAIN <query>: pipeline translates and reports the DuckDB SQL
+            return new QueryStatement(rel, q.explainDesc() != null);
         }
         throw new UnsupportedOperationException(
                 "StarRocks front-end currently supports DQL only. Got: " + stmt.getText());
-    }
-
-    private Relation visitQueryStatement(QueryStatementContext ctx) {
-        if (ctx.explainDesc() != null || ctx.optimizerTrace() != null) {
-            throw new UnsupportedOperationException("EXPLAIN/TRACE is not supported yet");
-        }
-        if (ctx.outfile() != null) {
-            throw new UnsupportedOperationException("INTO OUTFILE is not supported");
-        }
-        return visitQueryRelation(ctx.queryRelation());
     }
 
     Relation visitQueryRelation(QueryRelationContext ctx) {

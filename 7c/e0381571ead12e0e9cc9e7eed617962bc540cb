@@ -1,0 +1,58 @@
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/StarRocksTwinDifferentialTest.java
+  s_273c04d32969ec::t_c44805f6ff53d7 21-27
+  s_50415e38e9982d::t_4e783bfa41353a 105-106,108,110,113-116,118,120
+  s_273c04d32969ec::t_79b7cebb011cdf 72,74
+  s_50415e38e9982d::t_894f813ab92826 82-84
+  s_273c04d32969ec::t_cf2be6b954624f 1-20,28-52,55-71,73,75-81,99-101,104,107,109,111-112,117,119,121-130,135,137-183
+  s_273c04d32969ec::t_79d562e332b885 53-54
+  s_273c04d32969ec::t_440eba30cf1edb 85-89,102-103
+  s_50415e38e9982d::t_cc8bd6d0fe053f 90-98
+  s_273c04d32969ec::t_92d19b693503c5 131-134,136
+docs/usage.md
+  s_50415e38e9982d::t_05de336e4b2d2e 144-156
+  s_50415e38e9982d::t_47637367857f76 295-297,305,308,310
+  s_50415e38e9982d::t_0a9c246f4714f5 22
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/ThriftQueryRunner.java
+  s_273c04d32969ec::t_7000b88fbc3917 41-45,52,57-62,67-69
+AGENTS.md
+  s_50415e38e9982d::t_26376b89690e36 177-181
+  s_50415e38e9982d::t_b356a7995bff1f 237,240-241
+  s_50415e38e9982d::t_5a5905de2a58b4 40-41
+  s_50415e38e9982d::t_780d1f9d9ca6e1 62,64
+  s_50415e38e9982d::t_b8fc128871b51e 78
+docs/starrocks-compat.md
+  s_50415e38e9982d::t_a25b4c09d28b7a 61
+  s_50415e38e9982d::t_aedd851ae7e7ae 26
+  s_50415e38e9982d::t_e218fdc9cca920 29-33
+  s_50415e38e9982d::t_1a2b459f01a5c0 64-65
+  s_50415e38e9982d::t_001a66acf6c327 1-21,24-25,27-28,34-60,62-63,66-78
+  s_50415e38e9982d::t_351cffebfa8de4 22-23
+docs/starrocks-compat-plan.md
+  s_50415e38e9982d::t_377a25c8379126 105-106,109
+  s_50415e38e9982d::t_cedaa62f220518 119
+  s_50415e38e9982d::t_52114279dcac0b 118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "7ce0381571ead12e0e9cc9e7eed617962bc540cb",
+  "prompts": {},
+  "sessions": {
+    "s_273c04d32969ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e5522f06dffe2A9PNs51jooYQo",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    },
+    "s_50415e38e9982d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e3076326dffe1O2msSUlFcEQN1",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

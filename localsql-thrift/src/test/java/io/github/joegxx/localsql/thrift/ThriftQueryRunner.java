@@ -38,23 +38,35 @@ final class ThriftQueryRunner implements AutoCloseable {
 
     /** Boot a fresh in-process server (catalog + DuckDB) and connect a Thrift client to it. */
     static ThriftQueryRunner start(int port) throws Exception {
+        return start(port, java.util.Map.of());
+    }
+
+    /** Boot a fresh in-process server and connect a session carrying {@code sessionConf}. */
+    static ThriftQueryRunner start(int port, java.util.Map<String, String> sessionConf) throws Exception {
         DuckDbExecutor executor = new DuckDbExecutor();
         CatalogStore store = new DuckDbCatalogStore(executor);
         CatalogService catalog = new CatalogService(store);
         ThriftServer server = new ThriftServer(catalog, executor);
         server.start(port);
         Thread.sleep(800);
-        return connect(server, executor, catalog, port);
+        return connect(server, executor, catalog, port, sessionConf);
     }
 
     static ThriftQueryRunner connect(ThriftServer server, DuckDbExecutor executor,
                                      CatalogService catalog, int port) throws Exception {
+        return connect(server, executor, catalog, port, java.util.Map.of());
+    }
+
+    static ThriftQueryRunner connect(ThriftServer server, DuckDbExecutor executor,
+                                     CatalogService catalog, int port,
+                                     java.util.Map<String, String> sessionConf) throws Exception {
         TTransport transport = new TSocket("localhost", port);
         transport.open();
         TCLIService.Client client = new TCLIService.Client(
                 new TBinaryProtocol(transport), new TBinaryProtocol(transport));
-        TOpenSessionResp open = client.OpenSession(
-                new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11));
+        TOpenSessionReq openReq = new TOpenSessionReq(TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V11);
+        if (!sessionConf.isEmpty()) openReq.setConfiguration(new java.util.HashMap<>(sessionConf));
+        TOpenSessionResp open = client.OpenSession(openReq);
         if (open.getStatus().getStatusCode() != TStatusCode.SUCCESS_STATUS) {
             throw new IllegalStateException("OpenSession failed: " + open.getStatus());
         }

@@ -19,6 +19,7 @@ LocalSQL 是一个本地 SQL Sandbox：用 Spark SQL 3.2.0 语法写查询，翻
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [用数据库客户端连接](#用数据库客户端连接)
+- [StarRocks 方言连接](#starrocks-方言连接)
 - [用代码连接](#用代码连接)
 - [内置样例数据](#内置样例数据)
 - [支持的 SQL 特性](#支持的-sql-特性)
@@ -139,6 +140,19 @@ lsof -iTCP:10000 -sTCP:LISTEN
 ```bash
 beeline -u jdbc:hive2://localhost:10000/default -n anyuser
 ```
+
+## StarRocks 方言连接
+
+连接时在 JDBC URL 追加 session var 即可切换为 StarRocks 方言前端（同一服务、同一套 Catalog/DuckDB 数据，方言仅影响 SQL 解析）：
+
+```
+jdbc:hive2://localhost:10000/default;sql_dialect=starrocks
+```
+
+- DBeaver/DataGrip：在上述 URL 后直接追加即可；beeline：`beeline -u 'jdbc:hive2://localhost:10000/default;sql_dialect=starrocks' -n anyuser`
+- 方言在连接期固定，会话内不可切换；未知值记 WARN 并回落 Spark 方言（绝不静默误配）
+- 该前端仅支持 DQL 与管理语句（USE / SHOW / SET CATALOG 等）；StarRocks 模型 DDL、INSERT 等请用默认 Spark 方言会话
+- 逐特性支持/归一/拒绝矩阵见 [starrocks-compat.md](starrocks-compat.md)
 
 ## 用代码连接
 
@@ -278,6 +292,9 @@ mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest -Dsurefire.failIfNo
 
 # 只跑翻译回归(135 份 SQL + 1 个汇总测试，不执行)
 mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
+
+# 只跑 StarRocks 双方言孪生差分(103 份,同一文本双方言执行,需要 tpcds 扩展)
+mvn -pl localsql-thrift -am test -Dtest=StarRocksTwinDifferentialTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 测试体系分三层:
@@ -285,9 +302,11 @@ mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIf
 | 层 | 测试类 | 内容 |
 |---|---|---|
 | L1 翻译回归 | `TpcdsQueryPipelineTest` | 135 份 SQL + 1 个汇总测试，parse->analyze->rewrite->generate，不执行 |
+| L1 StarRocks 翻译 | `StarRocksFrontendPipelineTest` | 官方 StarRocks TPC-DS 基准 103 份，经 StarRocks 前端完整翻译 |
 | L3 手工 golden | `TpcdsGoldenResultTest` | 走真实 Thrift 端点执行,与 Spark 语义手工校准值对比 |
 | L3 DuckDB 差分 | `TpcdsConsistencyTest` | DuckDB 原生 vs. Thrift；字符串化多重集比较，oracle 不可用的查询只检查执行成功 |
+| L3 双方言孪生差分 | `StarRocksTwinDifferentialTest` | 同一 SQL 文本 Spark/StarRocks 两会话各执行一次，双向 `EXCEPT ALL` 为 0 |
 
-2026-09-10 审查：Java 21 打包成功；排除 7 个端口相关测试类后 455 项测试通过，全量测试受沙箱绑定权限限制未完成。可复现命令和完整排除清单见开发计划，不能据此宣称全量测试或 Spark 语义一致性通过。
+2026-11-12 基线：Java 21 下排除三个 L3 端口测试后全量 733 项通过；StarRocks 侧 L1 104 项、孪生差分 103 项全绿。不能据此宣称与 Spark/StarRocks 生产语义完全一致。
 
 更多面向开发者的架构约束见根目录 `AGENTS.md`。

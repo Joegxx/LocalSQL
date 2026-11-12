@@ -102,10 +102,11 @@ AdminStatementHandler 是 pre-grammar 权宜层（文本正则匹配 SHOW/USE/SE
 ## 8. 测试策略
 
 - **L1 翻译回归**：官方 TPC-DS 99 条语料 verbatim 拆分至 `localsql-thrift/src/test/resources/tpcds-starrocks/`（q14/23/24 拆 a/b），经 StarRocks 前端 parse→analyze→rewrite→generate（挂 `TpcdsCatalogFixture`），通过率记录在案。
-- **双方言孪生等价**（M4）：同语义 SQL 两方言翻译，`TpcdsMiniData` 上双向 `EXCEPT ALL` 为 0。
+- **双方言孪生等价**（M4，已落地 `StarRocksTwinDifferentialTest` 103 项）：**同一份 SQL 文本**（tpcds-starrocks 语料，ANSI 语法双方言都可解析）在 `dsdgen(sf=0.01)` 数据上由 Spark 与 StarRocks 两个方言会话各执行一次，字符串化后双向 `EXCEPT ALL` 为 0。不能配对两份语料（StarRocks 基准文档改写了部分查询，如 q6 的 d_year、q12/q20/q98 的列清单，行差异来自文本而非翻译）。8 份使用 `as "..."` 双引号别名的查询（q16/32/50/62/92/94/95/99）Spark 语法本就拒绝、无孪生可比，归入 `SPARK_UNPARSEABLE`，仅断言 StarRocks 会话执行成功。
+- **三态矩阵**（M4，已落地 `docs/starrocks-compat.md`）：✅ 支持 / 🔄 归一 / ❌ 拒绝，逐特性标注验证证据。
 - **M0 探针**（已落地 `StarRocksLexerProbeTest` 9 项）：小写关键字、字面量/标识符大小写保持、`||` 双模式、双引号字符串、反引号、ROLLUP/MINUS/窗口冒烟、语法错误收集。
 - **方言注入**（已落地 `DialectSessionTest` 6 项）：三种 key 形态、未知值回落、STARROCKS 大声失败、解析边界。
-- 每步验收含 Spark 基线零回退：`mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest' -Dsurefire.failIfNoSpecifiedTests=false`。
+- 每步验收含 Spark 基线零回退：`mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest,!StarRocksTwinDifferentialTest' -Dsurefire.failIfNoSpecifiedTests=false`（三个 L3 测试均需真实端口，孪生差分另需 DuckDB tpcds 扩展）。
 
 ## 9. 里程碑
 
@@ -114,8 +115,8 @@ AdminStatementHandler 是 pre-grammar 权宜层（文本正则匹配 SHOW/USE/SE
 | M0 | 分支 + 本文档 + 双 g4 verbatim + 补丁 + codegen + 探针 + DialectRuntime 骨架 + OpenSession 注入 | ✅ |
 | M1 | `localsql-starrocks` 三类 builder DQL 全覆盖 + 归一化孪生回归 + STARROCKS bundle 接线 | ✅ |
 | M2 | `StarRocksFunctionCatalog`（SPI）+ 方言作用域 rewrite + strict 契约 + 碰撞审计 | ✅ |
-| M3 | Admin 方言优先分发 + `SHOW CATALOGS`/`SET CATALOG` + EXPLAIN 返回译文 + GetInfo 方言名 | |
-| M4 | L3 双方言差分 + `docs/starrocks-compat.md` 三态矩阵 + usage/README/AGENTS.md | |
+| M3 | Admin 方言优先分发 + `SHOW CATALOGS`/`SET CATALOG` + EXPLAIN 返回译文 + GetInfo 方言名 | ✅ |
+| M4 | L3 双方言差分 + `docs/starrocks-compat.md` 三态矩阵 + usage/README/AGENTS.md | ✅ |
 
 ## 10. 已发现并顺手修复的存量问题
 

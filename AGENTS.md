@@ -37,6 +37,8 @@ DuckDB execute
 
 目标是无需部署 Spark/Hadoop/Hive 服务即可在本地跑数据仓库 SQL。已有 DQL、基础 DML/DDL、文件库导入/加载、进程内 UDF/UDTF 路径；仍有正确性及打包缺口，不能声称与 Spark 语义一致。
 
+**StarRocks 方言（M0–M4 已完成）**：连接时经 JDBC URL session var 指定（`;sql_dialect=starrocks`），独立前端（3.5.21 双 g4 verbatim + `localsql-starrocks` 三 builder）产出同一 IR，下游 Analyzer/Rewrite/Generator/Executor 方言无感知。前端仅 DQL；管理语句由 `AdminStatementHandler` 按方言优先分发。三态兼容矩阵与验证证据见 [docs/starrocks-compat.md](docs/starrocks-compat.md)，设计决策见 [docs/starrocks-compat-plan.md](docs/starrocks-compat-plan.md)。
+
 本地说明以 README、README.zh-CN、docs/usage.md 和开发计划为入口；。代码优先，不要求先访问外部设计文档。
 
 ## 构建与运行
@@ -57,8 +59,9 @@ DuckDB execute
 
 ```
 app -> {thrift, udf-runtime, parser, ir, spark, analyzer, rewrite, catalog, duckdb}
-thrift -> {spark, parser, duckdb, catalog, analyzer, rewrite, udf-api}
+thrift -> {spark, starrocks, parser, duckdb, catalog, analyzer, rewrite, udf-api}
 spark -> {parser, ir}
+starrocks -> {parser, ir}
 analyzer -> {ir, catalog}
 rewrite -> {ir, udf-api}
 duckdb -> {ir, catalog}
@@ -72,6 +75,7 @@ ir -> (nothing)
 - `localsql-parser` - ANTLR4 语法 + `SparkSqlParser` 入口。**只有 parse-tree,不做任何逻辑。**
 - `localsql-ir` - 公共 IR。`Relation` 和 `Expression` 当前是 abstract class，不是 sealed 层级；`Statement` 表示顶层语句；`IrVisitor` 做开放递归。**严禁依赖 Spark 或 ANTLR。** IR 是唯一真相源，任何后端不得绕过 IR 直接读 parse-tree。
 - `localsql-spark` - `SparkAstBuilder` 把 ParseTree 转成 IR。`SparkExpressionBuilder` 和 `SparkDataTypeBuilder` 是 package-private 辅助类。
+- `localsql-starrocks` - StarRocks ParseTree -> IR 的镜像三 builder（Ast/Expression/Type，均 DQL-only）。方言差异在前端归一（双引号字符串、`LIMIT a,b`、`MINUS`、DATETIME/LARGEINT、CONVERT、三段名剥 catalog 前缀）；专属语法（QUALIFY/PIVOT/LATERAL/时态查询/BITMAP 族）显式拒绝。
 - `localsql-catalog` - 纯逻辑元数据 + 持久化抽象，`LinkedHashMap` 缓存，配置 `CatalogStore` 后持久化。A2 已完成：`RuntimeInfo` 独立为 `RuntimeStore` 接口（Catalog 只存逻辑元数据）；`renameTable` 只做逻辑重命名，不再修补 SQL 字符串；写路径统一走 `CatalogService`（SET/UNSET TBLPROPERTIES 已收编），`registerTable` 对重复注册显式报错。
 - `localsql-duckdb` - Generator、JDBC Executor、`DuckDbCatalogStore` 和内置 Java 函数注册。当前 Generator 仍包含表达式重写；目标迁移至 Rewrite 后只序列化 IR。
 - `localsql-udf-api` - UDF 定义、注册表、批数据与 Gateway 接口，不包含 Hive 执行实现。
@@ -170,6 +174,11 @@ M2 已落地 A3 元数据契约：analyzer 模块新增 `FunctionCatalog`(只读
 - `localsql-thrift/src/test/resources/tpcds-v2.7.0/` - 32 个查询,apache/spark `a2da2926` 的 `sql/core/src/test/resources/tpcds-v2.7.0`
 - `localsql-thrift/src/test/resources/tpcds/` - 103 个查询,apache/spark `master` 的 `sql/core/src/test/resources/tpcds`(完整 q1..q99 + a/b 变体)
 
+StarRocks 侧对称三层：
+- **L1** `StarRocksFrontendPipelineTest` - `tpcds-starrocks/` 官方基准 99 条（103 份，q14/23/24 拆 a/b）经 StarRocks 前端完整翻译，strict `StarRocksFunctionCatalog` 绑定全绿
+- **L3 孪生差分** `StarRocksTwinDifferentialTest` - **同一文本**双方言会话执行（不能配对两份语料，StarRocks 基准文档改写过部分查询常量/列清单），双向 `EXCEPT ALL` 为 0；8 份双引号别名查询（q16/32/50/62/92/94/95/99）Spark 语法本就拒绝，`SPARK_UNPARSEABLE` 豁免、仅断言 StarRocks 侧成功
+- 探针 `StarRocksLexerProbeTest` / 注入 `DialectSessionTest` / 方言作用域 `DialectScopeRewriteTest`
+
 测试资源共 135 份 SQL；`TpcdsQueryPipelineTest` 另有 1 个汇总测试，因此该类为 136 项测试，不是 136 条查询。`UNSUPPORTED` 当前为空。窗口函数（含 frame）与 ROLLUP/CUBE/GROUPING SETS 已有实现；命名窗口和聚合 FILTER 仍显式拒绝。L1 已接入 `TpcdsCatalogFixture`（24 表 v2.7.0 全 schema 元数据，内嵌在测试代码；customer 表额外补 v2.7 的 `c_last_review_date`），严格 Analyzer 在此 fixture 上绑定全部 135 个查询，不能回退到空 Catalog。
 
 ### 分层测试架构
@@ -225,11 +234,11 @@ L3 组件(全部 DuckDB 自举):
 
 下一阶段按 [开发计划](docs/development-plan.md) 执行：F3 残留（正式 JAR 的 UDF 配置入口缺 Hive 运行依赖）与 F2 收尾（提交失败「状态未知」的 store 重载恢复）。**F6 数据库级持久化已完成**（catalog_database/catalog_db_property/catalog_schema_version 三表 + 旧库从 catalog_table 推导迁移 + ensureDefaultDatabase；重启保留/迁移幂等/未知版本拒绝均有回归）。**A2 主体已完成****A1 已完成**；**A2 主体已完成**（rename 的 replay DDL 改为从 DuckDB 物理元数据 `duckdb_views()`/`duckdb_tables()` 读取（`readPhysicalCreateSql`），删除 `replayDdlAfterRename` 正则修补；RuntimeStore 接口分离早已落地；SET/UNSET TBLPROPERTIES 旁路写收编进 `CatalogService.updateTable`；registerTable 重复注册显式拒绝）（Generator 的 `FN_MAP` 139 entry、`emitMappedFunction` 全部 case、`REFLECT_MAP` 死代码已全部删除；函数转换唯一归属 rewrite 模块）。迁移批次记录：`FunctionNameRewriter`（rewrite 模块）持有 62 个 1:1 改名对（Spark 源名→DuckDB 名，如 instr→strpos、size→array_length、mean→avg）；`ExpressionLowering`（rewrite 模块）把 40 个参数重排/包装函数降级为纯 IR（if→CASE WHEN、isnull→IS NULL、datediff→date_diff 重排、to_date→CAST/strptime、count_if→count(CASE)、collect_set→list(DISTINCT)、current_catalog→字面量等），关系树经 RewriteEngine 重建返回新树，`SqlPipeline` 已改为使用返回值（A1 验收：调用方必须用返回值）。Generator 的 `FN_MAP` 已删除这 62+1 对、`emitMappedFunction` 已删除对应 34 个 case；第六批（收尾）：nvl2/equal_null/mod/pmod（pmod 符号修正）/array_union/locate/map/octet_length/slice/date_from_unix_date/unix_date/months_between + 字面量模板族迁 `SparkDialectFormats`（named_struct/substring_index/next_day/format_number/date_format 含 SSS 毫秒分段/from_json 含 json_valid 守卫与 SchemaParser 迁移）+ from/to_utc_timestamp 纯函数形式 + initcap/bround/conv/parse_url 连接级 UDF。最后一批：FN_MAP 137 个 identity entry 删除（getOrDefault 等价）、array_join 2参与 map_from_arrays 迁入 ExpressionLowering（后者发射裸 `map` 避免与 k/v 对重排冲突）。已知坑：lambda 族必须先 lower body 再 substitute，否则替换表达式里的 `map(lv,lv)` 会被二次重排。A1 第三批已迁：CAST 类型函数（string/tinyint/.../decimal(x,p,s)→Cast IR）、sort_array、sequence、date_trunc（unit 字面量翻译）、sha2、reflect/java_method（REFLECT_MAP 移入 Rewrite）、array_repeat。lambda 高阶函数（A1 第五批已迁：exists/forall→len(list_filter)、aggregate→list_reduce+zero 前置、array_except→list_distinct(list_filter NOT contains)、array_remove→list_filter NOT EQ_NULL_SAFE、array_join 3参→array_to_string+COALESCE、zip_with→range 索引迭代+变量替换、transform_values/transform_keys/map_filter→map_entries 双变量 lambda 降级、map_zip_with→map_extract 值查找+并键迭代；IR StructExpr 新增 fieldNames 支持 struct_pack(name := v) 带名形式）、字面量模板族（date_format/from_json/named_struct/next_day/substring_index/format_number）、位运算/溢出（A1 第四批已迁：shiftleft/shiftright→Binary SHIFT_LEFT/RIGHT、shiftrightunsigned→UBIGINT 掩码+SHIFT_RIGHT、getbit/bit_get→(x>>b)&1、bit_and/bit_or→&/|、bit_xor→xor()、try_add→TRY_CAST(x AS HUGEINT) 求和；IR 新增 BinaryExpression.SHIFT_LEFT/RIGHT、Cast.tryCast、IntegralType UBIGINT/HUGEINT 类型名）、时区（from/to_utc_timestamp，AT TIME ZONE 语法）、bround/conv/parse_url（连接级 Java UDF）。新增数据库元数据表与存储版本迁移是拟议方案，尚未实现；正式迁移前必须确认旧库兼容与备份策略。
 
-## 验证基线（2026-09-11）
+## 验证基线（2026-11-12）
 
 - Java 21 下 `mvn -o package -DskipTests` 成功。
-- 排除 `TpcdsConsistencyTest`/`TpcdsGoldenResultTest`（需真实端口与 tpcds 扩展）后 `mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest' -Dsurefire.failIfNoSpecifiedTests=false` 全量 561 项通过。
-- 全量命令在本沙箱可完成 bind；TPC-DS 翻译 136 项（135 SQL + 汇总）含 24 表 fixture 绑定全绿，真实端口差分仍未跑。
+- 排除三个 L3 端口测试（`TpcdsConsistencyTest`/`TpcdsGoldenResultTest`/`StarRocksTwinDifferentialTest`，需真实端口；差分类另需 DuckDB tpcds 扩展）后 `mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest,!StarRocksTwinDifferentialTest' -Dsurefire.failIfNoSpecifiedTests=false` 全量 733 项通过。
+- Spark 侧 TPC-DS 翻译 136 项（135 SQL + 汇总）含 24 表 fixture 绑定全绿；StarRocks 侧 L1 104 项全绿、孪生差分 103 项全绿（95 双方言等价 + 8 SPARK_UNPARSEABLE 仅断言 StarRocks 侧成功）。
 - M2 验收覆盖：F1AnalyzerBindingTest 20 项（USE/限定名/LIKE/CTE/子查询/self join/别名/JOIN USING 正反例 + 输出 schema）、FunctionCatalogContractTest 11 项（A3 契约）、SemanticAnalyzerContractTest 4 项（strict 闸门）。
 
 ## 约定

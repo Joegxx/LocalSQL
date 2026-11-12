@@ -1,0 +1,60 @@
+localsql-ir/src/main/java/io/github/joegxx/localsql/ir/expression/FunctionCall.java
+  s_273c04d32969ec::t_d92217d058f412 11,30-32
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java
+  s_273c04d32969ec::t_879f3e6c3d35ef 860-862
+  s_273c04d32969ec::t_4508dfdf16148e 36-39
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/BuiltInFunctionCatalog.java
+  s_273c04d32969ec::t_571c7eedd803dc 121
+  s_273c04d32969ec::t_8e43322e1d1077 140-141
+localsql-starrocks/src/test/java/io/github/joegxx/localsql/starrocks/StarRocksAstBuilderTest.java
+  s_273c04d32969ec::t_4a0d659adba9d5 160-173
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/UdtfGenerateSplitter.java
+  s_273c04d32969ec::t_ca327f08c8972c 236
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/FunctionNameRewriter.java
+  s_273c04d32969ec::t_e038f4d2c7a36e 110,115-122,124,139-141
+  s_273c04d32969ec::t_d6eb48132ebc46 93-108
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/ExpressionLowering.java
+  s_273c04d32969ec::t_c116617f4d3228 65,76-83,85
+  s_273c04d32969ec::t_d4eb2dafbf2ac8 413-439
+  s_273c04d32969ec::t_c6dba5a1e929bf 400
+  s_273c04d32969ec::t_6c00fa634179d7 444-449
+localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java
+  s_273c04d32969ec::t_c43505b04f1cb7 90-95
+localsql-starrocks/src/main/java/io/github/joegxx/localsql/starrocks/StarRocksExpressionBuilder.java
+  s_273c04d32969ec::t_1553c41e138f88 333,337
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/DialectSessionTest.java
+  s_273c04d32969ec::t_337adff15cfc19 40-44
+  s_273c04d32969ec::t_b149ebae2b5784 124-145,147,149-162
+  s_273c04d32969ec::t_9dd620ada9bbea 146,148
+  s_273c04d32969ec::t_a61bc5c573be5d 16
+docs/starrocks-compat-plan.md
+  s_273c04d32969ec::t_5685c19c4224a5 115-116
+localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/StarRocksFunctionCatalog.java
+  s_273c04d32969ec::t_c6e7254e2516d3 1-51
+localsql-thrift/src/test/java/io/github/joegxx/localsql/thrift/StarRocksFrontendPipelineTest.java
+  s_273c04d32969ec::t_fa10ce48734366 42,47,50-54,59-60
+localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/RewriteEngine.java
+  s_273c04d32969ec::t_6e0f98801e7f38 36-45
+localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java
+  s_273c04d32969ec::t_209257463b8cac 735-737
+localsql-rewrite/src/test/java/io/github/joegxx/localsql/rewrite/DialectScopeRewriteTest.java
+  s_273c04d32969ec::t_ade3fec944cad0 40,55,69
+  s_273c04d32969ec::t_14a628a83a4c36 1-39,41-43,45-48,50-54,56-58,60-62,64-68,70-72,74-86
+  s_273c04d32969ec::t_ebf4c02f1d87c1 44,49,59,63,73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "32467e9f54fdb81f42a9cfd5095dc80568412255",
+  "prompts": {},
+  "sessions": {
+    "s_273c04d32969ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e5522f06dffe2A9PNs51jooYQo",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+README.zh-CN.md
+  s_50415e38e9982d::t_cdd701ffa13720 11
+  s_50415e38e9982d::t_02244f8d4d6572 69-70
+  s_50415e38e9982d::t_9272df295e43d7 153-155,157
+  s_50415e38e9982d::t_c9134ad8e72c28 5
+  s_50415e38e9982d::t_361048273fcd21 29-33
+  s_50415e38e9982d::t_8ee91ec238a5cb 163-164
+  s_50415e38e9982d::t_8737bd1a63ea7d 101
+  s_50415e38e9982d::t_f5161492a78237 111
+  s_50415e38e9982d::t_1befe780894af2 18
+  s_50415e38e9982d::t_e5e1ea45d82261 89
+  s_50415e38e9982d::t_f502ace7e7b7d7 133-138,141,144-145,147
+  s_50415e38e9982d::t_5cb5fb67e7b9b6 107,110
+  s_50415e38e9982d::t_1de74ed38e1d4d 112
+README.md
+  s_50415e38e9982d::t_5f0ff4c439e01f 133-138,141,144-145,147
+  s_50415e38e9982d::t_59f244e33df783 18
+  s_50415e38e9982d::t_6dfef3ede9ff62 111
+  s_50415e38e9982d::t_a2d03ddce0a90e 89
+  s_50415e38e9982d::t_7acea91508640b 11
+  s_50415e38e9982d::t_2ade85b5a18689 5
+  s_50415e38e9982d::t_faaee58122d211 69-70
+  s_50415e38e9982d::t_efed466f097a17 29-33
+  s_50415e38e9982d::t_b87326853aa365 101
+  s_50415e38e9982d::t_c346d2f0652d11 107,110
+  s_50415e38e9982d::t_1be162fb0557f2 153-155,157
+  s_50415e38e9982d::t_ab39ef013feb67 163-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "7bd8f3913d57711e3d0731cb20b20eaa27522427",
+  "prompts": {},
+  "sessions": {
+    "s_50415e38e9982d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e3076326dffe1O2msSUlFcEQN1",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

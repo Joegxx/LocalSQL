@@ -1,0 +1,33 @@
+docs/development-plan.md
+  s_50415e38e9982d::t_c9c215f0ba666f 71-72
+  s_50415e38e9982d::t_4c7113bb151441 157-159
+  s_50415e38e9982d::t_c61f8d7d0cbbfc 164-165
+  s_50415e38e9982d::t_701369cd612230 330,332,334-335,338
+  s_50415e38e9982d::t_e654d65e8772be 222
+  s_50415e38e9982d::t_2420ad470f9c56 140-141
+  s_50415e38e9982d::t_adcd73229f7c2e 11-21
+  s_50415e38e9982d::t_8d1e93bf19a31c 121-122
+  s_50415e38e9982d::t_6167fbe700d5a3 186-187
+  s_50415e38e9982d::t_b62b8dce290a77 27
+  s_50415e38e9982d::t_c8183759aaafb4 228-229
+  s_50415e38e9982d::t_a69ab3dd6ee6a3 3,5
+  s_50415e38e9982d::t_a43cdfba8d95be 56-57
+  s_50415e38e9982d::t_e2d1258d5328f2 270-291
+  s_50415e38e9982d::t_f8d5b91ee43e47 96-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "300a877c5227564960618ddf3f46d22a35586875",
+  "prompts": {},
+  "sessions": {
+    "s_50415e38e9982d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e3076326dffe1O2msSUlFcEQN1",
+        "model": "glm-5.3"
+      },
+      "human_author": "xiaopengguo <xiaopengguo@trip.com>"
+    }
+  }
+}

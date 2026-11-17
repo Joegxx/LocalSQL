@@ -1,30 +1,30 @@
 # LocalSQL 开发计划：正确性修复与模块边界收敛
 
-更新日期：2026-09-10。
+更新日期：2026-11-12。
 
-状态：项目说明已更新；本文是待实施方案，以下代码任务均未开始。审查基线不是本计划的实施结果，新接口、新模块和存储布局也不代表已经存在。
+状态：**本计划已部分实施**——A1、F4、F6 已完成；A2、F1、F2、F3 主体落地、各留有明确残留；A3 契约部分落地；F5 仅修复崩溃项。逐项状态见第 1 节「当前状态」列与各节状态行；未勾选的验收项仍以本计划为准，不能视作已完成。2026-09-10 基线之后的所有验收均有对应回归测试（见第 13 节新基线）。StarRocks 方言是独立轨道，进度见 [starrocks-compat-plan.md](starrocks-compat-plan.md)（M0–M4 已完成）。
 
 目标：让已支持的 SQL 经过可验证的名称和类型绑定，失败时保持物理数据、持久化元数据与内存 Catalog 一致，并使正式产物和 Thrift 行为符合声明能力。
 
 ## 1. 范围与优先级
 
-| 编号 | 工作项 | 优先级 / 性质 | 交付目标 |
-|---|---|---|---|
-| A1 | Generator 中的语义转换迁入 Rewrite | 架构主线 | Generator 只序列化已解析、已降级 IR |
-| A2 | CatalogService 优化 | 架构主线 | 纯逻辑元数据、统一写入口、可恢复缓存 |
-| A3 | 函数转换统一 | 架构主线 | Analyzer 绑定，Rewrite 转换，每个函数只有一个转换归属 |
-| F1 | Analyzer 名称解析与类型绑定 | P1 | 错库、缺列、歧义在执行前拒绝，输出 schema 正确 |
-| F2 | DDL 回滚与内存 Catalog 一致性 | P1 | 失败后物理库、store、缓存一致 |
-| F3 | UDF 正式产物与普通查询兼容 | P1 | JAR 可执行 UDF，未使用 UDF 的查询不受配置影响 |
-| F4 | 语法被接受后静默丢弃 | P1 | 保留语义或明确拒绝，不静默返回错误结果 |
-| F5 | Thrift 元数据、状态与生命周期 | P1/P2 | 修复崩溃、结果类型、状态、取消与资源回收 |
-| F6 | 数据库级元数据持久化 | P2，随 A2/F2 实施 | 空库和数据库属性可恢复，旧库可迁移 |
+| 编号 | 工作项 | 优先级 / 性质 | 交付目标 | 当前状态（2026-11-12） |
+|---|---|---|---|---|
+| A1 | Generator 中的语义转换迁入 Rewrite | 架构主线 | Generator 只序列化已解析、已降级 IR | ✅ 完成：FN_MAP/emitMappedFunction/REFLECT_MAP 全删，62 改名对 + 全部降级独占 Rewrite |
+| A2 | CatalogService 优化 | 架构主线 | 纯逻辑元数据、统一写入口、可恢复缓存 | 主体完成：RuntimeStore 分离、统一写路径、重复注册拒绝；旁路读者快照未完全收编 |
+| A3 | 函数转换统一 | 架构主线 | Analyzer 绑定，Rewrite 转换，每个函数只有一个转换归属 | 契约落地（FunctionCatalog SPI + strict 闸门 + 方言作用域 rewrite）；自定义模板编译、UDF 同名冲突策略未完成 |
+| F1 | Analyzer 名称解析与类型绑定 | P1 | 错库、缺列、歧义在执行前拒绝，输出 schema 正确 | 严格名称解析落地（分层 Scope/星号展开/别名可见性/lambda 绑定）；类型传播未完成 |
+| F2 | DDL 回滚与内存 Catalog 一致性 | P1 | 失败后物理库、store、缓存一致 | DDL 缓存回滚已修复；提交失败「状态未知」的 store 重载恢复收尾中 |
+| F3 | UDF 正式产物与普通查询兼容 | P1 | JAR 可执行 UDF，未使用 UDF 的查询不受配置影响 | UDF 兼容修复（未使用 UDF 不再误拒、拆分器按实际嵌套还原）；正式 JAR 的 Hive 运行依赖仍缺 |
+| F4 | 语法被接受后静默丢弃 | P1 | 保留语义或明确拒绝，不静默返回错误结果 | ✅ 完成：非字面量 LIMIT、SORT BY 显式拒绝 |
+| F5 | Thrift 元数据、状态与生命周期 | P1/P2 | 修复崩溃、结果类型、状态、取消与资源回收 | 部分修复：GetTypeInfo 崩溃已修（f5_getTypeInfoMustNotThrow）；结果类型全列 STRING、状态恒 FINISHED、句柄校验缺口仍在 |
+| F6 | 数据库级元数据持久化 | P2，随 A2/F2 实施 | 空库和数据库属性可恢复，旧库可迁移 | ✅ 完成：catalog_database 三表 + 旧库推导迁移，重启/幂等/未知版本拒绝均有回归 |
 
 范围约束：
 
 - 不新增 optimizer、成本模型、分布式执行、用户级事务/ACID、认证、多引擎或更多 DML。
 - 修复现有内部事务的原子性，不等于提供用户级事务功能。
-- DDL 导入误删是独立 P1：失败清理可能按裸表名删除其他逻辑库的已有物理表。它不在本次指定的六项主线中；修复前只允许在可丢弃副本上验证导入，不得因本计划完成而宣称整体导入安全。
+- ~~DDL 导入误删是独立 P1~~ 已修复（2026-10-02）：失败清理基于导入前物理表快照，只回滚本次导入新建的物理表，不再按裸表名误删其他库对象；保留回归保护。
 - 本文建议新增接口和数据库元数据存储；实际修改旧文件库前，须确认兼容、备份与迁移策略。本轮不执行数据迁移。
 
 ## 2. 目标职责与契约
@@ -53,6 +53,8 @@
 
 以下是依赖顺序，不是工期承诺。每阶段可拆为多个可独立验收的提交。
 
+> 2026-11-12 执行注记：实际实施未严格按此顺序——A1 提前完成（StarRocks 方言轨道需要干净的 Rewrite 归属），F4/F5 小修复与 A2/F2/F6 并行落地；A2/F6 的验收项已勾选，其余阶段以第 1 节状态列为准。本表的 M0–M5 是本计划内部阶段编号，与 [starrocks-compat-plan.md](starrocks-compat-plan.md) 的 M0–M4 无关。
+
 | 阶段 | 工作内容 | 前置条件 | 阶段验收 |
 |---|---|---|---|
 | M0 | 固化缺陷复现、现有结果和模块边界，建立产物测试入口 | 无 | 已确认缺陷都有能暴露旧行为的测试 |
@@ -65,6 +67,8 @@
 可提前的小提交：GetTypeInfo 空值崩溃、无 UDF 查询误入拆分器、未支持 LIMIT/SORT BY 显式拒绝、UDF 运行依赖修正。这些不必等待整体架构迁移。
 
 ## 4. A1：Generator → Rewrite 迁移方案
+
+**状态（2026-11-12）：✅ 完成。**`FN_MAP`（139 entry）、`emitMappedFunction` 全部 case、`REFLECT_MAP` 已删除；62 个 1:1 改名归 `FunctionNameRewriter`，40+ 参数重排/包装/lambda/字面量模板族归 `ExpressionLowering`；`SqlPipeline` 已消费返回值。回归：SparkFunctionMappingTest 274 项、ExpressionLoweringContractTest 14 项、RewriteRenameContractTest 5 项全绿。
 
 主要入口：[DuckDbSqlGenerator](../localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbSqlGenerator.java)、[RewriteEngine](../localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/RewriteEngine.java)。
 
@@ -89,10 +93,10 @@
 
 验收：
 
-- [ ] Rewrite 有输入/输出 IR 结构断言，Generator 只接收可序列化 IR，且不修改输入树。
-- [ ] 无二次 rename、重复 CAST、重复参数扩展；每个源函数只有一个转换归属。
-- [ ] Generator 不调用 IdentifierSubstituter 或 schema 语义解析；Rewrite 不越过模块依赖边界。
-- [ ] 函数、CTE、窗口、JOIN 别名与 TPC-DS 回归通过；行为变化有语义依据，不只更新快照。
+- [x] Rewrite 有输入/输出 IR 结构断言，Generator 只接收可序列化 IR，且不修改输入树。
+- [x] 无二次 rename、重复 CAST、重复参数扩展；每个源函数只有一个转换归属。
+- [x] Generator 不调用 IdentifierSubstituter 或 schema 语义解析；Rewrite 不越过模块依赖边界。
+- [x] 函数、CTE、窗口、JOIN 别名与 TPC-DS 回归通过；行为变化有语义依据，不只更新快照。
 
 ## 5. A2：CatalogService 优化方案
 
@@ -114,6 +118,8 @@
 
 ## 6. A3：函数绑定与转换统一方案
 
+**状态（2026-11-12）：契约部分落地。**`FunctionCatalog`（只读 SPI）、`FunctionInfo`、`FunctionKind`、`BuiltInFunctionCatalog`（Spark 3.2 名单 + 别名重定向）已进 analyzer 模块；`SemanticAnalyzer(catalog, functions, strictFunctions)` 在解析 `FunctionCall` 时查目录，strict 拒绝未知函数；Rewrite 拆共享/方言专属两张表（StarRocks 专属降级不影响 Spark 会话，负向回归保护）。**未完成**：自定义模板编译为受限表达式 IR（第 4 条）、UDF 同名同签名冲突策略（第 3 条）、映射配置迁移清单。
+
 主要入口：RewriteEngine、DuckDbSqlGenerator、[UdfRegistry](../localsql-udf-api/src/main/java/io/github/joegxx/localsql/udf/api/UdfRegistry.java)、[FunctionMapLoader](../localsql-app/src/main/java/io/github/joegxx/localsql/app/FunctionMapLoader.java)。
 
 1. Analyzer 接收只读函数元数据：身份、别名、参数数目/类型、返回类型、标量/聚合/窗口/表函数类别、UDF 标识。app 可组装元数据适配器，但不能传入 Gateway、ClassLoader 或 Hive 执行类。
@@ -131,6 +137,8 @@
 
 ## 7. F1：Analyzer 名称解析与类型绑定
 
+**状态（2026-11-12）：名称解析落地，类型传播未完成。**分层 Scope（当前库/FROM/别名/CTE/派生表/相关子查询/lambda）、错库/错表/缺列/歧义执行前拒绝、Star 展开、ORDER BY/HAVING 别名可见性（select 输出优先）、alias 屏蔽表名均已实现，回归为 F1AnalyzerBindingTest 20 项。Identifier 绑定回传带类型引用；普通 Identifier 的 Unknown → STRING 伪推导仍在（第 5 条未完成）。
+
 主要入口：[SemanticAnalyzer](../localsql-analyzer/src/main/java/io/github/joegxx/localsql/analyzer/SemanticAnalyzer.java)、[Project.output](../localsql-ir/src/main/java/io/github/joegxx/localsql/ir/relation/Project.java) 及其他 Relation.output。
 
 审查已复现：已有 default.t 时查询 no_such_database.t 或切换空库后查询裸名 t 仍能读到它；INT 列的普通 Identifier 分析后仍是 UnknownType。
@@ -146,12 +154,14 @@
 
 验收：
 
-- [ ] 错库/错表/缺列/歧义在 Executor 调用前失败，无物理副作用。
-- [ ] USE、限定名、LIKE、CTE、子查询、self join、别名、JOIN USING 均有正反例。
-- [ ] SELECT id AS x 只输出 x，类型正确；聚合、CAST、Decimal 输出 schema 可断言。
+- [x] 错库/错表/缺列/歧义在 Executor 调用前失败，无物理副作用。
+- [x] USE、限定名、LIKE、CTE、子查询、self join、别名、JOIN USING 均有正反例。
+- [ ] SELECT id AS x 只输出 x，类型正确；聚合、CAST、Decimal 输出 schema 可断言。（输出 schema 已有断言；类型传播未完成）
 - [ ] Generator 入口不存在未绑定用户 Identifier；重写生成的 IR 同样通过后端校验。
 
 ## 8. F2：DDL 事务与内存 Catalog 一致性
+
+**状态（2026-11-12）：缓存回滚已修复，「状态未知」重载恢复收尾中。**失败 DDL 已回滚内存 Catalog（幽灵表/丢缓存项已消除，有回归）；待完成：提交失败处于「状态未知」时从已提交 store 重载的恢复路径（第 5 条后半）。
 
 主要入口：[SqlPipeline](../localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/SqlPipeline.java) 的 inTransaction 与各 DDL 处理方法。
 
@@ -173,6 +183,8 @@
 
 ## 9. F3：UDF 产物与普通查询兼容
 
+**状态（2026-11-12）：兼容修复落地，打包依赖缺口仍在。**未使用 UDF 的查询不再被拆分器误拒、`UdfProjectionSplitter` 按实际嵌套形状（Limit(Sort(Project))）还原——均有回归。**待完成**：正式 `runtime.jar --udf-config` 入口的 Hive 运行依赖（第 1 条）；子 JVM 产物级验证（验收第 2 条）。
+
 主要入口：[udf-runtime POM](../localsql-udf-runtime/pom.xml)、[Main](../localsql-app/src/main/java/io/github/joegxx/localsql/app/Main.java)、[UdfProjectionSplitter](../localsql-rewrite/src/main/java/io/github/joegxx/localsql/rewrite/UdfProjectionSplitter.java)。
 
 审查已复现：实际 runtime.jar 配置 udfs: [] 即缺少 ObjectInspector；测试依赖补齐后，注册未使用 UDF 会误拒绝普通 SELECT *。
@@ -193,6 +205,8 @@
 
 ## 10. F4：拒绝静默丢失的语义
 
+**状态（2026-11-12）：✅ 完成（核心项）。**非字面量 LIMIT（`LIMIT must be an integer literal`）、`LIMIT ALL`、SORT BY（`DuckDB has no per-partition sort`）已在 AST builder 显式拒绝，不再静默丢弃。全面审计（第 1 条清单）与默认 NULL 排序核验（第 4 条）不在此列。
+
 主要入口：[SparkAstBuilder](../localsql-spark/src/main/java/io/github/joegxx/localsql/spark/SparkAstBuilder.java) 的 visitQueryOrganization 与 SparkExpressionBuilder。
 
 审查已复现：LIMIT 1 + 1 返回全部行，SORT BY id DESC 未生成排序。默认 NULL 排序也需纳入 Spark 基准核验。
@@ -205,11 +219,13 @@
 
 验收：
 
-- [ ] 已解析语义都有 IR/执行行为，或在执行前明确拒绝；LIMIT 不会被忽略。
+- [x] 已解析语义都有 IR/执行行为，或在执行前明确拒绝；LIMIT 不会被忽略。
 - [ ] 不支持语义测试断言 Executor 未被调用；排序比较有序序列，不只比较多重集。
 - [ ] 存储提示兼容清单明确，不修改 LETTER 与 UpperCaseCharStream 机制。
 
 ## 11. F5：Thrift 协议正确性
+
+**状态（2026-11-12）：部分修复。**GetTypeInfo 空值崩溃已修（回归 `ReviewRegressionTest.f5_getTypeInfoMustNotThrow`）。**缺口仍在**：GetResultSetMetadata 全列 STRING、GetOperationStatus 恒 FINISHED、无效 session 回落 default、CloseOperation 不校验句柄；取消/分页/生命周期项均未动。
 
 主要入口：[LocalSqlThriftService](../localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/LocalSqlThriftService.java)、[ThriftServer](../localsql-thrift/src/main/java/io/github/joegxx/localsql/thrift/ThriftServer.java)、[DuckDbExecutor](../localsql-duckdb/src/main/java/io/github/joegxx/localsql/duckdb/DuckDbExecutor.java)。
 
@@ -251,7 +267,28 @@
 
 ## 13. 测试策略与审查基线
 
-### 2026-09-10 审查基线
+### 2026-11-12 验证基线
+
+- Java 21 下 `mvn -o package -DskipTests` 成功。
+- 排除三个 L3 端口测试（`TpcdsConsistencyTest`/`TpcdsGoldenResultTest`/`StarRocksTwinDifferentialTest`，需真实端口；差分类另需 DuckDB tpcds 扩展）后全量 **733 项通过，0 failure/error**。
+- Spark 侧 TPC-DS 翻译 136 项（135 SQL + 汇总）含 24 表 fixture strict 绑定全绿；StarRocks 侧 L1 104 项、孪生差分 103 项全绿。
+- F1/F4/F5-崩溃/A1/A3 契约/F6 均有专项回归（F1AnalyzerBindingTest、ReviewRegressionTest、SparkFunctionMappingTest、FunctionCatalogContractTest、SemanticAnalyzerContractTest、DialectScopeRewriteTest 等）。
+
+```bash
+# 快速基线（无端口依赖）
+mvn -o test '-Dtest=!TpcdsConsistencyTest,!TpcdsGoldenResultTest,!StarRocksTwinDifferentialTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+# TPC-DS 翻译回归（Spark / StarRocks）
+mvn -pl localsql-thrift -am test -Dtest=TpcdsQueryPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn -pl localsql-thrift -am test -Dtest=StarRocksFrontendPipelineTest -Dsurefire.failIfNoSpecifiedTests=false
+
+# L3（需端口；差分类另需 tpcds 扩展）
+mvn -pl localsql-thrift -am test -Dtest=TpcdsConsistencyTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn -pl localsql-thrift -am test -Dtest=StarRocksTwinDifferentialTest -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+### 2026-09-10 审查基线（历史）
 
 - Java 21 下 mvn -o package -DskipTests 成功。
 - 排除七个端口相关测试类后，455 项测试通过，0 failure/error。
@@ -290,11 +327,12 @@ mvn -pl localsql-thrift -am test \
 
 ## 14. 完成标准
 
-- [ ] A1–A3、F1–F6 验收均有代码、测试及执行记录，完成后才勾选。
+- [ ] A1–A3、F1–F6 验收均有代码、测试及执行记录，完成后才勾选。（A1/F4/F6 已达成；A2/A3/F1/F2/F3/F5 各有残留，见第 1 节状态列）
 - [ ] 全量验证在允许端口监听的环境执行，未验证项单独列出。
-- [ ] 旧 Generator 转换、Catalog runtime SQL、旁路缓存写入按迁移清单移除。
+- [x] 旧 Generator 转换、Catalog runtime SQL、旁路缓存写入按迁移清单移除。
 - [ ] 实际产物不借用测试依赖，旧库升级不丢数据，失败后当前进程可安全继续。
-- [ ] README、AGENTS、usage、functions、udf-plan 的当前状态与目标一致，不保留过期测试声明。
-- [ ] 独立的导入误删 P1 保持可见，未修复前不宣称导入安全。
+- [ ] README、AGENTS、usage、functions、udf-plan 的当前状态与目标一致，不保留过期测试声明。（README/AGENTS/usage/development-plan 已于 2026-11-12 刷新；functions/udf-plan 待核对）
+- [x] 导入误删 P1 已修复（快照式失败清理），保留回归保护。
 
 建议第一个实现提交：M0 最小回归，加 F4 显式拒绝止错与 F5 GetTypeInfo 修复；随后进入 A2/F2/F6。Generator 系统迁移在绑定与 IR 契约稳定后按函数族推进。
+（2026-11-12 执行记录：F4、GetTypeInfo 修复与 A2/F2/F6/A1 均已落地，仅剩各节标注的残留项。）
